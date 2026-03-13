@@ -1,5 +1,7 @@
 """FastMCP server that auto-registers all services from the registry as MCP tools."""
 
+import inspect
+
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("mycli")
@@ -28,6 +30,9 @@ def _make_tool(entry) -> None:
 
     tool_fn.__name__ = entry.name
     tool_fn.__doc__ = entry.description
+    tool_fn.__annotations__ = {
+        k: v.annotation for k, v in inspect.signature(input_model).parameters.items()
+    }
     mcp.tool(name=entry.name, description=entry.description)(tool_fn)
 
 

@@ -959,9 +959,30 @@ def _update_mcp_entrypoint(old_name: str, new_name: str) -> None:
     pyproject_path.write_text(text)
 
 
+def _read_github_owner_repo() -> tuple[str, str]:
+    """Extract owner and repo from the git remote URL. Falls back to placeholders."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            timeout=5,
+        )
+        url = result.stdout.strip()
+        # Match github.com/OWNER/REPO from HTTPS or SSH URLs
+        match = re.search(r"github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?$", url)
+        if match:
+            return match.group(1), match.group(2)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return "OWNER", "REPO"
+
+
 def _update_mcp_distribution_files(cli_name: str, mcp_name: str) -> None:
     """Fill in placeholders in server.json, smithery.yaml, and .mcp.json.example."""
     project_name = _read_pyproject_name()
+    github_owner, github_repo = _read_github_owner_repo()
 
     # Read version and description from pyproject.toml
     pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text()
@@ -984,7 +1005,7 @@ def _update_mcp_distribution_files(cli_name: str, mcp_name: str) -> None:
     server_json_path = PROJECT_ROOT / "server.json"
     if server_json_path.exists():
         text = server_json_path.read_text()
-        text = text.replace("OWNER/REPO", f"owner/{project_name}")
+        text = text.replace("OWNER/REPO", f"{github_owner}/{github_repo}")
         text = text.replace("DESCRIPTION", description)
         text = text.replace("PYPI_PACKAGE_NAME", project_name)
         text = re.sub(r'"version":\s*"0\.1\.0"', f'"version": "{version}"', text)
