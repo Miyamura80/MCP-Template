@@ -18,7 +18,8 @@ jobs:
 
       - name: Install mcp-publisher
         run: |
-          curl -fsSL https://registry.modelcontextprotocol.io/install.sh | bash
+          curl -fsSL https://registry.modelcontextprotocol.io/install.sh -o install.sh
+          bash install.sh
 
       - name: Login via GitHub OIDC
         run: mcp-publisher login github-oidc
