@@ -1,0 +1,30 @@
+---
+description: 
+globs: *.py
+alwaysApply: false
+---
+Langfuse is an LLM observability tool used to monitor LLM behavior in our application. It uses decorators and callbacks to record LLM inference. Always use it in LLM-related modules to ensure traceability.
+
+### Langfuse v3 Migration Guide
+As of Langfuse SDK v3.x, the `langfuse.decorators` module structure has changed.
+
+**Typical Usage:**
+
+```python
+from langfuse import observe, get_client
+
+@observe()
+def function_name(...):
+    # To rename the span/observation or update metadata:
+    get_client().update_current_span(name=f"descriptive_name_{id}")
+
+    # To get trace or observation IDs:
+    trace_id = get_client().get_current_trace_id()
+    observation_id = get_client().get_current_observation_id()
+```
+
+**Key Changes from v2:**
+1. Import `observe` and `get_client` directly from `langfuse`.
+2. Replace `langfuse_context` with `get_client()`.
+3. Use `update_current_span()` instead of `update_current_observation()`.
+

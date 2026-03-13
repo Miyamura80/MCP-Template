@@ -1,0 +1,164 @@
+"""Main CLI entry point."""
+
+import importlib.metadata
+from enum import StrEnum
+from typing import Annotated
+
+import typer
+
+from src.cli.state import (
+    OutputFormat,
+    Verbosity,
+    dry_run,
+    output_format,
+    verbosity,
+)
+from src.utils.errors import install_error_handler
+
+
+class FormatChoice(StrEnum):
+    table = "table"
+    json = "json"
+    plain = "plain"
+
+
+_FORMAT_MAP = {
+    FormatChoice.table: OutputFormat.TABLE,
+    FormatChoice.json: OutputFormat.JSON,
+    FormatChoice.plain: OutputFormat.PLAIN,
+}
+
+app = typer.Typer(
+    name="mycli",
+    help="CLI Template - a batteries-included Python CLI.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+
+
+def _load_cli_branding() -> tuple[str, str]:
+    """Read emoji and primary color from config. Returns (emoji, primary_color)."""
+    from src.utils.theme import get_cli_emoji, get_primary_color
+
+    return get_cli_emoji(), get_primary_color()
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        version = importlib.metadata.version("miyamura80-cli-template")
+        emoji, _ = _load_cli_branding()
+        prefix = f"{emoji} " if emoji else ""
+        typer.echo(f"{prefix}mycli {version}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Increase output verbosity."),
+    ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", "-q", help="Suppress non-essential output."),
+    ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option("--debug", help="Enable debug mode with full tracebacks."),
+    ] = False,
+    fmt: Annotated[
+        FormatChoice,
+        typer.Option("--format", "-f", help="Output format."),
+    ] = FormatChoice.table,
+    dry: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Preview actions without executing."),
+    ] = False,
+    version: Annotated[  # noqa: ARG001
+        bool | None,
+        typer.Option(
+            "--version",
+            "-V",
+            help="Show version and exit.",
+            callback=_version_callback,
+            is_eager=True,
+        ),
+    ] = None,
+) -> None:
+    """Process global flags before any subcommand."""
+    # Set verbosity (always reset so contextvars don't leak between invocations)
+    if debug:
+        verbosity.set(Verbosity.DEBUG)
+    elif quiet:
+        verbosity.set(Verbosity.QUIET)
+    elif verbose:
+        verbosity.set(Verbosity.VERBOSE)
+    else:
+        verbosity.set(Verbosity.NORMAL)
+
+    # Set output format
+    output_format.set(_FORMAT_MAP[fmt])
+
+    # Set dry run
+    dry_run.set(dry)
+
+    # Install error handler
+    install_error_handler(debug=debug)
+
+    # One-time security notice on first run (after flags are parsed)
+    if not quiet:
+        from src.cli.security import show_first_install_notice
+
+        show_first_install_notice()
+
+
+_builtins_registered = False
+_user_commands_registered = False
+
+
+def _register_builtin_commands() -> None:
+    """Register built-in CLI commands (idempotent)."""
+    global _builtins_registered  # noqa: PLW0603
+    if _builtins_registered:
+        return
+    _builtins_registered = True
+
+    from src.cli.completions import app as completions_app
+    from src.cli.scaffold import init_command
+    from src.cli.security import security_command
+    from src.cli.telemetry import app as telemetry_app
+    from src.cli.update import update_command
+
+    app.add_typer(completions_app, name="completions", help="Manage shell completions.")
+    app.add_typer(telemetry_app, name="telemetry", help="Manage anonymous telemetry.")
+    app.command(name="update")(update_command)
+    app.command(name="init")(init_command)
+    app.command(name="security")(security_command)
+
+
+def _register_user_commands() -> None:
+    """Discover and register user commands from commands/ (idempotent)."""
+    global _user_commands_registered  # noqa: PLW0603
+    if _user_commands_registered:
+        return
+    _user_commands_registered = True
+
+    from commands import discover_commands
+
+    discover_commands(app)
+
+
+def main_cli() -> None:
+    """Entry point called by the console script."""
+    _register_builtin_commands()
+    _register_user_commands()
+
+    version = importlib.metadata.version("miyamura80-cli-template")
+    emoji, primary = _load_cli_branding()
+    prefix = f"{emoji} " if emoji else ""
+    app.info.help = (
+        f"{prefix}[{primary}]CLI Template[/{primary}] "
+        f"[dim]v{version}[/dim] - a batteries-included Python CLI."
+    )
+
+    app()

@@ -1,0 +1,94 @@
+---
+title: Quick Start
+description: Get started with this Python template
+---
+
+Welcome to the docs! Follow these steps to get started with this Python template.
+
+## Quick Start
+
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+<Steps>
+<Step>
+
+### Setup Environment
+
+Create and activate your virtual environment using `uv`:
+
+```bash
+make setup
+```
+
+This will create a `.venv` directory and sync all dependencies from `pyproject.toml`.
+
+</Step>
+
+<Step>
+
+### Configure Settings
+
+Copy the example environment file and add your API keys:
+
+```bash
+cp .env.example .env
+```
+
+Edit `common/global_config.yaml` to customize configuration values for your project.
+
+</Step>
+
+<Step>
+
+### Run the Application
+
+Execute the main application:
+
+```bash
+make all
+```
+
+Or run specific Python files directly:
+
+```bash
+uv run python src/main.py
+```
+
+</Step>
+
+<Step>
+
+### Run Tests
+
+Verify everything is working by running the test suite:
+
+```bash
+make test
+```
+
+Run code quality checks:
+
+```bash
+make ci
+```
+
+</Step>
+</Steps>
+
+## Using the CLI
+
+Once dependencies are installed, the `mycli` command is available:
+
+```bash
+mycli --help          # see all commands
+mycli greet Alice     # run a command
+mycli init my_tool    # scaffold a new command
+```
+
+## Next Steps
+
+<Cards>
+  <Card title="CLI Usage Guide" href="/docs/cli" />
+  <Card title="Writing Commands" href="/docs/commands" />
+  <Card title="API Reference" href="/docs/api" />
+</Cards>

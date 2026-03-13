@@ -1,0 +1,120 @@
+---
+title: CLI Usage
+description: Installation, global flags, built-in commands, and output formats
+---
+
+## Installation
+
+After running `make onboard` and `uv sync`, the `mycli` command is available in your virtual environment:
+
+```bash
+uv sync            # install deps + register CLI entry point
+mycli --help       # see all commands
+```
+
+Or run it via `make`:
+
+```bash
+make cli ARGS="--help"
+```
+
+## Global Flags
+
+Every command inherits these flags:
+
+| Flag | Short | Description |
+|---|---|---|
+| `--verbose` | `-v` | Increase output verbosity |
+| `--quiet` | `-q` | Suppress non-essential output |
+| `--debug` | | Show full tracebacks on error |
+| `--format` | `-f` | Output format: `table` (default), `json`, `plain` |
+| `--dry-run` | | Preview actions without executing |
+| `--version` | `-V` | Print version and exit |
+
+Global flags go **before** the subcommand:
+
+```bash
+mycli --format json config show
+mycli --dry-run greet Alice
+mycli --debug update
+```
+
+## Built-in Commands
+
+### config
+
+Manage project configuration from `common/global_config.yaml`:
+
+```bash
+mycli config show                           # full config
+mycli config get llm_config.cache_enabled   # single value
+mycli config set logging.verbose false      # write override to .global_config.yaml
+```
+
+### completions
+
+Install shell completions:
+
+```bash
+mycli completions install bash    # append to ~/.bashrc
+mycli completions install zsh     # append to ~/.zshrc
+mycli completions install fish    # append to config.fish
+mycli completions show bash       # print script to stdout
+```
+
+### update
+
+Check PyPI for a newer version and upgrade:
+
+```bash
+mycli update
+```
+
+### telemetry
+
+Manage anonymous usage telemetry:
+
+```bash
+mycli telemetry status    # show enabled/disabled
+mycli telemetry disable   # opt out
+mycli telemetry enable    # opt back in
+```
+
+You can also set the environment variable `CLI_TELEMETRY_DISABLED=1` to disable.
+
+### init
+
+Scaffold a new command from the built-in template:
+
+```bash
+mycli init my_command --desc "Does something useful"
+```
+
+This creates `commands/my_command.py` with the standard boilerplate.
+
+## Output Formats
+
+The `--format` flag controls how data is rendered:
+
+**Table** (default) - Rich formatted tables:
+```bash
+mycli config show
+```
+
+**JSON** - Machine-readable output:
+```bash
+mycli --format json config show
+```
+
+**Plain** - Simple `key: value` lines:
+```bash
+mycli --format plain config show
+```
+
+## Error Handling
+
+By default, errors show a concise Rich panel. Use `--debug` for full tracebacks with local variables:
+
+```bash
+mycli --debug config get nonexistent.key
+```

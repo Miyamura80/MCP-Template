@@ -1,0 +1,149 @@
+[project]
+name = "miyamura80-cli-template"
+version = "0.1.1"
+description = "🪛 CLI tool template (python) with batteries included. Auto-install, updates, linting, dead code analysis, and a whole lot more."
+authors = [
+    { name = "Miyamura80", email = "eitomiyamura@gmail.com" }
+]
+license = { file = "LICENSE" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Utilities",
+]
+keywords = ["cli", "template", "typer", "uv", "tooling"]
+dependencies = [
+    "pyyaml>=6.0.3",
+    "python-dotenv>=1.2.1",
+    "human-id>=0.2.0",
+    "import-linter>=2.1.1",
+    "pytest>=8.3.4",
+    "pytest-xdist>=3.6.1",
+    "termcolor>=2.5.0",
+    "loguru>=0.7.3",
+    "vulture>=2.14",
+    "dspy>=3.1.2",
+    "langfuse>=3.12.1",
+    "litellm>=1.59.8",
+    "tenacity>=9.0.0",
+    "pillow>=12.1.0",
+    "google-genai>=1.60.0",
+    "ty>=0.0.14",
+    "pytest-env>=1.2.0",
+    "pydantic-settings>=2.7.1",
+    "pytest-cov>=7.0.0",
+    "pytest-repeat>=0.9.3",
+    "pylint>=3.3.3",
+    "deptry>=0.23.0",
+    "openfeature-sdk>=0.7.1",
+    "scrubadub>=2.0.1",
+    "pydantic>=2.10.6",
+    "numpy>=2.2.2",
+    "typer",
+    "questionary",
+    "rich>=14.3.1",
+    "packaging>=24.0",
+    "keyring>=25.0.0",
+]
+readme = "README.md"
+requires-python = ">= 3.12"
+
+[project.urls]
+Homepage = "https://github.com/Miyamura80/CLI-Template"
+Repository = "https://github.com/Miyamura80/CLI-Template"
+Issues = "https://github.com/Miyamura80/CLI-Template/issues"
+
+[project.scripts]
+mycli = "cli:main_cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src", "common", "utils", "commands"]
+force-include = {"cli.py" = "cli.py"}
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "C901", "FIX"]
+ignore = ["E501", "UP015", "B008"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ty]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.deptry]
+ignore = ["DEP002"]
+
+[tool.vulture]
+exclude = [
+    ".venv-test/",
+    ".venv/",
+    ".uv-cache/",
+    ".uv_cache/",
+    ".uv_tools/",
+    ".uv-tools/",
+    "docs/",
+    "node_modules/",
+    "tests/test_logging_security.py",
+    "tests/test_logging_thread_safety.py",
+    "tests/test_template.py",
+    "utils/llm/",
+    "common/",
+    "src/utils/logging_config.py",
+    "src/utils/context.py",
+    "src/utils/interactive.py",
+    "src/utils/progress.py",
+    "src/utils/output.py",
+    "src/utils/errors.py",
+    "src/utils/theme.py",
+    "tests/conftest.py",
+    "init/",
+    "onboard.py",
+    "commands/",
+    "src/cli/",
+    "cli.py",
+    "templates/"
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src", "common", "utils", "commands"]
+omit = [
+    "tests/*",
+    "docs/*",
+    "init/*",
+    "alembic/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "pytest-check-links>=0.9.1",
+]

@@ -1,0 +1,169 @@
+---
+title: Writing Commands
+description: Auto-discovery, single commands, subcommand groups, and available utilities
+---
+
+## Auto-Discovery
+
+Drop a Python file into the `commands/` directory and it is automatically registered as a CLI command. No manual wiring needed.
+
+The discovery rules:
+- Files starting with `_` are skipped
+- `my_tool.py` becomes the command `my-tool`
+- If the module exports `app: typer.Typer` → registered as a **subcommand group**
+- If the module exports `main()` → registered as a **single command**
+
+## Single Command Pattern
+
+Create a module with a `main()` function. Typer annotations handle argument parsing:
+
+```python
+# commands/greet.py
+"""Greet someone - example single command."""
+
+from typing import Annotated
+import typer
+from src.cli.state import is_dry_run, is_verbose
+from src.utils.interactive import interactive_fallback
+from src.utils.output import render
+
+
+@interactive_fallback
+def main(
+    name: Annotated[
+        str | None, typer.Argument(help="Name of the person to greet.")
+    ] = None,
+    shout: Annotated[
+        bool,
+        typer.Option("--shout", "-s", help="SHOUT the greeting."),
+    ] = False,
+) -> None:
+    """Greet someone by name."""
+    if is_dry_run():
+        typer.echo(f"[DRY RUN] Would greet {name}")
+        return
+
+    greeting = f"Hello, {name}!"
+    if shout:
+        greeting = greeting.upper()
+
+    if is_verbose():
+        render({"name": name, "greeting": greeting}, title="Greet Details")
+    else:
+        typer.echo(greeting)
+```
+
+```bash
+mycli greet Alice --shout
+# HELLO, ALICE!
+```
+
+## Subcommand Group Pattern
+
+Create a module with `app = typer.Typer()` and decorate methods with `@app.command()`:
+
+```python
+# commands/config.py
+"""Manage project configuration."""
+
+import typer
+
+app = typer.Typer()
+
+@app.command()
+def show() -> None:
+    """Show the full configuration."""
+    ...
+
+@app.command()
+def get(key: str) -> None:
+    """Get a single config value."""
+    ...
+```
+
+```bash
+mycli config show
+mycli config get llm_config.cache_enabled
+```
+
+## Scaffold Command
+
+Use `mycli init` to generate a new command from the built-in template:
+
+```bash
+mycli init my_tool --desc "Process some data"
+# Creates commands/my_tool.py
+# Run it: mycli my-tool
+```
+
+The name must be `snake_case`.
+
+## Available Utilities
+
+### Output
+
+```python
+from src.utils.output import render
+
+render({"key": "value"}, title="Result")  # respects --format flag
+```
+
+### State Helpers
+
+```python
+from src.cli.state import is_dry_run, is_verbose, is_quiet, is_debug
+
+if is_dry_run():
+    typer.echo("[DRY RUN] Would do something")
+    return
+```
+
+### Dry Run Guard
+
+```python
+from src.cli.state import dry_run_guard
+
+@dry_run_guard("deploy the application")
+def deploy():
+    ...  # skipped entirely in --dry-run mode
+```
+
+### Spinner and Progress Bar
+
+```python
+from src.utils.progress import spinner, progress_bar
+
+with spinner("Processing..."):
+    do_work()
+
+with progress_bar("Downloading", total=100) as progress:
+    for chunk in stream:
+        progress.advance(task_id, len(chunk))
+```
+
+### Interactive Fallback
+
+```python
+from src.utils.interactive import interactive_fallback
+
+@interactive_fallback
+def main(name: str | None = None) -> None:
+    # If name is None and stdin is a TTY, prompts the user
+    ...
+```
+
+## Testing Commands
+
+Use `typer.testing.CliRunner` to test commands:
+
+```python
+from typer.testing import CliRunner
+from cli import app
+
+runner = CliRunner()
+
+def test_greet():
+    result = runner.invoke(app, ["greet", "Alice"])
+    assert result.exit_code == 0
+    assert "Hello, Alice!" in result.output
+```
