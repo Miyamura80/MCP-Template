@@ -87,6 +87,11 @@ class TestDoctor(TestTemplate):
         assert cr.fixable is True
 
     def test_check_status_values(self):
-        assert "pass" == "pass"
-        assert "fail" == "fail"
-        assert "warn" == "warn"
+        from models.doctor import DoctorInput
+        from services.doctor_svc import doctor
+
+        dr = doctor(DoctorInput())
+        for check in dr.checks:
+            assert check.status in ("pass", "fail", "warn"), (
+                f"Unexpected status: {check.status}"
+            )

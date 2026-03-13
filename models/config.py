@@ -1,5 +1,7 @@
 """Models for the config service."""
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -17,7 +19,7 @@ class ConfigGetInput(BaseModel):
 
 class ConfigGetResult(BaseModel):
     key: str
-    value: object
+    value: Any
 
 
 class ConfigSetInput(BaseModel):
@@ -27,4 +29,4 @@ class ConfigSetInput(BaseModel):
 
 class ConfigSetResult(BaseModel):
     key: str
-    coerced_value: object
+    coerced_value: Any
