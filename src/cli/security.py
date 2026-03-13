@@ -45,9 +45,7 @@ def get_snyk_security_url(package: str | None = None) -> str:
 
 def get_socket_url(package: str | None = None) -> str:
     """Build Socket.dev URL for the package."""
-    return _SOCKET_URL.format(
-        package=_validate_package_name(package or _PACKAGE_NAME)
-    )
+    return _SOCKET_URL.format(package=_validate_package_name(package or _PACKAGE_NAME))
 
 
 def _fetch_snyk_score(package: str) -> float | None:

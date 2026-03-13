@@ -109,6 +109,12 @@ docs: ## Run docs with bun
 	@cd docs && bun run dev
 	@echo "$(GREEN)✅ Docs run completed.$(RESET)"
 
+mcp: check_uv ## Run MCP server locally (stdio)
+	@$(PYTHON) mycli-mcp
+
+mcp_inspect: check_uv ## Run MCP server with inspector for debugging
+	@$(PYTHON) mcp dev mcp_server/server.py
+
 ralph: check_jq ## Run Ralph agent loop
 	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
 	@echo "$(RED)⚠️  It is HIGHLY RECOMMENDED to run Ralph in a sandboxed environment.$(RESET)"

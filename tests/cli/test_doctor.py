@@ -5,9 +5,8 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from cli import _register_builtin_commands, _register_user_commands, app
-from commands.doctor import (
-    CheckResult,
-    CheckStatus,
+from models.doctor import CheckResultModel
+from services.doctor_svc import (
     _check_env_exists,
     _check_git_repo,
     _check_python_version,
@@ -46,48 +45,48 @@ class TestDoctor(TestTemplate):
 
     def test_check_python_version(self):
         result = _check_python_version()
-        assert isinstance(result, CheckResult)
-        assert result.status == CheckStatus.PASS
+        assert isinstance(result, CheckResultModel)
+        assert result.status == "pass"
         assert result.name == "Python version"
 
     def test_check_uv_installed(self):
         result = _check_uv_installed()
-        assert isinstance(result, CheckResult)
+        assert isinstance(result, CheckResultModel)
         assert result.name == "uv installed"
 
     def test_check_git_repo(self):
         result = _check_git_repo()
-        assert isinstance(result, CheckResult)
+        assert isinstance(result, CheckResultModel)
         assert result.name == "Git repo"
-        assert result.status == CheckStatus.PASS
+        assert result.status == "pass"
 
     def test_check_env_exists_missing(self, tmp_path):
-        with patch("commands.doctor._ROOT_DIR", tmp_path):
+        with patch("services.doctor_svc._ROOT_DIR", tmp_path):
             result = _check_env_exists()
-            assert isinstance(result, CheckResult)
-            assert result.status == CheckStatus.FAIL
+            assert isinstance(result, CheckResultModel)
+            assert result.status == "fail"
             assert result.fixable is True
 
     def test_check_env_exists_empty(self, tmp_path):
         env_file = tmp_path / ".env"
         env_file.touch()
-        with patch("commands.doctor._ROOT_DIR", tmp_path):
+        with patch("services.doctor_svc._ROOT_DIR", tmp_path):
             result = _check_env_exists()
-            assert result.status == CheckStatus.WARN
+            assert result.status == "warn"
 
-    def test_check_result_dataclass(self):
-        cr = CheckResult(
+    def test_check_result_model(self):
+        cr = CheckResultModel(
             name="test",
-            status=CheckStatus.PASS,
+            status="pass",
             message="ok",
             detail="details here",
             fixable=True,
         )
         assert cr.name == "test"
-        assert cr.status == CheckStatus.PASS
+        assert cr.status == "pass"
         assert cr.fixable is True
 
     def test_check_status_values(self):
-        assert CheckStatus.PASS == "pass"
-        assert CheckStatus.FAIL == "fail"
-        assert CheckStatus.WARN == "warn"
+        assert "pass" == "pass"
+        assert "fail" == "fail"
+        assert "warn" == "warn"
