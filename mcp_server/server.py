@@ -24,9 +24,12 @@ def _make_tool(entry) -> None:
     input_model = entry.input_model
 
     def tool_fn(**kwargs):
-        input_obj = input_model(**kwargs)
-        result = func(input_obj)
-        return result.model_dump()
+        try:
+            input_obj = input_model(**kwargs)
+            result = func(input_obj)
+            return result.model_dump()
+        except Exception as e:
+            return {"error": str(e)}
 
     tool_fn.__name__ = entry.name
     tool_fn.__doc__ = entry.description
