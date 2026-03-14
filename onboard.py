@@ -946,7 +946,19 @@ def _disable_mcp() -> None:
     text = re.sub(r'^.*-mcp\s*=\s*"mcp_server:main"\s*\n', "", text, flags=re.MULTILINE)
     # Remove mcp dependency line
     text = re.sub(r'^\s*"mcp\[cli\].*",?\s*\n', "", text, flags=re.MULTILINE)
+    # Remove mcp_server from hatch packages list
+    text = re.sub(r',?\s*"mcp_server"', "", text)
     pyproject_path.write_text(text)
+
+    # Clean up .importlinter references to mcp_server
+    importlinter_path = PROJECT_ROOT / ".importlinter"
+    if importlinter_path.exists():
+        il_text = importlinter_path.read_text()
+        # Remove mcp_server from root_packages and contract module lists
+        il_text = re.sub(r"^\s*mcp_server\s*\n", "", il_text, flags=re.MULTILINE)
+        # Remove the services_no_transport contract's mcp_server forbidden entry
+        # (already handled by the line removal above)
+        importlinter_path.write_text(il_text)
 
 
 def _update_mcp_entrypoint(old_name: str, new_name: str) -> None:
