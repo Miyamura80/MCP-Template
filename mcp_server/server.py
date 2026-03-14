@@ -35,9 +35,9 @@ def _make_tool(entry: ServiceEntry) -> None:
 
     tool_fn.__name__ = entry.name
     tool_fn.__doc__ = entry.description
-    tool_fn.__annotations__ = {
-        k: v.annotation for k, v in inspect.signature(input_model).parameters.items()
-    }
+    sig = inspect.signature(input_model)
+    tool_fn.__annotations__ = {k: v.annotation for k, v in sig.parameters.items()}
+    tool_fn.__signature__ = sig  # type: ignore[attr-defined]
     mcp.tool(name=entry.name, description=entry.description)(tool_fn)
 
 

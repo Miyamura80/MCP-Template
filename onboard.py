@@ -860,7 +860,7 @@ def _run_media_generation(choice: str, project_name: str, theme: str) -> list[st
 
 @app.command()
 def media() -> None:
-    """Step 7: Generate banner and logo assets."""
+    """Step 8: Generate banner and logo assets."""
     if not _check_gemini_key():
         rprint("[yellow]⚠ GEMINI_API_KEY is not configured.[/yellow]")
         skip = questionary.confirm("Skip media generation?", default=True).ask()
@@ -1075,7 +1075,7 @@ def _disable_workflow(filename: str) -> None:
 
 @app.command()
 def jules() -> None:
-    """Step 8: Enable or disable automated Jules maintenance workflows."""
+    """Step 9: Enable or disable automated Jules maintenance workflows."""
     if not _WORKFLOWS_DIR.is_dir():
         rprint("[red]✗ .github/workflows/ directory not found.[/red]")
         raise typer.Exit(code=1)
