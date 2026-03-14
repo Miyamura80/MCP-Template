@@ -17,7 +17,7 @@ from services import service
 _ROOT_DIR = Path(__file__).parent.parent
 
 
-def _coerce_value(value: str):
+def _coerce_value(value: str) -> bool | int | float | str | None:
     """Attempt to coerce a string value to bool/int/float."""
     if value.lower() in ("true", "yes"):
         return True
