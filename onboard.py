@@ -934,6 +934,7 @@ def _disable_mcp() -> None:
         PROJECT_ROOT / "server.json",
         PROJECT_ROOT / "smithery.yaml",
         PROJECT_ROOT / ".mcp.json.example",
+        PROJECT_ROOT / ".github" / "workflows" / "mcp-registry-publish.yml",
     ):
         if path.is_dir():
             shutil.rmtree(path)
