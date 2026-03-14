@@ -1,5 +1,7 @@
 """Models for the doctor service."""
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -9,7 +11,7 @@ class DoctorInput(BaseModel):
 
 class CheckResultModel(BaseModel):
     name: str
-    status: str
+    status: Literal["pass", "fail", "warn"]
     message: str
     detail: str = ""
     fixable: bool = False
