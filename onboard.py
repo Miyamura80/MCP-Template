@@ -384,7 +384,13 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
     replacements: list[tuple[Path, list[tuple[str, str]]]] = [
         (
             PROJECT_ROOT / "pyproject.toml",
-            [(f'{old_name} = "cli:main_cli"', f'{new_name} = "cli:main_cli"')],
+            [
+                (f'{old_name} = "cli:main_cli"', f'{new_name} = "cli:main_cli"'),
+                (
+                    f'{old_name}-mcp = "mcp_server:main"',
+                    f'{new_name}-mcp = "mcp_server:main"',
+                ),
+            ],
         ),
         (
             PROJECT_ROOT / "cli.py",
@@ -421,15 +427,6 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
         (
             PROJECT_ROOT / "tests" / "cli" / "test_cli.py",
             [(f'"{old_name}"', f'"{new_name}"')],
-        ),
-        (
-            PROJECT_ROOT / "pyproject.toml",
-            [
-                (
-                    f'{old_name}-mcp = "mcp_server:main"',
-                    f'{new_name}-mcp = "mcp_server:main"',
-                )
-            ],
         ),
         (
             PROJECT_ROOT / ".mcp.json.example",
