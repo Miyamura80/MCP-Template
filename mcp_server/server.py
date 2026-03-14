@@ -4,6 +4,8 @@ import inspect
 
 from mcp.server.fastmcp import FastMCP
 
+from services import ServiceEntry
+
 mcp = FastMCP("mycli")
 
 
@@ -18,7 +20,7 @@ def _register_tools() -> None:
         _make_tool(entry)
 
 
-def _make_tool(entry) -> None:
+def _make_tool(entry: ServiceEntry) -> None:
     """Create an MCP tool from a service entry."""
     func = entry.func
     input_model = entry.input_model
