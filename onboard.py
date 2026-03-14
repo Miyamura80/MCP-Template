@@ -947,8 +947,8 @@ def _disable_mcp() -> None:
     text = re.sub(r'^.*-mcp\s*=\s*"mcp_server:main"\s*\n', "", text, flags=re.MULTILINE)
     # Remove mcp dependency line
     text = re.sub(r'^\s*"mcp\[cli\].*",?\s*\n', "", text, flags=re.MULTILINE)
-    # Remove mcp_server from hatch packages list
-    text = re.sub(r',?\s*"mcp_server"', "", text)
+    # Remove mcp_server from hatch packages list and vulture exclude paths
+    text = re.sub(r',?\s*"mcp_server/?"', "", text)
     pyproject_path.write_text(text)
 
     # Clean up .importlinter references to mcp_server
