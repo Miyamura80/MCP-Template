@@ -10,7 +10,7 @@ class ConfigShowInput(BaseModel):
 
 
 class ConfigShowResult(BaseModel):
-    config: dict
+    config: dict[str, Any]
 
 
 class ConfigGetInput(BaseModel):
