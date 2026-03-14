@@ -1,6 +1,8 @@
 """Service registry - pure business logic with no transport awareness."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -9,7 +11,7 @@ class ServiceEntry:
     description: str
     input_model: type
     output_model: type
-    func: object
+    func: Callable[..., Any]
 
 
 _registry: list[ServiceEntry] = []
