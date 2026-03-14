@@ -50,6 +50,7 @@ dependencies = [
     "rich>=14.3.1",
     "packaging>=24.0",
     "keyring>=25.0.0",
+    "mcp[cli]>=1.0.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
@@ -61,6 +62,7 @@ Issues = "https://github.com/Miyamura80/CLI-Template/issues"
 
 [project.scripts]
 mycli = "cli:main_cli"
+mycli-mcp = "mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -70,7 +72,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "common", "utils", "commands"]
+packages = ["src", "common", "utils", "commands", "services", "models", "mcp_server"]
 force-include = {"cli.py" = "cli.py"}
 
 [tool.ruff]
@@ -126,12 +128,15 @@ exclude = [
     "commands/",
     "src/cli/",
     "cli.py",
-    "templates/"
+    "templates/",
+    "services/",
+    "models/",
+    "mcp_server/",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["src", "common", "utils", "commands"]
+source = ["src", "common", "utils", "commands", "services", "models"]
 omit = [
     "tests/*",
     "docs/*",

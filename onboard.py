@@ -35,8 +35,22 @@ COLOR_PALETTES: list[tuple[str, str, str, str]] = [
 ]
 
 PRESET_EMOJIS: list[str] = [
-    "🚀", "⚡", "🔥", "🛠️", "🎯", "✨", "🌟", "💎",
-    "🦊", "🐉", "🌊", "🌿", "🔮", "🧪", "🎨", "🤖",
+    "🚀",
+    "⚡",
+    "🔥",
+    "🛠️",
+    "🎯",
+    "✨",
+    "🌟",
+    "💎",
+    "🦊",
+    "🐉",
+    "🌊",
+    "🌿",
+    "🔮",
+    "🧪",
+    "🎨",
+    "🤖",
 ]
 
 # ------------------------------------------------------------------------------
@@ -87,6 +101,7 @@ STEPS: list[tuple[str, str]] = [
     ("Dependencies", "deps"),
     ("Environment Variables", "env"),
     ("Pre-commit Hooks", "hooks"),
+    ("MCP Server", "mcp"),
     ("Media Generation", "media"),
     ("Jules Workflows", "jules"),
 ]
@@ -107,8 +122,9 @@ def _run_orchestrator() -> None:
             "  4. Dependencies - Install project dependencies\n"
             "  5. Environment - Configure API keys and secrets\n"
             "  6. Hooks - Activate pre-commit hooks\n"
-            "  7. Media - Generate banner and logo assets\n"
-            "  8. Jules - Enable/disable automated maintenance workflows",
+            "  7. MCP Server - Enable MCP server alongside CLI\n"
+            "  8. Media - Generate banner and logo assets\n"
+            "  9. Jules - Enable/disable automated maintenance workflows",
             title="Welcome to Project Onboarding",
             border_style="blue",
         )
@@ -180,15 +196,15 @@ def _save_cli_branding(emoji: str, primary_color: str, secondary_color: str) -> 
     """Persist emoji and colour settings into common/global_config.yaml."""
     config_path = PROJECT_ROOT / "common" / "global_config.yaml"
     text = config_path.read_text()
-    text = re.sub(r'^  emoji:.*$', f'  emoji: "{emoji}"', text, flags=re.MULTILINE)
+    text = re.sub(r"^  emoji:.*$", f'  emoji: "{emoji}"', text, flags=re.MULTILINE)
     text = re.sub(
-        r'^  primary_color:.*$',
+        r"^  primary_color:.*$",
         f'  primary_color: "{primary_color}"',
         text,
         flags=re.MULTILINE,
     )
     text = re.sub(
-        r'^  secondary_color:.*$',
+        r"^  secondary_color:.*$",
         f'  secondary_color: "{secondary_color}"',
         text,
         flags=re.MULTILINE,
@@ -368,7 +384,13 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
     replacements: list[tuple[Path, list[tuple[str, str]]]] = [
         (
             PROJECT_ROOT / "pyproject.toml",
-            [(f'{old_name} = "cli:main_cli"', f'{new_name} = "cli:main_cli"')],
+            [
+                (f'{old_name} = "cli:main_cli"', f'{new_name} = "cli:main_cli"'),
+                (
+                    f'{old_name}-mcp = "mcp_server:main"',
+                    f'{new_name}-mcp = "mcp_server:main"',
+                ),
+            ],
         ),
         (
             PROJECT_ROOT / "cli.py",
@@ -405,6 +427,25 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
         (
             PROJECT_ROOT / "tests" / "cli" / "test_cli.py",
             [(f'"{old_name}"', f'"{new_name}"')],
+        ),
+        (
+            PROJECT_ROOT / ".mcp.json.example",
+            [
+                (f'"{old_name}"', f'"{new_name}"'),
+                (f"{old_name}-mcp", f"{new_name}-mcp"),
+            ],
+        ),
+        (
+            PROJECT_ROOT / "smithery.yaml",
+            [(f"{old_name}-mcp", f"{new_name}-mcp")],
+        ),
+        (
+            PROJECT_ROOT / "mcp_server" / "server.py",
+            [(f'FastMCP("{old_name}")', f'FastMCP("{new_name}")')],
+        ),
+        (
+            PROJECT_ROOT / "Makefile",
+            [(f"{old_name}-mcp", f"{new_name}-mcp")],
         ),
     ]
 
@@ -819,7 +860,7 @@ def _run_media_generation(choice: str, project_name: str, theme: str) -> list[st
 
 @app.command()
 def media() -> None:
-    """Step 7: Generate banner and logo assets."""
+    """Step 8: Generate banner and logo assets."""
     if not _check_gemini_key():
         rprint("[yellow]⚠ GEMINI_API_KEY is not configured.[/yellow]")
         skip = questionary.confirm("Skip media generation?", default=True).ask()
@@ -855,6 +896,145 @@ def media() -> None:
     rprint("\n[green]Generated files:[/green]")
     for f in generated_files:
         rprint(f"  {f}")
+
+
+@app.command()
+def mcp() -> None:
+    """Step 7: Enable MCP server alongside CLI."""
+    enable = questionary.confirm("Enable MCP server alongside CLI?", default=True).ask()
+    if enable is None:
+        raise typer.Abort()
+
+    if not enable:
+        _disable_mcp()
+        rprint("[yellow]MCP server disabled. Removed MCP-related files.[/yellow]")
+        return
+
+    cli_name = _read_cli_name()
+    default_mcp_name = f"{cli_name}-mcp"
+    mcp_name = questionary.text("MCP entrypoint name:", default=default_mcp_name).ask()
+    if mcp_name is None:
+        raise typer.Abort()
+
+    if mcp_name != default_mcp_name:
+        _update_mcp_entrypoint(default_mcp_name, mcp_name)
+
+    _update_mcp_distribution_files(cli_name, mcp_name)
+
+    rprint(
+        Panel(
+            f"MCP entrypoint: [green]{mcp_name}[/green]\n"
+            f"Run locally:    [cyan]uv run {mcp_name}[/cyan]\n"
+            f"Inspector:      [cyan]uv run mcp dev mcp_server/server.py[/cyan]",
+            title="MCP Server Enabled",
+            border_style="green",
+        )
+    )
+
+
+def _disable_mcp() -> None:
+    """Remove MCP-related files and config when user opts out."""
+    for path in (
+        PROJECT_ROOT / "mcp_server",
+        PROJECT_ROOT / "server.json",
+        PROJECT_ROOT / "smithery.yaml",
+        PROJECT_ROOT / ".mcp.json.example",
+        PROJECT_ROOT / ".github" / "workflows" / "mcp-registry-publish.yml",
+    ):
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
+
+    pyproject_path = PROJECT_ROOT / "pyproject.toml"
+    text = pyproject_path.read_text()
+    # Remove mycli-mcp entrypoint line
+    text = re.sub(r'^.*-mcp\s*=\s*"mcp_server:main"\s*\n', "", text, flags=re.MULTILINE)
+    # Remove mcp dependency line
+    text = re.sub(r'^\s*"mcp\[cli\].*",?\s*\n', "", text, flags=re.MULTILINE)
+    # Remove mcp_server from hatch packages list and vulture exclude paths
+    text = re.sub(r',?\s*"mcp_server/?"', "", text)
+    pyproject_path.write_text(text)
+
+    # Clean up .importlinter references to mcp_server
+    importlinter_path = PROJECT_ROOT / ".importlinter"
+    if importlinter_path.exists():
+        il_text = importlinter_path.read_text()
+        # Remove mcp_server from root_packages and contract module lists
+        il_text = re.sub(r"^\s*mcp_server\s*\n", "", il_text, flags=re.MULTILINE)
+        # Remove the services_no_transport contract's mcp_server forbidden entry
+        # (already handled by the line removal above)
+        importlinter_path.write_text(il_text)
+
+
+def _update_mcp_entrypoint(old_name: str, new_name: str) -> None:
+    """Update the MCP entrypoint name in pyproject.toml and distribution files."""
+    pyproject_path = PROJECT_ROOT / "pyproject.toml"
+    text = pyproject_path.read_text()
+    text = text.replace(
+        f'{old_name} = "mcp_server:main"', f'{new_name} = "mcp_server:main"'
+    )
+    pyproject_path.write_text(text)
+
+
+def _read_github_owner_repo() -> tuple[str, str]:
+    """Extract owner and repo from the git remote URL. Falls back to placeholders."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            timeout=5,
+        )
+        url = result.stdout.strip()
+        # Match github.com/OWNER/REPO from HTTPS or SSH URLs
+        match = re.search(r"github\.com[:/]([^/]+)/([^/.]+?)(?:\.git)?$", url)
+        if match:
+            return match.group(1), match.group(2)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return "OWNER", "REPO"
+
+
+def _update_mcp_distribution_files(cli_name: str, mcp_name: str) -> None:
+    """Fill in placeholders in server.json, smithery.yaml, and .mcp.json.example."""
+    project_name = _read_pyproject_name()
+    github_owner, github_repo = _read_github_owner_repo()
+
+    # Read version and description from pyproject.toml
+    pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text()
+    version_match = re.search(r'^version\s*=\s*"([^"]*)"', pyproject_text, re.MULTILINE)
+    version = version_match.group(1) if version_match else "0.1.0"
+    desc_match = re.search(
+        r'^description\s*=\s*"([^"]*)"', pyproject_text, re.MULTILINE
+    )
+    description = desc_match.group(1) if desc_match else project_name
+
+    # Update .mcp.json.example
+    mcp_json_path = PROJECT_ROOT / ".mcp.json.example"
+    if mcp_json_path.exists():
+        text = mcp_json_path.read_text()
+        text = text.replace("mycli-mcp", mcp_name)
+        text = text.replace('"mycli"', f'"{cli_name}"')
+        mcp_json_path.write_text(text)
+
+    # Update server.json
+    server_json_path = PROJECT_ROOT / "server.json"
+    if server_json_path.exists():
+        text = server_json_path.read_text()
+        text = text.replace("OWNER/REPO", f"{github_owner}/{github_repo}")
+        text = text.replace("DESCRIPTION", description)
+        text = text.replace("PYPI_PACKAGE_NAME", project_name)
+        text = re.sub(r'"version":\s*"0\.1\.0"', f'"version": "{version}"', text)
+        server_json_path.write_text(text)
+
+    # Update smithery.yaml
+    smithery_path = PROJECT_ROOT / "smithery.yaml"
+    if smithery_path.exists():
+        text = smithery_path.read_text()
+        text = text.replace("mycli-mcp", mcp_name)
+        smithery_path.write_text(text)
 
 
 _JULES_WORKFLOWS: list[tuple[str, str]] = [
@@ -895,7 +1075,7 @@ def _disable_workflow(filename: str) -> None:
 
 @app.command()
 def jules() -> None:
-    """Step 8: Enable or disable automated Jules maintenance workflows."""
+    """Step 9: Enable or disable automated Jules maintenance workflows."""
     if not _WORKFLOWS_DIR.is_dir():
         rprint("[red]✗ .github/workflows/ directory not found.[/red]")
         raise typer.Exit(code=1)
@@ -966,6 +1146,7 @@ STEP_FUNCTIONS.update(
         "deps": deps,
         "env": env,
         "hooks": hooks,
+        "mcp": mcp,
         "media": media,
         "jules": jules,
     }

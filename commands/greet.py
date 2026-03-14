@@ -28,15 +28,16 @@ def main(
         typer.echo(f"[DRY RUN] Would greet {name}")
         return
 
-    greeting = f"Hello, {name}!"
-    if shout:
-        greeting = greeting.upper()
+    from models.greet import GreetInput
+    from services.greet import greet
+
+    result = greet(GreetInput(name=name or "", shout=shout, times=times))
 
     if is_verbose():
         render(
-            {"name": name, "shout": shout, "times": times, "greeting": greeting},
+            {"name": name, "shout": shout, "times": times, "greeting": result.message},
             title="Greet Details",
         )
     else:
-        for _ in range(times):
-            typer.echo(greeting)
+        for _ in range(result.times):
+            typer.echo(result.message)
