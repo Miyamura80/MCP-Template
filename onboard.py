@@ -442,6 +442,14 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
             PROJECT_ROOT / "smithery.yaml",
             [(f"{old_name}-mcp", f"{new_name}-mcp")],
         ),
+        (
+            PROJECT_ROOT / "mcp_server" / "server.py",
+            [(f'FastMCP("{old_name}")', f'FastMCP("{new_name}")')],
+        ),
+        (
+            PROJECT_ROOT / "Makefile",
+            [(f"{old_name}-mcp", f"{new_name}-mcp")],
+        ),
     ]
 
     # Files where we use regex word-boundary replacement instead of literal
