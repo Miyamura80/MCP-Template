@@ -96,9 +96,21 @@ class TestAPIServer(TestTemplate):
     def test_403_on_insufficient_scopes(self):
         """A key with read-only scopes should be rejected from service execution."""
         # Override auth to return a user with limited scopes
-        app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
-            user_id="scoped-user", auth_method="api_key", scopes=["services:read"]
-        )
-        client = TestClient(app)
-        resp = client.post("/api/v1/services/greet", json={"name": "World"})
-        assert resp.status_code == 403
+        original = app.dependency_overrides.get(get_authenticated_user)
+        try:
+            app.dependency_overrides[get_authenticated_user] = lambda: (
+                AuthenticatedUser(
+                    user_id="scoped-user",
+                    auth_method="api_key",
+                    scopes=["services:read"],
+                )
+            )
+            client = TestClient(app)
+            resp = client.post("/api/v1/services/greet", json={"name": "World"})
+            assert resp.status_code == 403
+        finally:
+            # Restore original override to prevent leaking into other tests
+            if original is not None:
+                app.dependency_overrides[get_authenticated_user] = original
+            else:
+                app.dependency_overrides.pop(get_authenticated_user, None)

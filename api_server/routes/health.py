@@ -18,11 +18,10 @@ def _check_database() -> dict:
             return {"status": "not_configured"}
         from sqlalchemy import text
 
-        from db.engine import _init_engine
+        from db.engine import use_db_session
 
-        engine = _init_engine()  # returns cached singleton
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+        with use_db_session() as session:
+            session.execute(text("SELECT 1"))
         return {"status": "ok"}
     except Exception as exc:
         return {"status": "error", "message": type(exc).__name__}
