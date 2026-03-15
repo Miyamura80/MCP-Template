@@ -100,10 +100,17 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 # If it already has our error envelope, just add the request ID
                 if "error" in data and isinstance(data["error"], dict):
                     data["error"]["request_id"] = request_id
+                    # Strip content-length/content-type so JSONResponse recomputes
+                    # them from the (possibly mutated) body.
+                    fwd_headers = {
+                        k: v
+                        for k, v in response.headers.items()
+                        if k.lower() not in ("content-length", "content-type")
+                    }
                     return JSONResponse(
                         status_code=response.status_code,
                         content=data,
-                        headers=dict(response.headers),
+                        headers=fwd_headers,
                     )
 
                 # Convert FastAPI's {"detail": "..."} format

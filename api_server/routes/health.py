@@ -39,7 +39,10 @@ def _check_redis() -> dict:
         import redis
 
         r = redis.from_url(redis_url, socket_connect_timeout=2)
-        r.ping()
+        try:
+            r.ping()
+        finally:
+            r.close()
         return {"status": "ok"}
     except Exception as exc:
         return {"status": "error", "message": type(exc).__name__}
