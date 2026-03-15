@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.models.subscription_types import SubscriptionTier
@@ -35,15 +36,20 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
 
     sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
     if sub is None:
-        sub = UserSubscription(
-            user_id=user_id,
-            subscription_tier=SubscriptionTier.FREE.value,
-            current_period_start=datetime.now(UTC),
-        )
-        session.add(sub)
-        session.commit()
-        session.refresh(sub)
+        try:
+            sub = UserSubscription(
+                user_id=user_id,
+                subscription_tier=SubscriptionTier.FREE.value,
+                current_period_start=datetime.now(UTC),
+            )
+            session.add(sub)
+            session.commit()
+            session.refresh(sub)
+        except IntegrityError:
+            session.rollback()
+            sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
 
+    assert sub is not None  # guaranteed: created above or fetched after IntegrityError
     tier_key = sub.subscription_tier
     tier_cfg = cfg.tier_limits.get(tier_key)
     daily_limit = tier_cfg.daily_requests if tier_cfg else 100

@@ -1,9 +1,9 @@
 """Metered usage reporting via Stripe Billing Meter API."""
 
-import contextlib
-import time
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger as log
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -42,14 +42,19 @@ def report_usage(
     if ensure_stripe() and sub.stripe_customer_id:
         import stripe
 
-        with contextlib.suppress(Exception):
+        try:
             stripe.billing.MeterEvent.create(
                 event_name=get_meter_event_name(),
                 payload={
                     "stripe_customer_id": sub.stripe_customer_id,
                     "value": "1",
                 },
-                identifier=f"{sub.stripe_customer_id}-{int(time.time())}",
+                identifier=f"{sub.stripe_customer_id}-{uuid.uuid4().hex}",
+            )
+        except Exception:
+            log.warning(
+                "Failed to report meter event for customer {}",
+                sub.stripe_customer_id,
             )
 
     return {"usage": sub.current_period_usage}
