@@ -47,7 +47,7 @@ class TestUnifiedAuth(TestTemplate):
     @patch("api_server.auth.workos_auth.global_config")
     def test_jwt_auth_succeeds(self, mock_config):
         mock_config.WORKOS_CLIENT_ID = "test-client"
-        mock_config.is_local = True
+        mock_config.DEV_ENV = "dev"
         app, _sl = _setup_app()
         client = TestClient(app)
         token = json.dumps({"sub": "jwt-user", "email": "j@t.com"})

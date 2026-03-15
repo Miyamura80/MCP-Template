@@ -40,8 +40,8 @@ def verify_workos_token(token: str) -> WorkOSUser | None:
     if not client_id:
         return None
 
-    # Test-mode bypass: only allowed in local/dev environments
-    if token.startswith("{") and global_config.is_local:
+    # Test-mode bypass: only allowed in non-production environments
+    if token.startswith("{") and global_config.DEV_ENV != "prod":
         try:
             payload = json.loads(token)
             return WorkOSUser(

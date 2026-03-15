@@ -44,6 +44,9 @@ def get_db_session() -> Generator[Session, None, None]:
     session = _SessionLocal()
     try:
         yield session
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
 
