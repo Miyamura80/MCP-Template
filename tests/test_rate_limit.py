@@ -32,13 +32,15 @@ class TestRateLimit(TestTemplate):
         mock_limits.return_value = {"rps": 1, "rpm": 1000, "rph": 10000, "rpd": 100000}
         app = _make_app()
         client = TestClient(app)
+        # Use X-API-KEY so identity is not "ip:testclient" (which is exempt)
+        headers = {"X-API-KEY": "test-rate-limit-key"}
 
         # First request should succeed
-        resp = client.get("/test")
+        resp = client.get("/test", headers=headers)
         assert resp.status_code == 200
 
         # Second request within same second should be rate limited
-        resp2 = client.get("/test")
+        resp2 = client.get("/test", headers=headers)
         assert resp2.status_code == 429
         assert "Retry-After" in resp2.headers
 
@@ -52,8 +54,9 @@ class TestRateLimit(TestTemplate):
         }
         app = _make_app()
         client = TestClient(app)
+        headers = {"X-API-KEY": "test-headers-key"}
 
-        resp = client.get("/test")
+        resp = client.get("/test", headers=headers)
         assert resp.status_code == 200
         assert "X-RateLimit-Limit" in resp.headers
         assert "X-RateLimit-Remaining" in resp.headers
@@ -79,9 +82,10 @@ class TestRateLimit(TestTemplate):
         mock_limits.return_value = {"rps": 1, "rpm": 1000, "rph": 10000, "rpd": 100000}
         app = _make_app()
         client = TestClient(app)
+        headers = {"X-API-KEY": "test-error-body-key"}
 
-        client.get("/test")  # Use up the limit
-        resp = client.get("/test")
+        client.get("/test", headers=headers)  # Use up the limit
+        resp = client.get("/test", headers=headers)
         assert resp.status_code == 429
 
         body = resp.json()

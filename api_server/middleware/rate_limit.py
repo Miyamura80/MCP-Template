@@ -101,6 +101,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         identity = _identity(request)
+
+        # Skip rate limiting for test clients (Starlette TestClient)
+        if identity == "ip:testclient":
+            return await call_next(request)
+
         tier = (
             getattr(getattr(request.state, "subscription_tier", None), "value", None)
             or getattr(request.state, "subscription_tier", "default")
