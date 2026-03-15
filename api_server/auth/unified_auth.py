@@ -16,6 +16,7 @@ class AuthenticatedUser:
     user_id: str
     email: str | None = None
     auth_method: str = "jwt"  # "jwt" | "api_key"
+    scopes: list[str] | None = None  # None = legacy (no restrictions)
 
 
 def get_authenticated_user(
@@ -47,6 +48,7 @@ def get_authenticated_user(
             return AuthenticatedUser(
                 user_id=row.user_id,
                 auth_method="api_key",
+                scopes=row.scopes,
             )
 
     raise HTTPException(status_code=401, detail="Authentication required")

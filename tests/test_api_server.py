@@ -46,7 +46,10 @@ class TestAPIServer(TestTemplate):
     def test_health_endpoint(self):
         resp = self.client.get("/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        data = resp.json()
+        assert data["status"] in ("ok", "degraded")
+        assert "components" in data
+        assert data["components"]["api"]["status"] == "ok"
 
     def test_greet_service(self):
         resp = self.client.post(
@@ -82,3 +85,20 @@ class TestAPIServer(TestTemplate):
         routes = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/api/v1/services/greet" in routes
         assert "/api/v1/services/config_show" in routes
+
+    def test_billing_routes_registered(self):
+        """Billing routes should be registered."""
+        routes = [r.path for r in app.routes if hasattr(r, "path")]
+        assert "/api/v1/billing/checkout/create" in routes
+        assert "/api/v1/billing/usage/current" in routes
+        assert "/api/v1/billing/subscription/status" in routes
+
+    def test_403_on_insufficient_scopes(self):
+        """A key with read-only scopes should be rejected from service execution."""
+        # Override auth to return a user with limited scopes
+        app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+            user_id="scoped-user", auth_method="api_key", scopes=["services:read"]
+        )
+        client = TestClient(app)
+        resp = client.post("/api/v1/services/greet", json={"name": "World"})
+        assert resp.status_code == 403

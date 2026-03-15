@@ -22,7 +22,9 @@ from .config_models import (
     FeaturesConfig,
     LlmConfig,
     LoggingConfig,
+    RateLimitConfig,
     ServerConfig,
+    SubscriptionConfig,
     TelemetryConfig,
 )
 
@@ -181,6 +183,10 @@ class Config(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig())
     cli: CliConfig = Field(default_factory=lambda: CliConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
+    subscription_config: SubscriptionConfig = Field(
+        default_factory=lambda: SubscriptionConfig()
+    )
+    rate_limit: RateLimitConfig = Field(default_factory=lambda: RateLimitConfig())
 
     # Environment variables
     DEV_ENV: str
@@ -195,6 +201,15 @@ class Config(BaseSettings):
     WORKOS_CLIENT_ID: str | None = None
     WORKOS_API_KEY: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
+
+    # Stripe & billing
+    STRIPE_SECRET_KEY: str | None = None
+    STRIPE_TEST_SECRET_KEY: str | None = None
+    STRIPE_WEBHOOK_SECRET: str | None = None
+    STRIPE_TEST_WEBHOOK_SECRET: str | None = None
+
+    # Redis
+    REDIS_URL: str | None = None
 
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(

@@ -27,6 +27,7 @@ def create_api_key(
     name: str = "Default",
     expires_in_days: int | None = None,
     email: str | None = None,
+    scopes: list[str] | None = None,
 ) -> tuple[str, APIKey]:
     """Create a new API key and return ``(raw_key, db_row)``."""
     ensure_profile_exists(session, user_id=user_id, email=email)
@@ -44,6 +45,7 @@ def create_api_key(
         key_hash=key_hash,
         key_prefix=key_prefix,
         name=name,
+        scopes=scopes,
         expires_at=expires_at,
     )
     session.add(row)

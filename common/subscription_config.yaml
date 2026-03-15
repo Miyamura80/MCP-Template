@@ -1,0 +1,19 @@
+tier_limits:
+  free_tier:
+    daily_requests: 100
+  plus_tier:
+    daily_requests: 10000
+default_tier: free_tier
+stripe:
+  price_ids:
+    test: ""
+    prod: ""
+  meter_event_name: "api_requests"
+  api_version: "2025-03-31.basil"
+metered:
+  included_units: 100
+  overage_unit_amount: 1
+  unit_label: "API calls"
+trial_period_days: 7
+payment_retry:
+  max_attempts: 3

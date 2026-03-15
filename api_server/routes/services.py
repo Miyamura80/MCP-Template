@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter, Depends
 
-from api_server.auth import AuthenticatedUser, get_authenticated_user
+from api_server.auth import AuthenticatedUser
+from api_server.auth.scopes import require_scopes
 from services import ServiceEntry
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
@@ -38,7 +39,7 @@ def _make_route(entry: ServiceEntry) -> None:
     )
     def _handler(
         body: input_model,  # type: ignore[valid-type]
-        _user: AuthenticatedUser = Depends(get_authenticated_user),
+        _user: AuthenticatedUser = Depends(require_scopes("services:execute")),
     ):
         return func(body)
 
