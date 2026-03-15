@@ -44,21 +44,41 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
         session.commit()
         session.refresh(sub)
 
-    # Reset counter if we've crossed into a new day
-    if sub.current_period_start:
-        now = datetime.now(UTC)
-        if now.date() > sub.current_period_start.date():
-            sub.current_period_usage = 0
-            sub.current_period_start = now
-            session.commit()
-
     tier_key = sub.subscription_tier
     tier_cfg = cfg.tier_limits.get(tier_key)
     daily_limit = tier_cfg.daily_requests if tier_cfg else 100
 
+    # Atomic day-boundary reset: merge reset + first increment into one
+    # statement so concurrent requests can't clobber each other's counts.
+    if sub.current_period_start:
+        now = datetime.now(UTC)
+        if now.date() > sub.current_period_start.date():
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            result = session.execute(
+                update(UserSubscription)
+                .where(
+                    UserSubscription.user_id == user_id,
+                    UserSubscription.current_period_start < day_start,
+                )
+                .values(
+                    current_period_usage=1,
+                    current_period_start=now,
+                )
+            )
+            session.commit()
+            session.refresh(sub)
+            if result.rowcount > 0:
+                # We reset and claimed the first slot atomically
+                return LimitStatus(
+                    allowed=True,
+                    current_usage=1,
+                    daily_limit=daily_limit,
+                    remaining=daily_limit - 1,
+                    tier=tier_key,
+                )
+            # Another request already reset; fall through to normal increment
+
     # Atomic increment: only succeeds if usage is still under the limit.
-    # This prevents race conditions where concurrent requests could all
-    # pass a non-atomic check before any commits the increment.
     result = session.execute(
         update(UserSubscription)
         .where(
@@ -70,7 +90,6 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
     session.commit()
 
     if result.rowcount == 0:
-        # Re-read to get accurate current usage for error detail
         session.refresh(sub)
         raise HTTPException(
             status_code=402,
@@ -83,7 +102,6 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
             },
         )
 
-    # Re-read to get the updated value
     session.refresh(sub)
     new_remaining = max(0, daily_limit - sub.current_period_usage)
     return LimitStatus(

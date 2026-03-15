@@ -50,13 +50,17 @@ def create_checkout(
     if not price_id:
         raise HTTPException(status_code=503, detail="Stripe price ID not configured")
 
+    from common import global_config
+
+    frontend_url = global_config.FRONTEND_URL.rstrip("/")
+
     checkout_session = stripe.checkout.Session.create(
         customer=customer_id,
         payment_method_types=["card"],
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
-        success_url="https://example.com/billing/success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url="https://example.com/billing/cancel",
+        success_url=f"{frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{frontend_url}/billing/cancel",
         metadata={"user_id": user.user_id},
     )
 

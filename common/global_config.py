@@ -207,6 +207,7 @@ class Config(BaseSettings):
     STRIPE_TEST_SECRET_KEY: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_TEST_WEBHOOK_SECRET: str | None = None
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Redis
     REDIS_URL: str | None = None

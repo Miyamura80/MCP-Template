@@ -122,14 +122,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             ("day", RateLimitItemPerDay(limits_cfg.get("rpd", 5000))),
         ]
 
-        # Check all windows - find the tightest one that is hit
+        # Check all windows without consuming quota first
         hit_window = None
         hit_item = None
         for window_name, item in windows:
-            if not self._limiter.hit(item, identity):
+            if not self._limiter.test(item, identity):
                 hit_window = window_name
                 hit_item = item
                 break
+
+        if hit_window is None:
+            # All windows passed - now consume quota
+            for _, item in windows:
+                self._limiter.hit(item, identity)
 
         # Use minute window for response headers
         _minute_item = windows[1][1]

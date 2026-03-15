@@ -4,6 +4,7 @@ import contextlib
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
@@ -28,9 +29,14 @@ def report_usage(
     if not sub:
         raise HTTPException(status_code=404, detail="No subscription found")
 
-    # Update local cache
-    sub.current_period_usage += 1
+    # Atomic increment to prevent lost updates under concurrent load
+    session.execute(
+        update(UserSubscription)
+        .where(UserSubscription.user_id == user.user_id)
+        .values(current_period_usage=UserSubscription.current_period_usage + 1)
+    )
     session.commit()
+    session.refresh(sub)
 
     # Report to Stripe if configured and user has a Stripe customer
     if _ensure_stripe() and sub.stripe_customer_id:
