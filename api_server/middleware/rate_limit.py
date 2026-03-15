@@ -147,7 +147,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             headers = {
                 "X-RateLimit-Limit": str(limit_val),
                 "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(int(reset_time)),
+                "X-RateLimit-Reset": str(int(hit_stats.reset_time)),
                 "RateLimit": f"limit={limit_val}, remaining=0",
                 "RateLimit-Policy": f"{limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600",
                 "Retry-After": str(retry_after),

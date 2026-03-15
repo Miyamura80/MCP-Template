@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
 from api_server.billing.stripe_config import (
-    _ensure_stripe,
+    ensure_stripe,
     get_included_units,
     get_meter_event_name,
 )
@@ -39,7 +39,7 @@ def report_usage(
     session.refresh(sub)
 
     # Report to Stripe if configured and user has a Stripe customer
-    if _ensure_stripe() and sub.stripe_customer_id:
+    if ensure_stripe() and sub.stripe_customer_id:
         import stripe
 
         with contextlib.suppress(Exception):

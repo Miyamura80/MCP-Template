@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
-from api_server.billing.stripe_config import _ensure_stripe, get_stripe_price_id
+from api_server.billing.stripe_config import ensure_stripe, get_stripe_price_id
 from db.engine import get_db_session
 from db.models.subscription_types import SubscriptionStatus, SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
@@ -18,7 +18,7 @@ def create_checkout(
     session: Session = Depends(get_db_session),
 ):
     """Create a Stripe Checkout Session for the Plus tier."""
-    if not _ensure_stripe():
+    if not ensure_stripe():
         raise HTTPException(status_code=503, detail="Billing not configured")
 
     import stripe
@@ -40,6 +40,7 @@ def create_checkout(
         customer = stripe.Customer.create(
             metadata={"user_id": user.user_id},
             email=user.email,
+            idempotency_key=f"create-customer-{user.user_id}",
         )
         customer_id = customer.id
         if sub:
@@ -79,7 +80,7 @@ def cancel_subscription(
     session: Session = Depends(get_db_session),
 ):
     """Cancel the user's Stripe subscription."""
-    if not _ensure_stripe():
+    if not ensure_stripe():
         raise HTTPException(status_code=503, detail="Billing not configured")
 
     import stripe

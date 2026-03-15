@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger as log
 
-from api_server.billing.stripe_config import _ensure_stripe, get_webhook_secret
+from api_server.billing.stripe_config import ensure_stripe, get_webhook_secret
 from db.engine import use_db_session
 from db.models.subscription_types import (
     PaymentStatus,
@@ -49,7 +49,7 @@ def _try_construct_event(payload: bytes, sig_header: str):
 @router.post("/stripe")
 async def stripe_webhook(request: Request):
     """Handle incoming Stripe webhook events."""
-    if not _ensure_stripe():
+    if not ensure_stripe():
         raise HTTPException(status_code=503, detail="Billing not configured")
 
     payload = await request.body()

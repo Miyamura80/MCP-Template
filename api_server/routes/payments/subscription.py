@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
-from api_server.billing.stripe_config import _ensure_stripe
+from api_server.billing.stripe_config import ensure_stripe
 from db.engine import get_db_session
 from db.models.subscription_types import SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
@@ -30,7 +30,7 @@ def subscription_status(
 
     # Try Stripe for authoritative status if available
     stripe_status = None
-    if _ensure_stripe() and sub.stripe_subscription_id:
+    if ensure_stripe() and sub.stripe_subscription_id:
         try:
             import stripe
 

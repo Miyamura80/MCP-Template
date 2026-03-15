@@ -5,7 +5,7 @@ from loguru import logger as log
 _stripe_initialized = False
 
 
-def _ensure_stripe() -> bool:
+def ensure_stripe() -> bool:
     """Initialize Stripe SDK. Returns False if no keys are configured."""
     global _stripe_initialized  # noqa: PLW0603
     if _stripe_initialized:
