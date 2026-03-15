@@ -122,11 +122,13 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
         sub = _find_subscription_by_customer(session, customer_id)
         if not sub:
             log.error(
-                "Received subscription.created for unknown customer {}; skipping",
+                "Received subscription.created for unknown customer {}; will retry",
                 customer_id,
             )
-            session.commit()
-            return
+            session.rollback()
+            raise HTTPException(
+                status_code=500, detail="Customer not found, will retry"
+            )
 
         sub.stripe_subscription_id = data.get("id")
         sub.subscription_tier = SubscriptionTier.PLUS.value

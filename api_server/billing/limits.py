@@ -49,7 +49,10 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
             session.rollback()
             sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
 
-    assert sub is not None  # guaranteed: created above or fetched after IntegrityError
+    if sub is None:
+        raise RuntimeError(
+            f"Failed to create or retrieve subscription for user {user_id}"
+        )
     tier_key = sub.subscription_tier
     tier_cfg = cfg.tier_limits.get(tier_key)
     daily_limit = tier_cfg.daily_requests if tier_cfg else 100

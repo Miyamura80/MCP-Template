@@ -123,13 +123,13 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
         # First pass: remove expired entries
         expired = [k for k, (_, exp) in _tier_cache.items() if exp <= now]
         for k in expired:
-            del _tier_cache[k]
+            _tier_cache.pop(k, None)
         # If still full, evict oldest 10% by expiry to avoid thundering herd
         if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
             by_expiry = sorted(_tier_cache.items(), key=lambda x: x[1][1])
             evict_count = max(1, len(by_expiry) // 10)
             for k, _ in by_expiry[:evict_count]:
-                del _tier_cache[k]
+                _tier_cache.pop(k, None)
 
     _tier_cache[cache_key] = (tier, time.time() + _TIER_CACHE_TTL)
     return tier
