@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from api_server.auth.api_key_auth import validate_api_key
 from api_server.auth.workos_auth import verify_workos_token
+from common import global_config
 from db.engine import get_db_session
 
 
@@ -22,7 +23,7 @@ def get_authenticated_user(
     session: Session = Depends(get_db_session),
 ) -> AuthenticatedUser:
     """FastAPI dependency that authenticates via JWT or API key."""
-    # 1. Try Bearer JWT (fail fast if header present but invalid)
+    # 1. Try Bearer JWT (fail fast only when WorkOS is configured)
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.removeprefix("Bearer ").strip()
@@ -33,7 +34,10 @@ def get_authenticated_user(
                 email=workos_user.email,
                 auth_method="jwt",
             )
-        raise HTTPException(status_code=401, detail="Invalid Bearer token")
+        # Only fail fast if WorkOS is actually configured; otherwise
+        # the Bearer header may be irrelevant and API key should be tried.
+        if global_config.WORKOS_CLIENT_ID:
+            raise HTTPException(status_code=401, detail="Invalid Bearer token")
 
     # 2. Try API key (header)
     api_key = request.headers.get("X-API-KEY", "")

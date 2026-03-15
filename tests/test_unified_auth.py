@@ -70,11 +70,13 @@ class TestUnifiedAuth(TestTemplate):
         assert resp.json()["user_id"] == "key-user"
         assert resp.json()["method"] == "api_key"
 
+    @patch("api_server.auth.unified_auth.global_config")
     @patch("api_server.auth.workos_auth.global_config")
-    def test_invalid_bearer_fails_fast(self, mock_config):
-        """An invalid Bearer token should 401 immediately, not fall through to API key."""
-        mock_config.WORKOS_CLIENT_ID = "test-client"
-        mock_config.DEV_ENV = "prod"
+    def test_invalid_bearer_fails_fast(self, mock_workos_config, mock_unified_config):
+        """An invalid Bearer token should 401 when WorkOS is configured."""
+        mock_workos_config.WORKOS_CLIENT_ID = "test-client"
+        mock_workos_config.DEV_ENV = "prod"
+        mock_unified_config.WORKOS_CLIENT_ID = "test-client"
         app, sl = _setup_app()
         session = sl()
         raw_key, _row = create_api_key(session, user_id="key-user")
@@ -87,6 +89,28 @@ class TestUnifiedAuth(TestTemplate):
         )
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Invalid Bearer token"
+
+    @patch("api_server.auth.unified_auth.global_config")
+    @patch("api_server.auth.workos_auth.global_config")
+    def test_bearer_falls_through_when_workos_unconfigured(
+        self, mock_workos_config, mock_unified_config
+    ):
+        """Bearer header should fall through to API key when WorkOS is not configured."""
+        mock_workos_config.WORKOS_CLIENT_ID = None
+        mock_unified_config.WORKOS_CLIENT_ID = None
+        app, sl = _setup_app()
+        session = sl()
+        raw_key, _row = create_api_key(session, user_id="key-user")
+        session.close()
+
+        client = TestClient(app)
+        resp = client.get(
+            "/test-auth",
+            headers={"Authorization": "Bearer irrelevant", "X-API-KEY": raw_key},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["user_id"] == "key-user"
+        assert resp.json()["method"] == "api_key"
 
     @patch("api_server.auth.workos_auth.global_config")
     def test_no_credentials_returns_401(self, mock_config):

@@ -2,6 +2,7 @@
 
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.models.profiles import Profile
@@ -27,8 +28,12 @@ def ensure_profile_exists(
     if profile is not None:
         return profile
 
-    profile = Profile(user_id=user_id, email=email, username=username)
-    session.add(profile)
-    session.commit()
-    session.refresh(profile)
-    return profile
+    try:
+        profile = Profile(user_id=user_id, email=email, username=username)
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+        return profile
+    except IntegrityError:
+        session.rollback()
+        return session.query(Profile).filter_by(user_id=user_id).one()

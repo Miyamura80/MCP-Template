@@ -9,10 +9,15 @@ router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
 
 def _register_service_routes() -> None:
-    """Import service modules and create one route per service."""
-    import services.config_svc  # noqa: F401
-    import services.doctor_svc  # noqa: F401
-    import services.greet  # noqa: F401
+    """Discover all service modules and create one route per service."""
+    import importlib
+    import pkgutil
+
+    import services as _services_pkg
+
+    for module_info in pkgutil.iter_modules(_services_pkg.__path__):
+        importlib.import_module(f"services.{module_info.name}")
+
     from services import get_registry
 
     for entry in get_registry():

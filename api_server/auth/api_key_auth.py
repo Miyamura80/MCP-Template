@@ -54,6 +54,8 @@ def create_api_key(
 
 def validate_api_key(session: Session, raw_key: str) -> APIKey | None:
     """Validate a raw API key and return the DB row (or ``None``)."""
+    if not raw_key.startswith(PREFIX):
+        return None
     key_hash = _hash_key(raw_key)
     row = session.query(APIKey).filter_by(key_hash=key_hash).first()
     if row is None:
