@@ -75,7 +75,14 @@ def _identity(request: Request) -> str:
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         return "bearer:" + hashlib.sha256(token.encode()).hexdigest()[:16]
-    return "ip:" + (request.client.host if request.client else "unknown")
+    # Prefer real client IP from proxy headers (Railway, Render, etc.)
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    real_ip = (
+        forwarded
+        or request.headers.get("X-Real-IP", "")
+        or (request.client.host if request.client else "unknown")
+    )
+    return "ip:" + real_ip
 
 
 def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:

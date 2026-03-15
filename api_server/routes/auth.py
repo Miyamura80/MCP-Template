@@ -45,8 +45,10 @@ def create_key(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Prevent privilege escalation: new key's scopes must be a subset of
-    # the caller's own scopes (e.g., a "standard" user cannot mint "admin" keys).
-    if scopes is not None and not check_scopes(scopes, user.scopes):
+    # the caller's own scopes. Treat legacy keys (scopes=None) as ["*"]
+    # so they can create any scoped key within their implicit full access.
+    caller_scopes = user.scopes if user.scopes is not None else ["*"]
+    if scopes is not None and not check_scopes(scopes, caller_scopes):
         raise HTTPException(
             status_code=403,
             detail="Cannot create a key with scopes that exceed your own.",
