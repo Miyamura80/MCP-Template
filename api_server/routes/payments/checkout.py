@@ -69,6 +69,7 @@ def create_checkout(
         success_url=f"{frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{frontend_url}/billing/cancel",
         metadata={"user_id": user.user_id},
+        idempotency_key=f"checkout-{user.user_id}-{price_id}",
     )
 
     return {"checkout_url": checkout_session.url, "session_id": checkout_session.id}
