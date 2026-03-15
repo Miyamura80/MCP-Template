@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
 from api_server.auth.api_key_auth import create_api_key, revoke_api_key
-from api_server.auth.scopes import SCOPE_TEMPLATES, validate_scopes
+from api_server.auth.scopes import SCOPE_TEMPLATES, check_scopes, validate_scopes
 from db.engine import get_db_session
 from db.models.api_keys import APIKey
 from models.auth import APIKeyInfo, CreateAPIKeyRequest, CreateAPIKeyResponse
@@ -43,6 +43,14 @@ def create_key(
             scopes = validate_scopes(body.scopes)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Prevent privilege escalation: new key's scopes must be a subset of
+    # the caller's own scopes (e.g., a "standard" user cannot mint "admin" keys).
+    if scopes is not None and not check_scopes(scopes, user.scopes):
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot create a key with scopes that exceed your own.",
+        )
 
     raw_key, row = create_api_key(
         session,

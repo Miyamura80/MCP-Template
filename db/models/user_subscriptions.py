@@ -47,6 +47,9 @@ class UserSubscription(Base):
         String(255), nullable=True
     )
 
+    # Webhook deduplication
+    last_stripe_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Payment
     payment_status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=PaymentStatus.CURRENT.value

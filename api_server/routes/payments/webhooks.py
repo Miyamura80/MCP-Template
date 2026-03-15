@@ -61,17 +61,18 @@ async def stripe_webhook(request: Request):
         log.warning("Webhook signature verification failed: {}", exc)
         raise HTTPException(status_code=400, detail="Invalid signature") from exc
 
+    event_id = event["id"]
     event_type = event["type"]
     data = event["data"]["object"]
 
     if event_type == "customer.subscription.created":
-        _handle_subscription_created(data)
+        _handle_subscription_created(data, event_id)
     elif event_type == "customer.subscription.deleted":
-        _handle_subscription_deleted(data)
+        _handle_subscription_deleted(data, event_id)
     elif event_type == "invoice.payment_failed":
-        _handle_payment_failed(data)
+        _handle_payment_failed(data, event_id)
     elif event_type == "invoice.payment_succeeded":
-        _handle_payment_succeeded(data)
+        _handle_payment_succeeded(data, event_id)
     else:
         log.debug("Unhandled webhook event: {}", event_type)
 
@@ -88,7 +89,12 @@ def _find_subscription_by_customer(
     )
 
 
-def _handle_subscription_created(data: dict) -> None:
+def _is_duplicate_event(sub: UserSubscription, event_id: str) -> bool:
+    """Check if this Stripe event was already processed (at-least-once dedup)."""
+    return sub.last_stripe_event_id == event_id
+
+
+def _handle_subscription_created(data: dict, event_id: str) -> None:
     customer_id = data.get("customer")
     if not customer_id:
         return
@@ -102,10 +108,15 @@ def _handle_subscription_created(data: dict) -> None:
             )
             return
 
+        if _is_duplicate_event(sub, event_id):
+            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+            return
+
         sub.stripe_subscription_id = data.get("id")
         sub.subscription_tier = SubscriptionTier.PLUS.value
         sub.subscription_status = SubscriptionStatus.ACTIVE.value
         sub.is_active = True
+        sub.last_stripe_event_id = event_id
 
         current_period = data.get("current_period_start")
         if current_period:
@@ -118,7 +129,7 @@ def _handle_subscription_created(data: dict) -> None:
         log.info("Subscription created for customer {}", customer_id)
 
 
-def _handle_subscription_deleted(data: dict) -> None:
+def _handle_subscription_deleted(data: dict, event_id: str) -> None:
     customer_id = data.get("customer")
     if not customer_id:
         return
@@ -126,14 +137,19 @@ def _handle_subscription_deleted(data: dict) -> None:
     with use_db_session() as session:
         sub = _find_subscription_by_customer(session, customer_id)
         if sub:
+            if _is_duplicate_event(sub, event_id):
+                log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+                return
+
             sub.subscription_tier = SubscriptionTier.FREE.value
             sub.subscription_status = SubscriptionStatus.CANCELED.value
             sub.stripe_subscription_id = None
+            sub.last_stripe_event_id = event_id
             session.commit()
             log.info("Subscription canceled for customer {}", customer_id)
 
 
-def _handle_payment_failed(data: dict) -> None:
+def _handle_payment_failed(data: dict, event_id: str) -> None:
     customer_id = data.get("customer")
     if not customer_id:
         return
@@ -141,6 +157,10 @@ def _handle_payment_failed(data: dict) -> None:
     with use_db_session() as session:
         sub = _find_subscription_by_customer(session, customer_id)
         if sub:
+            if _is_duplicate_event(sub, event_id):
+                log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+                return
+
             sub.payment_status = PaymentStatus.FAILED.value
             sub.payment_failure_count += 1
             sub.last_payment_error = (
@@ -148,6 +168,7 @@ def _handle_payment_failed(data: dict) -> None:
                 if isinstance(data.get("last_payment_error"), dict)
                 else str(data.get("last_payment_error", ""))
             )
+            sub.last_stripe_event_id = event_id
             session.commit()
             log.warning(
                 "Payment failed for customer {} (attempt {})",
@@ -156,7 +177,7 @@ def _handle_payment_failed(data: dict) -> None:
             )
 
 
-def _handle_payment_succeeded(data: dict) -> None:
+def _handle_payment_succeeded(data: dict, event_id: str) -> None:
     customer_id = data.get("customer")
     if not customer_id:
         return
@@ -164,9 +185,14 @@ def _handle_payment_succeeded(data: dict) -> None:
     with use_db_session() as session:
         sub = _find_subscription_by_customer(session, customer_id)
         if sub:
+            if _is_duplicate_event(sub, event_id):
+                log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+                return
+
             sub.payment_status = PaymentStatus.CURRENT.value
             sub.payment_failure_count = 0
             sub.last_payment_error = None
+            sub.last_stripe_event_id = event_id
             # Reset usage for new billing period
             sub.current_period_usage = 0
             session.commit()

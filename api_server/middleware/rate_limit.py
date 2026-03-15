@@ -1,5 +1,6 @@
 """Sliding-window rate limiting middleware using the ``limits`` library."""
 
+import asyncio
 import hashlib
 import math
 import os
@@ -20,6 +21,10 @@ from starlette.responses import JSONResponse
 
 # Paths that bypass rate limiting
 _EXEMPT_PATHS = frozenset({"/health", "/api/v1/billing/webhook/stripe"})
+
+# TTL cache for API key hash → subscription tier (avoids DB hit on every request)
+_tier_cache: dict[str, tuple[str, float]] = {}
+_TIER_CACHE_TTL = 60  # seconds
 
 
 def _build_storage() -> Storage:
@@ -72,12 +77,52 @@ def _identity(request: Request) -> str:
     return "ip:" + (request.client.host if request.client else "unknown")
 
 
-def _resolve_tier(request: Request) -> str:
-    """Read the subscription tier from request.state (set by auth dependency).
+def _lookup_tier_sync(key_hash: str) -> str:
+    """Look up subscription tier for an API key hash (synchronous, cached).
 
-    Falls back to "default" if not populated (unauthenticated requests).
+    Uses a TTL cache to avoid a DB round-trip on every request.
     """
-    return getattr(request.state, "subscription_tier", "default")
+    cached = _tier_cache.get(key_hash)
+    if cached and cached[1] > time.time():
+        return cached[0]
+
+    tier = "default"
+    try:
+        from db.engine import use_db_session
+        from db.models.api_keys import APIKey
+        from db.models.user_subscriptions import UserSubscription
+
+        with use_db_session() as session:
+            row = (
+                session.query(APIKey.user_id)
+                .filter_by(key_hash=key_hash, revoked=False)
+                .first()
+            )
+            if row:
+                sub = (
+                    session.query(UserSubscription.subscription_tier)
+                    .filter_by(user_id=row.user_id)
+                    .first()
+                )
+                tier = sub.subscription_tier if sub else "default"
+    except Exception:
+        pass
+
+    _tier_cache[key_hash] = (tier, time.time() + _TIER_CACHE_TTL)
+    return tier
+
+
+async def _resolve_tier(request: Request) -> str:
+    """Resolve subscription tier from the API key in the request.
+
+    Performs a lightweight cached DB lookup so middleware doesn't depend on
+    the auth dependency (which runs later, inside call_next).
+    """
+    api_key = request.headers.get("X-API-KEY", "")
+    if api_key:
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        return await asyncio.to_thread(_lookup_tier_sync, key_hash)
+    return "default"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -114,7 +159,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         identity = _identity(request)
-        tier = _resolve_tier(request)
+        tier = await _resolve_tier(request)
         limits_cfg = _get_tier_limits(tier)
 
         # Build rate limit items for each window
