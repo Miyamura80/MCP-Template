@@ -16,11 +16,11 @@ from common import global_config
 
 app = FastAPI(title="mycli-api", version="0.1.0")
 
-# --- Middleware (outermost first) -----------------------------------------
+# --- Middleware (last-added = outermost in Starlette) ---------------------
 
-app.add_middleware(ErrorHandlerMiddleware)  # type: ignore[arg-type]
-app.add_middleware(RateLimitMiddleware)  # type: ignore[arg-type]
 app.add_middleware(RequestIdMiddleware)  # type: ignore[arg-type]
+app.add_middleware(RateLimitMiddleware)  # type: ignore[arg-type]
+app.add_middleware(ErrorHandlerMiddleware)  # type: ignore[arg-type]
 
 app.add_middleware(
     SessionMiddleware,  # type: ignore[arg-type]
