@@ -84,8 +84,10 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
         try:
             response = await call_next(request)
-            # Convert non-2xx FastAPI/Starlette error responses into structured format
-            if response.status_code >= 400:
+            # Convert non-2xx FastAPI/Starlette error responses into structured format.
+            # Only buffer JSON responses to avoid breaking streaming endpoints.
+            content_type = response.headers.get("content-type", "")
+            if response.status_code >= 400 and "application/json" in content_type:
                 # Read the body to check if it's already structured
                 body_bytes = b""
                 async for chunk in response.body_iterator:  # type: ignore[union-attr]

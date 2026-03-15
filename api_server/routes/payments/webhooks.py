@@ -195,7 +195,13 @@ def _handle_payment_succeeded(data: dict, event_id: str) -> None:
             sub.payment_failure_count = 0
             sub.last_payment_error = None
             sub.last_stripe_event_id = event_id
-            # Reset usage for new billing period
+            # Reset usage and advance period boundaries for the new billing cycle
             sub.current_period_usage = 0
+            period_start = data.get("period_start")
+            if period_start:
+                sub.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)
+            period_end = data.get("period_end")
+            if period_end:
+                sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
             session.commit()
             log.info("Payment succeeded for customer {}", customer_id)

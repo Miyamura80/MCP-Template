@@ -25,6 +25,7 @@ _EXEMPT_PATHS = frozenset({"/health", "/api/v1/billing/webhook/stripe"})
 # TTL cache for API key hash → subscription tier (avoids DB hit on every request)
 _tier_cache: dict[str, tuple[str, float]] = {}
 _TIER_CACHE_TTL = 60  # seconds
+_TIER_CACHE_MAX_SIZE = 10_000
 
 
 def _build_storage() -> Storage:
@@ -107,6 +108,16 @@ def _lookup_tier_sync(key_hash: str) -> str:
                 tier = sub.subscription_tier if sub else "default"
     except Exception:
         pass
+
+    # Evict expired entries if cache is at capacity
+    if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
+        now = time.time()
+        expired = [k for k, (_, exp) in _tier_cache.items() if exp <= now]
+        for k in expired:
+            del _tier_cache[k]
+        # If still full after eviction, drop oldest entries
+        if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
+            _tier_cache.clear()
 
     _tier_cache[key_hash] = (tier, time.time() + _TIER_CACHE_TTL)
     return tier
