@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from api_server.routes import auth, health, services
 from common import global_config
 
 app = FastAPI(title="mycli-api", version="0.1.0")
@@ -25,8 +26,6 @@ app.add_middleware(
 )
 
 # --- Routes ---------------------------------------------------------------
-
-from api_server.routes import auth, health, services  # noqa: E402
 
 app.include_router(health.router)
 app.include_router(services.router)

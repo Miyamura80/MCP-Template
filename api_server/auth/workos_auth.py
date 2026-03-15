@@ -5,7 +5,6 @@ Supports a test-mode bypass for local development.
 """
 
 import json
-from datetime import UTC, datetime
 
 import jwt
 from jwt import PyJWKClient
@@ -41,8 +40,8 @@ def verify_workos_token(token: str) -> WorkOSUser | None:
     if not client_id:
         return None
 
-    # Test-mode bypass: token is a JSON blob with sub/email
-    if token.startswith("{"):
+    # Test-mode bypass: only allowed in local/dev environments
+    if token.startswith("{") and global_config.is_local:
         try:
             payload = json.loads(token)
             return WorkOSUser(
@@ -62,10 +61,6 @@ def verify_workos_token(token: str) -> WorkOSUser | None:
             issuer=WORKOS_ISSUERS,
         )
     except jwt.PyJWTError:
-        return None
-
-    exp = payload.get("exp")
-    if exp and datetime.fromtimestamp(exp, tz=UTC) < datetime.now(UTC):
         return None
 
     user = WorkOSUser(user_id=payload["sub"], email=payload.get("email"))

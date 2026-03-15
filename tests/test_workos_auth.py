@@ -20,8 +20,9 @@ def _generate_rsa_keypair():
 class TestWorkOSAuth(TestTemplate):
     @patch("api_server.auth.workos_auth.global_config")
     def test_test_mode_bypass(self, mock_config):
-        """JSON test-mode token should be accepted."""
+        """JSON test-mode token should be accepted in local dev."""
         mock_config.WORKOS_CLIENT_ID = "client_test123"
+        mock_config.is_local = True
         token = json.dumps({"sub": "user-abc", "email": "a@b.com"})
         user = verify_workos_token(token)
         assert user is not None
