@@ -125,6 +125,14 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                         request_id,
                         details={"errors": message},
                     )
+                if isinstance(message, dict):
+                    # Structured detail dict (e.g. 402 quota exceeded)
+                    return _build_error_response(
+                        response.status_code,
+                        message.get("message", "An error occurred"),
+                        request_id,
+                        details={k: v for k, v in message.items() if k != "message"},
+                    )
                 return _build_error_response(
                     response.status_code, str(message), request_id
                 )

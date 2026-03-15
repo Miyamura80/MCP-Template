@@ -161,6 +161,7 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
             sub.subscription_tier = SubscriptionTier.FREE.value
             sub.subscription_status = SubscriptionStatus.CANCELED.value
             sub.stripe_subscription_id = None
+            sub.is_active = False
             session.commit()
             log.info("Subscription canceled for customer {}", customer_id)
         else:
