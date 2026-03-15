@@ -1,3 +1,4 @@
+# Auto-loaded by split YAML loader in global_config.py as "subscription_config" key.
 tier_limits:
   free_tier:
     daily_requests: 100
