@@ -22,7 +22,7 @@ def get_authenticated_user(
     session: Session = Depends(get_db_session),
 ) -> AuthenticatedUser:
     """FastAPI dependency that authenticates via JWT or API key."""
-    # 1. Try Bearer JWT
+    # 1. Try Bearer JWT (fail fast if header present but invalid)
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.removeprefix("Bearer ").strip()
@@ -33,6 +33,7 @@ def get_authenticated_user(
                 email=workos_user.email,
                 auth_method="jwt",
             )
+        raise HTTPException(status_code=401, detail="Invalid Bearer token")
 
     # 2. Try API key (header)
     api_key = request.headers.get("X-API-KEY", "")

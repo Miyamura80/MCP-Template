@@ -29,14 +29,13 @@ def _make_route(entry: ServiceEntry) -> None:
         f"/{entry.name}",
         response_model=output_model,
         summary=entry.description,
+        name=f"svc_{entry.name}",
     )
     def _handler(
         body: input_model,  # type: ignore[valid-type]
         _user: AuthenticatedUser = Depends(get_authenticated_user),
     ):
         return func(body)
-
-    _handler.__name__ = f"svc_{entry.name}"
 
 
 _register_service_routes()

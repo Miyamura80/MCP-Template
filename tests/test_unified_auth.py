@@ -71,6 +71,24 @@ class TestUnifiedAuth(TestTemplate):
         assert resp.json()["method"] == "api_key"
 
     @patch("api_server.auth.workos_auth.global_config")
+    def test_invalid_bearer_fails_fast(self, mock_config):
+        """An invalid Bearer token should 401 immediately, not fall through to API key."""
+        mock_config.WORKOS_CLIENT_ID = "test-client"
+        mock_config.DEV_ENV = "prod"
+        app, sl = _setup_app()
+        session = sl()
+        raw_key, _row = create_api_key(session, user_id="key-user")
+        session.close()
+
+        client = TestClient(app)
+        resp = client.get(
+            "/test-auth",
+            headers={"Authorization": "Bearer bad-token", "X-API-KEY": raw_key},
+        )
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Invalid Bearer token"
+
+    @patch("api_server.auth.workos_auth.global_config")
     def test_no_credentials_returns_401(self, mock_config):
         mock_config.WORKOS_CLIENT_ID = None
         app, _sl = _setup_app()
