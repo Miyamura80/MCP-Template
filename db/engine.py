@@ -4,7 +4,6 @@ The engine is created on first use so that CLI / MCP transports work
 without a database configured.
 """
 
-import contextlib
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -54,10 +53,13 @@ def get_db_session() -> Generator[Session, None, None]:
 @contextmanager
 def use_db_session() -> Generator[Session, None, None]:
     """Context-manager wrapper for non-FastAPI code."""
-    gen = get_db_session()
-    session = next(gen)
+    _init_engine()
+    assert _SessionLocal is not None
+    session = _SessionLocal()
     try:
         yield session
+    except Exception:
+        session.rollback()
+        raise
     finally:
-        with contextlib.suppress(StopIteration):
-            next(gen)
+        session.close()
