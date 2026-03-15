@@ -34,7 +34,7 @@ def create_checkout(
             status_code=409, detail="Active Plus subscription already exists"
         )
 
-    # Find or create Stripe customer
+    # Find or create Stripe customer, persisting the ID to prevent duplicates
     customer_id = sub.stripe_customer_id if sub else None
     if not customer_id:
         customer = stripe.Customer.create(
@@ -44,7 +44,13 @@ def create_checkout(
         customer_id = customer.id
         if sub:
             sub.stripe_customer_id = customer_id
-            session.commit()
+        else:
+            sub = UserSubscription(
+                user_id=user.user_id,
+                stripe_customer_id=customer_id,
+            )
+            session.add(sub)
+        session.commit()
 
     price_id = get_stripe_price_id()
     if not price_id:

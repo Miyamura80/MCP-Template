@@ -1,5 +1,6 @@
 """Health-check endpoint with component status (no auth required)."""
 
+import functools
 import subprocess
 from datetime import UTC, datetime
 
@@ -9,7 +10,7 @@ router = APIRouter(tags=["health"])
 
 
 def _check_database() -> dict:
-    """Check database connectivity."""
+    """Check database connectivity using the app's singleton engine."""
     try:
         from common import global_config
 
@@ -19,7 +20,7 @@ def _check_database() -> dict:
 
         from db.engine import _init_engine
 
-        engine = _init_engine()
+        engine = _init_engine()  # returns cached singleton
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return {"status": "ok"}
@@ -58,8 +59,9 @@ def _check_stripe() -> dict:
         return {"status": "error", "message": type(exc).__name__}
 
 
+@functools.cache
 def _get_git_commit() -> str | None:
-    """Get current git commit hash."""
+    """Get current git commit hash (cached at first call)."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
