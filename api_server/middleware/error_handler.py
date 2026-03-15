@@ -31,11 +31,7 @@ def _error_code(status: int) -> str:
 
 def _is_stripe_error(exc: Exception) -> bool:
     """Check if an exception originates from Stripe."""
-    return (
-        type(exc).__module__.startswith("stripe")
-        if hasattr(type(exc), "__module__")
-        else False
-    )
+    return type(exc).__module__.startswith("stripe")
 
 
 def _build_error_response(

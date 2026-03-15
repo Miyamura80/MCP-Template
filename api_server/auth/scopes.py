@@ -1,6 +1,6 @@
 """API key scope definitions and validation."""
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
 
 from api_server.auth.unified_auth import AuthenticatedUser, get_authenticated_user
 
@@ -65,7 +65,6 @@ def require_scopes(*scopes: str):
     """FastAPI dependency factory that enforces scope requirements."""
 
     def _check(
-        request: Request,
         user: AuthenticatedUser = Depends(get_authenticated_user),
     ) -> AuthenticatedUser:
         if not check_scopes(list(scopes), user.scopes):

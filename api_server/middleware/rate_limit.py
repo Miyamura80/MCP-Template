@@ -1,5 +1,6 @@
 """Sliding-window rate limiting middleware using the ``limits`` library."""
 
+import asyncio
 import hashlib
 import math
 import time
@@ -82,24 +83,15 @@ def _resolve_tier(request: Request) -> str:
         return "default"
     try:
         from api_server.auth.api_key_auth import validate_api_key
-        from db.engine import _init_engine
+        from db.engine import use_db_session
+        from db.models.user_subscriptions import UserSubscription
 
-        _init_engine()
-        from db.engine import _SessionLocal
-
-        if not _SessionLocal:
-            return "default"
-        session = _SessionLocal()
-        try:
+        with use_db_session() as session:
             row = validate_api_key(session, api_key)
             if not row:
                 return "default"
-            from db.models.user_subscriptions import UserSubscription
-
             sub = session.query(UserSubscription).filter_by(user_id=row.user_id).first()
             return sub.subscription_tier if sub else "default"
-        finally:
-            session.close()
     except Exception:
         return "default"
 
@@ -139,7 +131,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if identity == "ip:testclient":
             return await call_next(request)
 
-        tier = _resolve_tier(request)
+        tier = await asyncio.to_thread(_resolve_tier, request)
         limits_cfg = _get_tier_limits(tier)
 
         # Build rate limit items for each window

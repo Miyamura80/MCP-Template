@@ -96,11 +96,11 @@ def _handle_subscription_created(data: dict) -> None:
     with use_db_session() as session:
         sub = _find_subscription_by_customer(session, customer_id)
         if not sub:
-            sub = UserSubscription(
-                user_id=data.get("metadata", {}).get("user_id", customer_id),
-                stripe_customer_id=customer_id,
+            log.error(
+                "Received subscription.created for unknown customer {}; skipping",
+                customer_id,
             )
-            session.add(sub)
+            return
 
         sub.stripe_subscription_id = data.get("id")
         sub.subscription_tier = SubscriptionTier.PLUS.value
