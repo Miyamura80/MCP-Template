@@ -78,61 +78,91 @@ def _identity(request: Request) -> str:
     return "ip:" + (request.client.host if request.client else "unknown")
 
 
-def _lookup_tier_sync(key_hash: str) -> str:
-    """Look up subscription tier for an API key hash (synchronous, cached).
+def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
+    """Look up subscription tier (synchronous, cached).
 
-    Uses a TTL cache to avoid a DB round-trip on every request.
+    Accepts either a cache_key derived from an API key hash or a user_id
+    from a decoded JWT token. Uses a TTL cache to avoid a DB round-trip
+    on every request.
     """
-    cached = _tier_cache.get(key_hash)
+    cached = _tier_cache.get(cache_key)
     if cached and cached[1] > time.time():
         return cached[0]
 
     tier = "default"
     try:
         from db.engine import use_db_session
-        from db.models.api_keys import APIKey
         from db.models.user_subscriptions import UserSubscription
 
         with use_db_session() as session:
-            row = (
-                session.query(APIKey.user_id)
-                .filter_by(key_hash=key_hash, revoked=False)
-                .first()
-            )
-            if row:
+            resolved_user_id = user_id
+            if resolved_user_id is None:
+                # cache_key is an API key hash - look up the user
+                from db.models.api_keys import APIKey
+
+                row = (
+                    session.query(APIKey.user_id)
+                    .filter_by(key_hash=cache_key, revoked=False)
+                    .first()
+                )
+                resolved_user_id = row.user_id if row else None
+
+            if resolved_user_id:
                 sub = (
                     session.query(UserSubscription.subscription_tier)
-                    .filter_by(user_id=row.user_id)
+                    .filter_by(user_id=resolved_user_id)
                     .first()
                 )
                 tier = sub.subscription_tier if sub else "default"
     except Exception:
         pass
 
-    # Evict expired entries if cache is at capacity
+    # Evict entries if cache is at capacity
     if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
         now = time.time()
+        # First pass: remove expired entries
         expired = [k for k, (_, exp) in _tier_cache.items() if exp <= now]
         for k in expired:
             del _tier_cache[k]
-        # If still full after eviction, drop oldest entries
+        # If still full, evict oldest 10% by expiry to avoid thundering herd
         if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
-            _tier_cache.clear()
+            by_expiry = sorted(_tier_cache.items(), key=lambda x: x[1][1])
+            evict_count = max(1, len(by_expiry) // 10)
+            for k, _ in by_expiry[:evict_count]:
+                del _tier_cache[k]
 
-    _tier_cache[key_hash] = (tier, time.time() + _TIER_CACHE_TTL)
+    _tier_cache[cache_key] = (tier, time.time() + _TIER_CACHE_TTL)
     return tier
 
 
 async def _resolve_tier(request: Request) -> str:
-    """Resolve subscription tier from the API key in the request.
+    """Resolve subscription tier from the request credentials.
 
     Performs a lightweight cached DB lookup so middleware doesn't depend on
     the auth dependency (which runs later, inside call_next).
+    Supports both API key and JWT Bearer token authentication.
     """
     api_key = request.headers.get("X-API-KEY", "")
     if api_key:
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()
         return await asyncio.to_thread(_lookup_tier_sync, key_hash)
+
+    # For JWT Bearer tokens, decode the user_id and look up tier
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from api_server.auth.workos_auth import verify_workos_token
+
+            token = auth_header.removeprefix("Bearer ").strip()
+            workos_user = verify_workos_token(token)
+            if workos_user:
+                cache_key = f"jwt:{workos_user.user_id}"
+                return await asyncio.to_thread(
+                    _lookup_tier_sync, cache_key, user_id=workos_user.user_id
+                )
+        except Exception:
+            pass
+
     return "default"
 
 
