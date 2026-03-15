@@ -208,7 +208,10 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def _require_secret_in_prod(self) -> "Config":
-        if not self.is_local and self.SESSION_SECRET_KEY == "change-me-in-production":
+        if (
+            self.DEV_ENV == "prod"
+            and self.SESSION_SECRET_KEY == "change-me-in-production"
+        ):
             raise ValueError(
                 "SESSION_SECRET_KEY must be set to a strong random value in production"
             )
