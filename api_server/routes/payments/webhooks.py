@@ -161,6 +161,8 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
             sub.stripe_subscription_id = None
             session.commit()
             log.info("Subscription canceled for customer {}", customer_id)
+        else:
+            session.commit()
 
 
 def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
@@ -221,3 +223,5 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
                 sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
             session.commit()
             log.info("Payment succeeded for customer {}", customer_id)
+        else:
+            session.commit()
