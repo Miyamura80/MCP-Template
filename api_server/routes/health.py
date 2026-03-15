@@ -1,6 +1,7 @@
 """Health-check endpoint with component status (no auth required)."""
 
 import functools
+import os
 import subprocess
 from datetime import UTC, datetime
 
@@ -63,7 +64,15 @@ def _check_stripe() -> dict:
 
 @functools.cache
 def _get_git_commit() -> str | None:
-    """Get current git commit hash (cached at first call)."""
+    """Get current git commit hash (cached at first call).
+
+    Prefers build-time env vars (GIT_SHA, RENDER_GIT_COMMIT) for
+    containerized deployments where git may not be available.
+    """
+    for var in ("GIT_SHA", "RENDER_GIT_COMMIT"):
+        val = os.getenv(var)
+        if val:
+            return val[:7]
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
