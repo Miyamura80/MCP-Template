@@ -1,9 +1,12 @@
 """Auto-register every service as an authenticated ``POST /api/v1/services/{name}``."""
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
 from api_server.auth.scopes import require_scopes
+from api_server.billing.limits import ensure_daily_limit
+from db.engine import get_db_session
 from services import ServiceEntry
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
@@ -40,7 +43,9 @@ def _make_route(entry: ServiceEntry) -> None:
     def _handler(
         body: input_model,  # type: ignore[valid-type]
         _user: AuthenticatedUser = Depends(require_scopes("services:execute")),
+        _session: Session = Depends(get_db_session),
     ):
+        ensure_daily_limit(_session, _user.user_id)
         return func(body)
 
 

@@ -12,6 +12,7 @@ class SubscriptionStatus(enum.StrEnum):
     ACTIVE = "active"
     TRIALING = "trialing"
     PAST_DUE = "past_due"
+    CANCELING = "canceling"
     CANCELED = "canceled"
     INCOMPLETE = "incomplete"
 

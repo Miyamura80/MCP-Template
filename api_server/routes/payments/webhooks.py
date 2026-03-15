@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger as log
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from api_server.billing.stripe_config import ensure_stripe, get_webhook_secret
@@ -172,23 +173,27 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
 
-        sub = _find_subscription_by_customer(session, customer_id)
-        if sub:
-            sub.payment_status = PaymentStatus.FAILED.value
-            sub.payment_failure_count += 1
-            raw_err = data.get("last_payment_error")
-            if isinstance(raw_err, dict):
-                sub.last_payment_error = raw_err.get("message")
-            elif raw_err is not None:
-                sub.last_payment_error = str(raw_err)
-            else:
-                sub.last_payment_error = None
-            session.commit()
-            log.warning(
-                "Payment failed for customer {} (attempt {})",
-                customer_id,
-                sub.payment_failure_count,
+        raw_err = data.get("last_payment_error")
+        if isinstance(raw_err, dict):
+            error_msg = raw_err.get("message")
+        elif raw_err is not None:
+            error_msg = str(raw_err)
+        else:
+            error_msg = None
+
+        result = session.execute(
+            update(UserSubscription)
+            .where(UserSubscription.stripe_customer_id == customer_id)
+            .values(
+                payment_status=PaymentStatus.FAILED.value,
+                payment_failure_count=UserSubscription.payment_failure_count + 1,
+                last_payment_error=error_msg,
+                updated_at=datetime.now(UTC),
             )
+        )
+        session.commit()
+        if result.rowcount:
+            log.warning("Payment failed for customer {}", customer_id)
 
 
 def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> None:

@@ -94,7 +94,9 @@ def cancel_subscription(
         cancel_at_period_end=True,
     )
 
-    sub.subscription_status = SubscriptionStatus.CANCELED.value
+    # Mark as CANCELING - subscription stays active until period end.
+    # The customer.subscription.deleted webhook sets CANCELED when it expires.
+    sub.subscription_status = SubscriptionStatus.CANCELING.value
     session.commit()
 
     return {"status": "cancel_scheduled"}
