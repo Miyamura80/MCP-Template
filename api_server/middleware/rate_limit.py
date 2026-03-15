@@ -1,8 +1,8 @@
 """Sliding-window rate limiting middleware using the ``limits`` library."""
 
-import asyncio
 import hashlib
 import math
+import os
 import time
 
 from fastapi import Request, Response
@@ -73,27 +73,11 @@ def _identity(request: Request) -> str:
 
 
 def _resolve_tier(request: Request) -> str:
-    """Resolve the user's subscription tier for rate limiting.
+    """Read the subscription tier from request.state (set by auth dependency).
 
-    Attempts a lightweight DB lookup via the API key header.
-    Falls back to "default" if no key or no subscription found.
+    Falls back to "default" if not populated (unauthenticated requests).
     """
-    api_key = request.headers.get("X-API-KEY", "")
-    if not api_key:
-        return "default"
-    try:
-        from api_server.auth.api_key_auth import validate_api_key
-        from db.engine import use_db_session
-        from db.models.user_subscriptions import UserSubscription
-
-        with use_db_session() as session:
-            row = validate_api_key(session, api_key)
-            if not row:
-                return "default"
-            sub = session.query(UserSubscription).filter_by(user_id=row.user_id).first()
-            return sub.subscription_tier if sub else "default"
-    except Exception:
-        return "default"
+    return getattr(request.state, "subscription_tier", "default")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -125,13 +109,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 
-        identity = _identity(request)
-
-        # Skip rate limiting for test clients (Starlette TestClient)
-        if identity == "ip:testclient":
+        # Skip rate limiting in test mode
+        if os.getenv("TESTING") == "1":
             return await call_next(request)
 
-        tier = await asyncio.to_thread(_resolve_tier, request)
+        identity = _identity(request)
+        tier = _resolve_tier(request)
         limits_cfg = _get_tier_limits(tier)
 
         # Build rate limit items for each window

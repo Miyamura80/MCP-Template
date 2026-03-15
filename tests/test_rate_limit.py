@@ -1,5 +1,6 @@
 """Tests for rate limiting middleware."""
 
+import os
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -26,6 +27,14 @@ def _make_app(tier_limits=None):
 
 
 class TestRateLimit(TestTemplate):
+    def setup_method(self):
+        """Disable TESTING bypass so rate limiting is exercised."""
+        self._orig_testing = os.environ.pop("TESTING", None)
+
+    def teardown_method(self):
+        if self._orig_testing is not None:
+            os.environ["TESTING"] = self._orig_testing
+
     @patch("api_server.middleware.rate_limit._get_tier_limits")
     def test_burst_triggers_429(self, mock_limits):
         """Exceeding per-second burst limit should return 429."""

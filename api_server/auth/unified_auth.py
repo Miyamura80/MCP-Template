@@ -34,6 +34,7 @@ def get_authenticated_user(
                 user_id=workos_user.user_id,
                 email=workos_user.email,
                 auth_method="jwt",
+                scopes=["*"],  # JWT users get full access explicitly
             )
         # Only fail fast if WorkOS is actually configured; otherwise
         # the Bearer header may be irrelevant and API key should be tried.
@@ -45,6 +46,13 @@ def get_authenticated_user(
     if api_key:
         row = validate_api_key(session, api_key)
         if row:
+            # Resolve subscription tier for rate limiting middleware
+            from db.models.user_subscriptions import UserSubscription
+
+            sub = session.query(UserSubscription).filter_by(user_id=row.user_id).first()
+            request.state.subscription_tier = (
+                sub.subscription_tier if sub else "default"
+            )
             return AuthenticatedUser(
                 user_id=row.user_id,
                 auth_method="api_key",

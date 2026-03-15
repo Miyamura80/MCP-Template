@@ -91,6 +91,7 @@ def cancel_subscription(
 
     stripe.Subscription.cancel(sub.stripe_subscription_id)
 
+    sub.stripe_subscription_id = None
     sub.subscription_status = SubscriptionStatus.CANCELED.value
     sub.subscription_tier = SubscriptionTier.FREE.value
     sub.is_active = True  # Still active on free tier
