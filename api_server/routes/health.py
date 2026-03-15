@@ -24,7 +24,7 @@ def _check_database() -> dict:
             conn.execute(text("SELECT 1"))
         return {"status": "ok"}
     except Exception as exc:
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": type(exc).__name__}
 
 
 def _check_redis() -> dict:
@@ -41,7 +41,7 @@ def _check_redis() -> dict:
         r.ping()
         return {"status": "ok"}
     except Exception as exc:
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": type(exc).__name__}
 
 
 def _check_stripe() -> dict:
@@ -55,7 +55,7 @@ def _check_stripe() -> dict:
         )
         return {"status": "ok" if has_key else "not_configured"}
     except Exception as exc:
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": type(exc).__name__}
 
 
 def _get_git_commit() -> str | None:
