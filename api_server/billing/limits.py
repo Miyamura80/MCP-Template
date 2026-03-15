@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from db.models.subscription_types import SubscriptionTier
@@ -24,6 +25,9 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
 
     Creates a free-tier subscription row if none exists.
     Raises HTTP 402 if the daily quota is exceeded.
+
+    Uses an atomic UPDATE...WHERE to prevent race conditions under
+    concurrent load.
     """
     from common import global_config
 
@@ -52,7 +56,22 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
     tier_cfg = cfg.tier_limits.get(tier_key)
     daily_limit = tier_cfg.daily_requests if tier_cfg else 100
 
-    if sub.current_period_usage >= daily_limit:
+    # Atomic increment: only succeeds if usage is still under the limit.
+    # This prevents race conditions where concurrent requests could all
+    # pass a non-atomic check before any commits the increment.
+    result = session.execute(
+        update(UserSubscription)
+        .where(
+            UserSubscription.user_id == user_id,
+            UserSubscription.current_period_usage < daily_limit,
+        )
+        .values(current_period_usage=UserSubscription.current_period_usage + 1)
+    )
+    session.commit()
+
+    if result.rowcount == 0:
+        # Re-read to get accurate current usage for error detail
+        session.refresh(sub)
         raise HTTPException(
             status_code=402,
             detail={
@@ -64,10 +83,8 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
             },
         )
 
-    # Increment usage
-    sub.current_period_usage += 1
-    session.commit()
-
+    # Re-read to get the updated value
+    session.refresh(sub)
     new_remaining = max(0, daily_limit - sub.current_period_usage)
     return LimitStatus(
         allowed=True,

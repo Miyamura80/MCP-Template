@@ -28,8 +28,13 @@ def _try_construct_event(payload: bytes, sig_header: str):
     try:
         return stripe.Webhook.construct_event(payload, sig_header, secret)
     except stripe.SignatureVerificationError:
-        # Try the other secret (test vs prod)
+        # Only try fallback secret in non-production environments.
+        # In production, accepting a test-signed webhook would be a
+        # security risk (test-mode dashboard access could inject events).
         from common import global_config
+
+        if global_config.DEV_ENV == "prod":
+            raise
 
         fallback = (
             global_config.STRIPE_TEST_WEBHOOK_SECRET
