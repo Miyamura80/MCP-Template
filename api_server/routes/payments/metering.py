@@ -29,11 +29,16 @@ def report_usage(
     if not sub:
         raise HTTPException(status_code=404, detail="No subscription found")
 
+    from datetime import UTC, datetime
+
     # Atomic increment to prevent lost updates under concurrent load
     session.execute(
         update(UserSubscription)
         .where(UserSubscription.user_id == user.user_id)
-        .values(current_period_usage=UserSubscription.current_period_usage + 1)
+        .values(
+            current_period_usage=UserSubscription.current_period_usage + 1,
+            updated_at=datetime.now(UTC),
+        )
     )
     session.commit()
     session.refresh(sub)

@@ -165,11 +165,13 @@ def _handle_payment_failed(data: dict, event_id: str) -> None:
 
             sub.payment_status = PaymentStatus.FAILED.value
             sub.payment_failure_count += 1
-            sub.last_payment_error = (
-                data.get("last_payment_error", {}).get("message")
-                if isinstance(data.get("last_payment_error"), dict)
-                else str(data.get("last_payment_error", ""))
-            )
+            raw_err = data.get("last_payment_error")
+            if isinstance(raw_err, dict):
+                sub.last_payment_error = raw_err.get("message")
+            elif raw_err is not None:
+                sub.last_payment_error = str(raw_err)
+            else:
+                sub.last_payment_error = None
             sub.last_stripe_event_id = event_id
             session.commit()
             log.warning(

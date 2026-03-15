@@ -54,6 +54,22 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
     tier_cfg = cfg.tier_limits.get(tier_key)
     daily_limit = tier_cfg.daily_requests if tier_cfg else 100
 
+    # Initialise current_period_start if missing (e.g., checkout-created rows)
+    if sub.current_period_start is None:
+        session.execute(
+            update(UserSubscription)
+            .where(
+                UserSubscription.user_id == user_id,
+                UserSubscription.current_period_start.is_(None),
+            )
+            .values(
+                current_period_start=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+        session.refresh(sub)
+
     # Atomic day-boundary reset: merge reset + first increment into one
     # statement so concurrent requests can't clobber each other's counts.
     if sub.current_period_start:
@@ -69,6 +85,7 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
                 .values(
                     current_period_usage=1,
                     current_period_start=now,
+                    updated_at=now,
                 )
             )
             session.commit()
@@ -91,7 +108,10 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
             UserSubscription.user_id == user_id,
             UserSubscription.current_period_usage < daily_limit,
         )
-        .values(current_period_usage=UserSubscription.current_period_usage + 1)
+        .values(
+            current_period_usage=UserSubscription.current_period_usage + 1,
+            updated_at=datetime.now(UTC),
+        )
     )
     session.commit()
 
