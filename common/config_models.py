@@ -113,6 +113,14 @@ class CliConfig(BaseModel):
     secondary_color: str = "green"
 
 
+class ServerConfig(BaseModel):
+    """API server configuration."""
+
+    host: str = "0.0.0.0"
+    port: int = 8080
+    allowed_origins: list[str] = ["http://localhost:3000"]
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 

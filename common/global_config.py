@@ -7,7 +7,7 @@ from typing import Any
 import yaml
 from dotenv import dotenv_values, load_dotenv
 from loguru import logger
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -22,6 +22,7 @@ from .config_models import (
     FeaturesConfig,
     LlmConfig,
     LoggingConfig,
+    ServerConfig,
     TelemetryConfig,
 )
 
@@ -179,6 +180,7 @@ class Config(BaseSettings):
     features: FeaturesConfig = Field(default_factory=lambda: FeaturesConfig())
     telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig())
     cli: CliConfig = Field(default_factory=lambda: CliConfig())
+    server: ServerConfig = Field(default_factory=lambda: ServerConfig())
 
     # Environment variables
     DEV_ENV: str
@@ -187,6 +189,12 @@ class Config(BaseSettings):
     GROQ_API_KEY: str | None = None
     PERPLEXITY_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
+
+    # Database & auth secrets
+    BACKEND_DB_URI: str | None = None
+    WORKOS_CLIENT_ID: str | None = None
+    WORKOS_API_KEY: str | None = None
+    SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(
@@ -197,6 +205,17 @@ class Config(BaseSettings):
             "🖥️  local" if os.getenv("GITHUB_ACTIONS") != "true" else "☁️  CI"
         )
     )
+
+    @model_validator(mode="after")
+    def _require_secret_in_prod(self) -> "Config":
+        if (
+            self.DEV_ENV == "prod"
+            and self.SESSION_SECRET_KEY == "change-me-in-production"
+        ):
+            raise ValueError(
+                "SESSION_SECRET_KEY must be set to a strong random value in production"
+            )
+        return self
 
     @classmethod
     def settings_customise_sources(
