@@ -1,0 +1,47 @@
+"""Unified authentication - tries Bearer JWT first, then API key, then 401."""
+
+from dataclasses import dataclass
+
+from fastapi import Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+
+from api_server.auth.api_key_auth import validate_api_key
+from api_server.auth.workos_auth import verify_workos_token
+from db.engine import get_db_session
+
+
+@dataclass
+class AuthenticatedUser:
+    user_id: str
+    email: str | None = None
+    auth_method: str = "jwt"  # "jwt" | "api_key"
+
+
+def get_authenticated_user(
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> AuthenticatedUser:
+    """FastAPI dependency that authenticates via JWT or API key."""
+    # 1. Try Bearer JWT
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ").strip()
+        workos_user = verify_workos_token(token)
+        if workos_user:
+            return AuthenticatedUser(
+                user_id=workos_user.user_id,
+                email=workos_user.email,
+                auth_method="jwt",
+            )
+
+    # 2. Try API key (header)
+    api_key = request.headers.get("X-API-KEY", "")
+    if api_key:
+        row = validate_api_key(session, api_key)
+        if row:
+            return AuthenticatedUser(
+                user_id=row.user_id,
+                auth_method="api_key",
+            )
+
+    raise HTTPException(status_code=401, detail="Authentication required")

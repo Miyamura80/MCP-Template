@@ -22,6 +22,7 @@ from .config_models import (
     FeaturesConfig,
     LlmConfig,
     LoggingConfig,
+    ServerConfig,
     TelemetryConfig,
 )
 
@@ -179,6 +180,7 @@ class Config(BaseSettings):
     features: FeaturesConfig = Field(default_factory=lambda: FeaturesConfig())
     telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig())
     cli: CliConfig = Field(default_factory=lambda: CliConfig())
+    server: ServerConfig = Field(default_factory=lambda: ServerConfig())
 
     # Environment variables
     DEV_ENV: str
@@ -187,6 +189,12 @@ class Config(BaseSettings):
     GROQ_API_KEY: str | None = None
     PERPLEXITY_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
+
+    # Database & auth secrets
+    BACKEND_DB_URI: str | None = None
+    WORKOS_CLIENT_ID: str | None = None
+    WORKOS_API_KEY: str | None = None
+    SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(

@@ -9,6 +9,8 @@ root_packages =
     services
     models
     mcp_server
+    db
+    api_server
 
 [importlinter:contract:common_no_upper_layers]
 name = Common does not import higher layers
@@ -58,6 +60,7 @@ forbidden_modules =
     init
     commands
     mcp_server
+    api_server
 
 [importlinter:contract:models_are_pure]
 name = Models do not import app layers
@@ -70,8 +73,34 @@ forbidden_modules =
     commands
     services
     mcp_server
+    api_server
+    db
     src
     utils
+
+[importlinter:contract:db_is_low_level]
+name = DB does not import higher layers
+type = forbidden
+source_modules =
+    db
+forbidden_modules =
+    services
+    commands
+    mcp_server
+    api_server
+    tests
+    init
+
+[importlinter:contract:api_server_no_cli_mcp]
+name = API server does not import CLI or MCP layers
+type = forbidden
+source_modules =
+    api_server
+forbidden_modules =
+    commands
+    mcp_server
+    tests
+    init
 
 [importlinter:contract:no_imports_from_tests]
 name = Tests are not imported by app code
@@ -85,6 +114,8 @@ source_modules =
     services
     models
     mcp_server
+    db
+    api_server
 forbidden_modules =
     tests
 

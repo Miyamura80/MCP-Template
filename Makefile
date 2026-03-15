@@ -109,6 +109,10 @@ docs: ## Run docs with bun
 	@cd docs && bun run dev
 	@echo "$(GREEN)✅ Docs run completed.$(RESET)"
 
+api: check_uv ## Run authenticated API server
+	@echo "$(GREEN)🌐 Starting API server...$(RESET)"
+	@$(PYTHON) mycli-api
+
 mcp: check_uv ## Run MCP server locally (stdio)
 	@$(PYTHON) mycli-mcp
 
@@ -259,6 +263,21 @@ check_deps: install_tools ## Check for unused dependencies
 
 ci: ruff vulture import_lint ty docs_lint lint_links check_deps ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, lint_links)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
+
+########################################################
+# Database
+########################################################
+
+### Database
+db_migrate: check_uv ## Run Alembic migrations (upgrade head)
+	@echo "$(YELLOW)🗄️  Running database migrations...$(RESET)"
+	@$(PYTHON) -m alembic upgrade head
+	@echo "$(GREEN)✅ Migrations applied.$(RESET)"
+
+db_revision: check_uv ## Create a new Alembic migration revision (ARGS="message")
+	@echo "$(YELLOW)🗄️  Creating migration revision...$(RESET)"
+	@$(PYTHON) -m alembic revision --autogenerate -m "$(ARGS)"
+	@echo "$(GREEN)✅ Revision created.$(RESET)"
 
 ########################################################
 # Dependencies
