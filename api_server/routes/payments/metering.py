@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger as log
 from sqlalchemy import update
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/v1/billing/usage", tags=["billing"])
 
 @router.post("/report")
 def report_usage(
+    request: Request,
     user: AuthenticatedUser = Depends(require_scopes("billing:write")),
     session: Session = Depends(get_db_session),
 ):
@@ -31,6 +32,10 @@ def report_usage(
     is separate from the daily quota enforced by ``ensure_daily_limit`` on
     service routes. Do not call this for actions that already pass through
     the services route, as it would double-count usage.
+
+    Pass an ``Idempotency-Key`` header to make retries safe: the key is
+    forwarded as the Stripe MeterEvent ``identifier`` so duplicate events
+    are deduplicated by Stripe.
     """
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub:
@@ -54,6 +59,10 @@ def report_usage(
     if ensure_stripe() and sub.stripe_customer_id:
         import stripe
 
+        # Use client-supplied Idempotency-Key when available so retries
+        # produce the same Stripe MeterEvent identifier (deduplication).
+        idempotency_key = request.headers.get("Idempotency-Key")
+        identifier = idempotency_key or f"{sub.stripe_customer_id}-{uuid.uuid4().hex}"
         try:
             stripe.billing.MeterEvent.create(
                 event_name=get_meter_event_name(),
@@ -61,7 +70,7 @@ def report_usage(
                     "stripe_customer_id": sub.stripe_customer_id,
                     "value": "1",
                 },
-                identifier=f"{sub.stripe_customer_id}-{uuid.uuid4().hex}",
+                identifier=identifier,
             )
         except Exception:
             log.warning(

@@ -19,7 +19,9 @@ from loguru import logger as log
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
-# Paths that bypass rate limiting
+# Paths that bypass rate limiting.
+# NOTE: The webhook path must match the route defined in
+# api_server/routes/payments/webhooks.py (prefix + endpoint).
 _EXEMPT_PATHS = frozenset({"/health", "/api/v1/billing/webhook/stripe"})
 
 # TTL cache for API key hash → subscription tier (avoids DB hit on every request)
