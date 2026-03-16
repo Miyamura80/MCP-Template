@@ -83,7 +83,8 @@ def report_usage(
             )
         except Exception:
             log.warning(
-                "Failed to report meter event for customer {}",
+                "Failed to report meter event for customer {}; "
+                "local counter will still increment (potential billing drift)",
                 sub.stripe_customer_id,
             )
 

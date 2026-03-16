@@ -73,7 +73,7 @@ def _check_redis() -> dict:
 
 
 def _check_stripe() -> dict:
-    """Check if Stripe is configured."""
+    """Check Stripe key presence and API connectivity."""
     try:
         from common import global_config
 
@@ -81,7 +81,18 @@ def _check_stripe() -> dict:
             getattr(global_config, "STRIPE_SECRET_KEY", None)
             or getattr(global_config, "STRIPE_TEST_SECRET_KEY", None)
         )
-        return {"status": "ok" if has_key else "not_configured"}
+        if not has_key:
+            return {"status": "not_configured"}
+
+        from api_server.billing.stripe_config import ensure_stripe
+
+        if not ensure_stripe():
+            return {"status": "error", "message": "initialization_failed"}
+
+        import stripe
+
+        stripe.Balance.retrieve()
+        return {"status": "ok"}
     except Exception as exc:
         return {"status": "error", "message": type(exc).__name__}
 
