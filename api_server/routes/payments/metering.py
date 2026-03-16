@@ -21,6 +21,37 @@ from db.models.user_subscriptions import UserSubscription
 router = APIRouter(prefix="/api/v1/billing/usage", tags=["billing"])
 
 
+def _report_to_stripe(
+    sub: UserSubscription, user_id: str, idempotency_key: str
+) -> bool:
+    """Send a meter event to Stripe. Returns True on success or skip."""
+    if not ensure_stripe():
+        return True
+    if not sub.stripe_customer_id:
+        log.warning(
+            "Skipping Stripe meter event for user {} (paid tier, no stripe_customer_id); "
+            "local counter will still increment -- billing drift possible",
+            user_id,
+        )
+        return True
+    import stripe
+
+    try:
+        stripe.billing.MeterEvent.create(
+            event_name=get_meter_event_name(),
+            payload={"stripe_customer_id": sub.stripe_customer_id, "value": "1"},
+            identifier=idempotency_key,
+        )
+        return True
+    except Exception:
+        log.warning(
+            "Failed to report meter event for customer {}; "
+            "local counter will still increment (potential billing drift)",
+            sub.stripe_customer_id,
+        )
+        return False
+
+
 @router.post("/report")
 def report_usage(
     request: Request,
@@ -83,32 +114,10 @@ def report_usage(
         log.debug("Duplicate metering request with key {}", idempotency_key)
         return {"usage": sub.current_period_usage}
 
-    # Report to Stripe (identifier deduplicates on Stripe's side)
-    stripe_ok = True
-    if ensure_stripe() and sub.stripe_customer_id:
-        import stripe
-
-        identifier = idempotency_key
-        try:
-            stripe.billing.MeterEvent.create(
-                event_name=get_meter_event_name(),
-                payload={
-                    "stripe_customer_id": sub.stripe_customer_id,
-                    "value": "1",
-                },
-                identifier=identifier,
-            )
-        except Exception:
-            stripe_ok = False
-            log.warning(
-                "Failed to report meter event for customer {}; "
-                "local counter will still increment (potential billing drift)",
-                sub.stripe_customer_id,
-            )
-
+    # Report to Stripe (identifier deduplicates on Stripe's side).
     # If Stripe failed, rollback the dedup record so the caller can retry
     # with the same idempotency key.  Do not increment the local counter.
-    if not stripe_ok:
+    if not _report_to_stripe(sub, user.user_id, idempotency_key):
         session.rollback()
         session.refresh(sub)
         raise HTTPException(

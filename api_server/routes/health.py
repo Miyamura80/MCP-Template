@@ -100,10 +100,13 @@ def _check_stripe() -> dict:
 
 @functools.cache
 def _get_git_commit() -> str | None:
-    """Get current git commit hash (cached at first call).
+    """Get current git commit hash (cached after first call).
 
     Prefers build-time env vars (GIT_SHA, RENDER_GIT_COMMIT) for
     containerized deployments where git may not be available.
+    The subprocess fallback runs at most once (@functools.cache) and
+    executes in FastAPI's sync-endpoint threadpool, so it does not
+    block the async event loop.
     """
     for var in ("GIT_SHA", "RENDER_GIT_COMMIT"):
         val = os.getenv(var)
