@@ -222,7 +222,9 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
 
         sub = _find_subscription_by_customer(session, customer_id)
         if not sub:
-            session.commit()
+            # Rollback so the processed-event record is not committed,
+            # allowing Stripe to retry (consistent with subscription.created).
+            session.rollback()
             return
 
         local_status, is_active = _map_stripe_status(data)
@@ -264,6 +266,10 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
             sub.subscription_status = SubscriptionStatus.CANCELED.value
             sub.stripe_subscription_id = None
             sub.is_active = False
+            # Reset usage so the user is not immediately quota-blocked
+            # on the lower free tier daily limit.
+            sub.current_period_usage = 0
+            sub.daily_quota_reset_at = datetime.now(UTC)
             session.commit()
             log.info("Subscription canceled for customer {}", customer_id)
         else:
