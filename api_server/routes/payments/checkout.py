@@ -77,7 +77,10 @@ def create_checkout(
                     status_code=409,
                     detail="Active Plus subscription already exists",
                 ) from None
-            customer_id = sub.stripe_customer_id if sub else customer_id
+            # Only overwrite customer_id if the recovered row actually has one;
+            # otherwise keep the Stripe customer we just created.
+            if sub and sub.stripe_customer_id:
+                customer_id = sub.stripe_customer_id
         except SQLAlchemyError:
             session.rollback()
             log.error(
