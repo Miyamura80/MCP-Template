@@ -192,6 +192,9 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
 
             local_status, is_active = _map_stripe_status(data)
             sub.stripe_subscription_id = data.get("id")
+            # Currently only the PLUS tier goes through Stripe checkout.
+            # If additional tiers are added, resolve via Stripe price/product
+            # metadata: data["items"]["data"][0]["price"]["id"].
             sub.subscription_tier = SubscriptionTier.PLUS.value
             sub.subscription_status = local_status
             sub.is_active = is_active

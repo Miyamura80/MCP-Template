@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger as log
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
@@ -15,6 +16,7 @@ from api_server.billing.stripe_config import (
     get_meter_event_name,
 )
 from db.engine import get_db_session
+from db.models.processed_stripe_events import ProcessedStripeEvent
 from db.models.user_subscriptions import UserSubscription
 
 router = APIRouter(prefix="/api/v1/billing/usage", tags=["billing"])
@@ -34,8 +36,9 @@ def report_usage(
     the services route, as it would double-count usage.
 
     Pass an ``Idempotency-Key`` header to make retries safe: the key is
-    forwarded as the Stripe MeterEvent ``identifier`` so duplicate events
-    are deduplicated by Stripe.
+    used to deduplicate both the Stripe MeterEvent and the local DB
+    counter increment.  Without a key, each call is treated as a unique
+    event.
     """
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub:
@@ -43,11 +46,28 @@ def report_usage(
 
     from datetime import UTC, datetime
 
-    # Report to Stripe first so the DB counter stays in sync with the
-    # billing meter.  When the client retries with the same
-    # Idempotency-Key, Stripe deduplicates the event and we skip the
-    # local increment, keeping both counters consistent.
     idempotency_key = request.headers.get("Idempotency-Key")
+
+    # When an idempotency key is provided, check if we have already
+    # processed this request.  Re-use the processed_stripe_events table
+    # (PK-based dedup) so retries skip both the Stripe call and the local
+    # counter increment, keeping the two in sync.
+    if idempotency_key:
+        try:
+            session.add(
+                ProcessedStripeEvent(
+                    event_id=f"meter:{idempotency_key}",
+                    event_type="metering.report_usage",
+                )
+            )
+            session.flush()
+        except IntegrityError:
+            session.rollback()
+            session.refresh(sub)
+            log.debug("Duplicate metering request with key {}", idempotency_key)
+            return {"usage": sub.current_period_usage}
+
+    # Report to Stripe (identifier deduplicates on Stripe's side)
     if ensure_stripe() and sub.stripe_customer_id:
         import stripe
 

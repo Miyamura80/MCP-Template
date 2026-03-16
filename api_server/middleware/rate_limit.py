@@ -280,7 +280,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "X-RateLimit-Limit": str(limit_val),
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": str(reset_ts),
-                "RateLimit": f"limit={limit_val}, remaining=0",
+                "RateLimit": f"limit={limit_val}, remaining=0, reset={reset_ts}",
                 "RateLimit-Policy": f"{limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600",
                 "Retry-After": str(retry_after),
             }
@@ -302,7 +302,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Limit"] = str(limit_val)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         response.headers["X-RateLimit-Reset"] = str(int(reset_time))
-        response.headers["RateLimit"] = f"limit={limit_val}, remaining={remaining}"
+        response.headers["RateLimit"] = (
+            f"limit={limit_val}, remaining={remaining}, reset={int(reset_time)}"
+        )
         response.headers["RateLimit-Policy"] = (
             f"{limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600"
         )
