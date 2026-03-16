@@ -75,8 +75,10 @@ def _identity(request: Request) -> str:
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         return "bearer:" + hashlib.sha256(token.encode()).hexdigest()[:16]
-    # Prefer real client IP from proxy headers (Railway, Render, etc.)
-    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    # Use the last X-Forwarded-For entry (appended by the trusted edge proxy).
+    # Earlier entries are client-supplied and spoofable.
+    forwarded_ips = request.headers.get("X-Forwarded-For", "").split(",")
+    forwarded = forwarded_ips[-1].strip() if forwarded_ips[0] else ""
     real_ip = (
         forwarded
         or request.headers.get("X-Real-IP", "")

@@ -28,7 +28,8 @@ def create_checkout(
     if (
         sub
         and sub.subscription_tier == SubscriptionTier.PLUS.value
-        and sub.subscription_status == SubscriptionStatus.ACTIVE.value
+        and sub.subscription_status
+        in (SubscriptionStatus.ACTIVE.value, SubscriptionStatus.CANCELING.value)
     ):
         raise HTTPException(
             status_code=409, detail="Active Plus subscription already exists"

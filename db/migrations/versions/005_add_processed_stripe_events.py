@@ -28,6 +28,12 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
     )
+    # Index for periodic cleanup (DELETE WHERE processed_at < NOW() - 7 days)
+    op.create_index(
+        "ix_processed_stripe_events_processed_at",
+        "processed_stripe_events",
+        ["processed_at"],
+    )
 
 
 def downgrade() -> None:
