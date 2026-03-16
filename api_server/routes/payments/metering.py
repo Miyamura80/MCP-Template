@@ -82,11 +82,14 @@ def report_usage(
             detail="Idempotency-Key header is required for metering requests",
         )
     # DB key is "meter:{user_id}:{key}" and must fit in event_id String(255).
-    # Reserve 55 chars for the "meter:" prefix + user_id + colons.
-    if len(idempotency_key) > 200:
+    # Derive the allowed length from the actual user_id so the cap is always
+    # correct regardless of ID length.
+    prefix_len = len(f"meter:{user.user_id}:")
+    max_key_len = 255 - prefix_len
+    if len(idempotency_key) > max_key_len:
         raise HTTPException(
             status_code=422,
-            detail="Idempotency-Key must not exceed 200 characters",
+            detail=f"Idempotency-Key must not exceed {max_key_len} characters",
         )
 
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
