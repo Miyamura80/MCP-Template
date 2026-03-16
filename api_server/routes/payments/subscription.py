@@ -21,13 +21,15 @@ router = APIRouter(prefix="/api/v1/billing/subscription", tags=["billing"])
 _stripe_status_cache: dict[str, tuple[str, float]] = {}
 _stripe_status_lock = threading.Lock()
 _STRIPE_STATUS_TTL = 60  # seconds
+_STRIPE_ERROR_TTL = 5  # seconds -- short TTL to avoid thundering herd on outage
+_STRIPE_ERROR_SENTINEL = "__error__"
 
 
 def _get_stripe_status(stripe_sub_id: str) -> str | None:
     """Fetch Stripe subscription status with a 60s TTL cache."""
     cached = _stripe_status_cache.get(stripe_sub_id)
     if cached and cached[1] > time.time():
-        return cached[0]
+        return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
 
     if not ensure_stripe():
         return None
@@ -36,7 +38,7 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         # Double-check after acquiring lock
         cached = _stripe_status_cache.get(stripe_sub_id)
         if cached and cached[1] > time.time():
-            return cached[0]
+            return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
 
         try:
             import stripe
@@ -56,6 +58,10 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
                 "Stripe subscription lookup failed for {}: {}; falling back to DB",
                 stripe_sub_id,
                 exc,
+            )
+            _stripe_status_cache[stripe_sub_id] = (
+                _STRIPE_ERROR_SENTINEL,
+                time.time() + _STRIPE_ERROR_TTL,
             )
             return None
 

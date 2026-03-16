@@ -36,7 +36,9 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("trial_start", sa.DateTime(timezone=True), nullable=True),
         sa.Column("trial_end", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("stripe_customer_id", sa.String(255), nullable=True, index=True),
+        sa.Column(
+            "stripe_customer_id", sa.String(255), nullable=True, unique=True, index=True
+        ),
         sa.Column("stripe_subscription_id", sa.String(255), nullable=True),
         sa.Column("stripe_meter_event_name", sa.String(255), nullable=True),
         sa.Column(

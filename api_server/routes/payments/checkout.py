@@ -153,6 +153,9 @@ def cancel_subscription(
     if not sub or not sub.stripe_subscription_id:
         raise HTTPException(status_code=404, detail="No active subscription found")
 
+    if sub.subscription_status == SubscriptionStatus.CANCELING.value:
+        return {"status": "cancel_scheduled"}
+
     stripe.Subscription.modify(
         sub.stripe_subscription_id,
         cancel_at_period_end=True,
