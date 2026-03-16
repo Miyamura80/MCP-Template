@@ -159,17 +159,20 @@ def get_current_usage(
             "usage": 0,
             "daily_limit": daily_limit,
             "billing_included_units": get_included_units(),
-            "overage": 0,
+            "daily_overage": 0,
         }
 
     included = get_included_units()
-    overage = max(0, sub.current_period_usage - included)
+    # current_period_usage resets daily (via ensure_daily_limit), so this
+    # reflects daily overage against included units, not billing-period
+    # overage.  Stripe's Meter API is the billing source of truth.
+    daily_overage = max(0, sub.current_period_usage - included)
 
     return {
         "usage": sub.current_period_usage,
         "daily_limit": daily_limit,
         "billing_included_units": included,
-        "overage": overage,
+        "daily_overage": daily_overage,
         "period_start": sub.current_period_start.isoformat()
         if sub.current_period_start
         else None,

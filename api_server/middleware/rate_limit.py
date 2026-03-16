@@ -46,6 +46,10 @@ def _build_storage() -> Storage:
         log.warning(
             "Redis unavailable for rate limiting, falling back to memory storage"
         )
+    log.warning(
+        "REDIS_URL not set: rate limiting uses in-memory storage. "
+        "Limits will not be enforced across multiple workers or replicas."
+    )
     return MemoryStorage()
 
 

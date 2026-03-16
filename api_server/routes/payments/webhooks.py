@@ -395,34 +395,33 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
             return
 
         sub = _find_subscription_by_customer(session, customer_id)
-        if sub:
-            sub.payment_status = PaymentStatus.CURRENT.value
-            sub.payment_failure_count = 0
-            sub.last_payment_error = None
-            # Reset usage and advance period boundaries for the new billing cycle.
-            # Also reset daily_quota_reset_at so ensure_daily_limit re-triggers
-            # the day-boundary reset on the next request (prevents quota bypass).
-            sub.current_period_usage = 0
-            sub.daily_quota_reset_at = datetime.now(UTC)
-            # Prefer subscription line-item period over invoice top-level
-            # period_start/period_end, which may not match the subscription
-            # billing cycle when invoices have multiple line items.
-            lines = data.get("lines", {}).get("data", [])
-            first_line = lines[0] if lines else {}
-            line_period = first_line.get("period", {})
-            period_start = line_period.get("start") or data.get("period_start")
-            if period_start:
-                sub.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)
-            period_end = line_period.get("end") or data.get("period_end")
-            if period_end:
-                sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
-            session.commit()
-            log.info("Payment succeeded for customer {}", customer_id)
-        else:
-            session.rollback()
+        if not sub:
             log.warning(
                 "Received {} for unknown customer {}; will retry",
                 event_type,
                 customer_id,
             )
             raise _CustomerNotFoundError(customer_id)
+
+        sub.payment_status = PaymentStatus.CURRENT.value
+        sub.payment_failure_count = 0
+        sub.last_payment_error = None
+        # Reset usage and advance period boundaries for the new billing cycle.
+        # Also reset daily_quota_reset_at so ensure_daily_limit re-triggers
+        # the day-boundary reset on the next request (prevents quota bypass).
+        sub.current_period_usage = 0
+        sub.daily_quota_reset_at = datetime.now(UTC)
+        # Prefer subscription line-item period over invoice top-level
+        # period_start/period_end, which may not match the subscription
+        # billing cycle when invoices have multiple line items.
+        lines = data.get("lines", {}).get("data", [])
+        first_line = lines[0] if lines else {}
+        line_period = first_line.get("period", {})
+        period_start = line_period.get("start") or data.get("period_start")
+        if period_start:
+            sub.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)
+        period_end = line_period.get("end") or data.get("period_end")
+        if period_end:
+            sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+        session.commit()
+        log.info("Payment succeeded for customer {}", customer_id)
