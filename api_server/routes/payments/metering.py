@@ -52,7 +52,7 @@ def _report_to_stripe(
     except Exception:
         log.warning(
             "Failed to report meter event for customer {}; "
-            "local counter will still increment (potential billing drift)",
+            "rolling back dedup record so caller can retry",
             sub.stripe_customer_id,
         )
         return False

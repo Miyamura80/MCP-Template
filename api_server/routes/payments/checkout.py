@@ -156,10 +156,17 @@ def cancel_subscription(
     if sub.subscription_status == SubscriptionStatus.CANCELING.value:
         return {"status": "cancel_scheduled"}
 
-    stripe.Subscription.modify(
-        sub.stripe_subscription_id,
-        cancel_at_period_end=True,
-    )
+    try:
+        stripe.Subscription.modify(
+            sub.stripe_subscription_id,
+            cancel_at_period_end=True,
+        )
+    except stripe.InvalidRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc.user_message)) from exc
+    except stripe.StripeError:
+        raise HTTPException(
+            status_code=502, detail="Failed to cancel subscription; please retry"
+        ) from None
 
     # Mark as CANCELING - subscription stays active until period end.
     # The customer.subscription.deleted webhook sets CANCELED when it expires.

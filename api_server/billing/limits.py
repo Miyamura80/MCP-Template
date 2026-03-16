@@ -168,7 +168,12 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     remaining=daily_limit - 1,
                     tier=tier_key,
                 )
-            # Another request already reset; fall through to normal increment
+            # Another concurrent request already reset the counter.
+            # Fall through to the normal atomic increment below.
+            log.debug(
+                "Day-reset race for user {}: another request won; falling through",
+                user_id,
+            )
 
         # Atomic increment: only succeeds if usage is still under the limit.
         result = session.execute(
