@@ -220,18 +220,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             ("day", RateLimitItemPerDay(limits_cfg.get("rpd", 5000))),
         ]
 
-        # Use atomic hit() per window, short-circuiting on the first
-        # exceeded window. hit() is atomic (increment + check), avoiding
-        # the TOCTOU race that test-then-hit would introduce. The tradeoff
-        # is that earlier windows consume one slot even when a later window
-        # rejects - this is acceptable since it only costs one request slot.
+        # Check all windows before consuming quota to avoid over-decrementing
+        # earlier windows when a later window rejects. The narrow TOCTOU
+        # between test() and hit() is acceptable: a concurrent request may
+        # slip through, but guaranteed over-decrement under sustained load
+        # is worse.
         hit_window = None
         hit_item = None
         for window_name, item in windows:
-            if not self._limiter.hit(item, identity):
+            if not self._limiter.test(item, identity):
                 hit_window = window_name
                 hit_item = item
                 break
+
+        if hit_window is None:
+            # All windows have capacity - consume a slot in each
+            for _, item in windows:
+                self._limiter.hit(item, identity)
 
         # Use minute window for response headers
         _minute_item = windows[1][1]

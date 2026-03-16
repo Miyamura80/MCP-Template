@@ -130,42 +130,50 @@ def _map_stripe_status(data: dict) -> tuple[str, bool]:
     return local_status, is_active
 
 
+class _CustomerNotFoundError(Exception):
+    """Raised when a webhook references an unknown customer (triggers retry)."""
+
+
 def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> None:
     customer_id = data.get("customer")
     if not customer_id:
         return
 
-    with use_db_session() as session:
-        if not _mark_event_processed(session, event_id, event_type):
-            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
-            return
+    try:
+        with use_db_session() as session:
+            if not _mark_event_processed(session, event_id, event_type):
+                log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+                return
 
-        sub = _find_subscription_by_customer(session, customer_id)
-        if not sub:
-            log.error(
-                "Received subscription.created for unknown customer {}; will retry",
-                customer_id,
-            )
-            session.rollback()
-            raise HTTPException(
-                status_code=500, detail="Customer not found, will retry"
-            )
+            sub = _find_subscription_by_customer(session, customer_id)
+            if not sub:
+                log.error(
+                    "Received subscription.created for unknown customer {}; will retry",
+                    customer_id,
+                )
+                raise _CustomerNotFoundError(customer_id)
 
-        local_status, is_active = _map_stripe_status(data)
-        sub.stripe_subscription_id = data.get("id")
-        sub.subscription_tier = SubscriptionTier.PLUS.value
-        sub.subscription_status = local_status
-        sub.is_active = is_active
+            local_status, is_active = _map_stripe_status(data)
+            sub.stripe_subscription_id = data.get("id")
+            sub.subscription_tier = SubscriptionTier.PLUS.value
+            sub.subscription_status = local_status
+            sub.is_active = is_active
 
-        current_period = data.get("current_period_start")
-        if current_period:
-            sub.current_period_start = datetime.fromtimestamp(current_period, tz=UTC)
-        period_end = data.get("current_period_end")
-        if period_end:
-            sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+            current_period = data.get("current_period_start")
+            if current_period:
+                sub.current_period_start = datetime.fromtimestamp(
+                    current_period, tz=UTC
+                )
+            period_end = data.get("current_period_end")
+            if period_end:
+                sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
 
-        session.commit()
-        log.info("Subscription created for customer {}", customer_id)
+            session.commit()
+            log.info("Subscription created for customer {}", customer_id)
+    except _CustomerNotFoundError:
+        raise HTTPException(
+            status_code=500, detail="Customer not found, will retry"
+        ) from None
 
 
 def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> None:

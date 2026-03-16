@@ -36,7 +36,12 @@ def subscription_status(
             import stripe
 
             stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id)
-            stripe_status = stripe_sub.status
+            # Preserve local CANCELING: Stripe returns "active" when
+            # cancel_at_period_end=True, but we track cancellation separately.
+            if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
+                stripe_status = "canceling"
+            else:
+                stripe_status = stripe_sub.status
         except Exception:
             pass  # Fall back to DB
 
