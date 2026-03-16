@@ -116,13 +116,18 @@ _EVENT_RETENTION = timedelta(days=7)
 
 
 def _cleanup_old_events() -> None:
-    """Delete processed_stripe_events older than 7 days."""
+    """Delete processed_stripe_events older than 7 days.
+
+    Excludes ``meter:`` prefixed records which are metering idempotency
+    keys managed by the usage-reporting endpoint with their own lifecycle.
+    """
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
         with use_db_session() as session:
             result = session.execute(
                 delete(ProcessedStripeEvent).where(
-                    ProcessedStripeEvent.processed_at < cutoff
+                    ProcessedStripeEvent.processed_at < cutoff,
+                    ~ProcessedStripeEvent.event_id.startswith("meter:"),
                 )
             )
             session.commit()
@@ -170,7 +175,14 @@ _STRIPE_STATUS_MAP = {
 
 
 def _map_stripe_status(data: dict) -> tuple[str, bool]:
-    """Map Stripe subscription status to local enum and is_active flag."""
+    """Map Stripe subscription status to local enum and is_active flag.
+
+    **Policy decision**: ``paused`` subscriptions retain active entitlements.
+    Stripe pauses collection voluntarily (e.g., customer request), so the
+    user is not delinquent.  If paused users should lose paid-tier access,
+    change the mapping to ``SubscriptionStatus.PAST_DUE`` and remove
+    ``"paused"`` from the ``is_active`` set below.
+    """
     stripe_status = data.get("status", "active")
     local_status = _STRIPE_STATUS_MAP.get(
         stripe_status, SubscriptionStatus.PAST_DUE.value

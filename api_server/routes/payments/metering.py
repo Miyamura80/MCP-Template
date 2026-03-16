@@ -43,6 +43,10 @@ def report_usage(
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="No subscription found")
+    if not sub.is_active:
+        raise HTTPException(
+            status_code=402, detail="No active subscription for metering"
+        )
 
     from datetime import UTC, datetime
 
