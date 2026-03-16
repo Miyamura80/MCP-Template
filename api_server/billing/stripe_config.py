@@ -5,19 +5,24 @@ import threading
 from loguru import logger as log
 
 _stripe_initialized = False
+_stripe_unavailable = False
 _stripe_lock = threading.Lock()
 
 
 def ensure_stripe() -> bool:
     """Initialize Stripe SDK. Returns False if no keys are configured."""
-    global _stripe_initialized  # noqa: PLW0603
+    global _stripe_initialized, _stripe_unavailable  # noqa: PLW0603
     if _stripe_initialized:
         return True
+    if _stripe_unavailable:
+        return False
 
     with _stripe_lock:
         # Double-check after acquiring lock
         if _stripe_initialized:
             return True
+        if _stripe_unavailable:
+            return False
 
         try:
             import stripe
@@ -40,6 +45,7 @@ def ensure_stripe() -> bool:
 
             if not key:
                 log.debug("Stripe not configured - billing features disabled")
+                _stripe_unavailable = True
                 return False
 
             stripe.api_key = key
@@ -49,6 +55,7 @@ def ensure_stripe() -> bool:
             return True
         except Exception:
             log.warning("Failed to initialize Stripe")
+            _stripe_unavailable = True
             return False
 
 

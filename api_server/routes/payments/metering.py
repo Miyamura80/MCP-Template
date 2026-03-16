@@ -68,6 +68,7 @@ def report_usage(
             return {"usage": sub.current_period_usage}
 
     # Report to Stripe (identifier deduplicates on Stripe's side)
+    stripe_ok = True
     if ensure_stripe() and sub.stripe_customer_id:
         import stripe
 
@@ -82,11 +83,17 @@ def report_usage(
                 identifier=identifier,
             )
         except Exception:
+            stripe_ok = False
             log.warning(
                 "Failed to report meter event for customer {}; "
                 "local counter will still increment (potential billing drift)",
                 sub.stripe_customer_id,
             )
+
+    # If Stripe failed and we have an idempotency key, rollback the dedup
+    # record so the caller can retry and Stripe eventually gets billed.
+    if not stripe_ok and idempotency_key:
+        session.rollback()
 
     # Atomic increment to prevent lost updates under concurrent load
     session.execute(

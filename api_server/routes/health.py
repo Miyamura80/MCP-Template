@@ -73,7 +73,11 @@ def _check_redis() -> dict:
 
 
 def _check_stripe() -> dict:
-    """Check Stripe key presence and API connectivity."""
+    """Check Stripe SDK initialization (config + key presence).
+
+    Does not make a live API call to avoid hitting Stripe rate limits
+    from frequent health probes.
+    """
     try:
         from common import global_config
 
@@ -89,9 +93,6 @@ def _check_stripe() -> dict:
         if not ensure_stripe():
             return {"status": "error", "message": "initialization_failed"}
 
-        import stripe
-
-        stripe.Balance.retrieve()
         return {"status": "ok"}
     except Exception as exc:
         return {"status": "error", "message": type(exc).__name__}
