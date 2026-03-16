@@ -261,10 +261,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ]
 
         # Check all windows before consuming quota to avoid over-decrementing
-        # earlier windows when a later window rejects. The narrow TOCTOU
-        # between test() and hit() is acceptable: a concurrent request may
-        # slip through, but guaranteed over-decrement under sustained load
-        # is worse.
+        # earlier windows when a later window rejects.  Known trade-off: the
+        # TOCTOU gap between test() and hit() means up to N concurrent
+        # workers can pass test() simultaneously, briefly exceeding the RPS
+        # limit.  This is acceptable because (a) over-decrementing under
+        # sustained load is worse, and (b) the limits library's hit()
+        # doesn't expose window stats needed for response headers.
         # Wrap in try/except so a Redis failure degrades gracefully (pass
         # through) rather than converting every request to a 500.
         hit_window = None

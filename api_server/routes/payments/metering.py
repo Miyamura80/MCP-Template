@@ -62,24 +62,22 @@ def report_usage(
 
     from datetime import UTC, datetime
 
-    # When an idempotency key is provided, check if we have already
-    # processed this request.  Re-use the processed_stripe_events table
-    # (PK-based dedup) so retries skip both the Stripe call and the local
-    # counter increment, keeping the two in sync.
-    if idempotency_key:
-        try:
-            session.add(
-                ProcessedStripeEvent(
-                    event_id=f"meter:{idempotency_key}",
-                    event_type="metering.report_usage",
-                )
+    # Re-use the processed_stripe_events table for PK-based dedup so
+    # retries skip both the Stripe call and the local counter increment,
+    # keeping the two in sync.
+    try:
+        session.add(
+            ProcessedStripeEvent(
+                event_id=f"meter:{idempotency_key}",
+                event_type="metering.report_usage",
             )
-            session.flush()
-        except IntegrityError:
-            session.rollback()
-            session.refresh(sub)
-            log.debug("Duplicate metering request with key {}", idempotency_key)
-            return {"usage": sub.current_period_usage}
+        )
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        session.refresh(sub)
+        log.debug("Duplicate metering request with key {}", idempotency_key)
+        return {"usage": sub.current_period_usage}
 
     # Report to Stripe (identifier deduplicates on Stripe's side)
     stripe_ok = True

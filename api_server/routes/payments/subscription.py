@@ -1,6 +1,7 @@
 """Subscription status endpoint (dual-source: Stripe API + DB fallback)."""
 
 from fastapi import APIRouter, Depends
+from loguru import logger as log
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
@@ -42,8 +43,12 @@ def subscription_status(
                 stripe_status = "canceling"
             else:
                 stripe_status = stripe_sub.status
-        except Exception:
-            pass  # Fall back to DB
+        except Exception as exc:
+            log.debug(
+                "Stripe subscription lookup failed for {}: {}; falling back to DB",
+                sub.stripe_subscription_id,
+                exc,
+            )
 
     return {
         "tier": sub.subscription_tier,

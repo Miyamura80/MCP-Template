@@ -104,6 +104,9 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 )
             )
             session.commit()
+            # Refresh picks up the value we wrote, or the value another
+            # request wrote if our WHERE-IS-NULL was a no-op.  Either way
+            # reset_at ends up as a valid timestamp and we proceed normally.
             session.refresh(sub)
             reset_at = sub.daily_quota_reset_at
 
