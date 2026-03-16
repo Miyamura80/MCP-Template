@@ -77,15 +77,17 @@ def _identity(request: Request) -> str:
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         return "bearer:" + hashlib.sha256(token.encode()).hexdigest()
-    # Use the last X-Forwarded-For entry (appended by the trusted edge proxy).
-    # Earlier entries are client-supplied and spoofable.
-    forwarded_ips = request.headers.get("X-Forwarded-For", "").split(",")
-    forwarded = forwarded_ips[-1].strip() if forwarded_ips[-1].strip() else ""
-    real_ip = (
-        forwarded
-        or request.headers.get("X-Real-IP", "")
-        or (request.client.host if request.client else "unknown")
-    )
+    # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
+    # Fall back to the first X-Forwarded-For entry (original client claim)
+    # since the last entry is often the proxy's own outbound IP in
+    # multi-hop setups, which would collapse all clients into one bucket.
+    real_ip = request.headers.get("X-Real-IP", "").strip()
+    if not real_ip:
+        xff = request.headers.get("X-Forwarded-For", "")
+        if xff:
+            real_ip = xff.split(",")[0].strip()
+    if not real_ip:
+        real_ip = request.client.host if request.client else "unknown"
     return "ip:" + real_ip
 
 

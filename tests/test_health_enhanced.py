@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
+from api_server.routes.health import _health_cache
 from api_server.server import app
 from db.base import Base
 from db.engine import get_db_session
@@ -36,6 +37,7 @@ def _override_db():
 
 class TestHealthEnhanced(TestTemplate):
     def setup_method(self):
+        _health_cache.clear()
         app.dependency_overrides[get_authenticated_user] = _override_auth
         app.dependency_overrides[get_db_session] = _override_db
         self.client = TestClient(app)
