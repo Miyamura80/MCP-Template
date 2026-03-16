@@ -24,6 +24,25 @@ _stripe_in_flight: set[str] = set()
 _STRIPE_STATUS_TTL = 60  # seconds
 _STRIPE_ERROR_TTL = 5  # seconds -- short TTL to avoid thundering herd on outage
 _STRIPE_ERROR_SENTINEL = "__error__"
+_STRIPE_CACHE_MAX_SIZE = 10_000
+
+
+def _evict_stripe_cache() -> None:
+    """Evict expired/oldest entries when cache is at capacity.
+
+    Must be called while holding ``_stripe_status_lock``.
+    """
+    if len(_stripe_status_cache) < _STRIPE_CACHE_MAX_SIZE:
+        return
+    now = time.time()
+    expired = [k for k, (_, exp) in list(_stripe_status_cache.items()) if exp <= now]
+    for k in expired:
+        _stripe_status_cache.pop(k, None)
+    if len(_stripe_status_cache) >= _STRIPE_CACHE_MAX_SIZE:
+        by_expiry = sorted(_stripe_status_cache.items(), key=lambda x: x[1][1])
+        evict_count = max(1, len(by_expiry) // 10)
+        for k, _ in by_expiry[:evict_count]:
+            _stripe_status_cache.pop(k, None)
 
 
 def _get_stripe_status(stripe_sub_id: str) -> str | None:
@@ -66,6 +85,7 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
                 status,
                 time.time() + _STRIPE_STATUS_TTL,
             )
+            _evict_stripe_cache()
         return status
     except Exception as exc:
         log.debug(
@@ -78,6 +98,7 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
                 _STRIPE_ERROR_SENTINEL,
                 time.time() + _STRIPE_ERROR_TTL,
             )
+            _evict_stripe_cache()
         return None
     finally:
         with _stripe_status_lock:

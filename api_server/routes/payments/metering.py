@@ -26,6 +26,13 @@ def _report_to_stripe(
 ) -> bool:
     """Send a meter event to Stripe. Returns True on success or skip."""
     if not ensure_stripe():
+        if sub.stripe_customer_id:
+            log.error(
+                "Stripe SDK not initialised but user {} is on a paid tier; "
+                "refusing to increment local counter without Stripe event",
+                user_id,
+            )
+            return False
         return True
     if not sub.stripe_customer_id:
         log.error(

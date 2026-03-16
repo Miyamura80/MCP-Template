@@ -138,11 +138,22 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
             resolved_user_id = user_id
             if resolved_user_id is None:
                 # cache_key is an API key hash - look up the user
+                from datetime import UTC, datetime
+
+                from sqlalchemy import or_
+
                 from db.models.api_keys import APIKey
 
                 row = (
                     session.query(APIKey.user_id)
-                    .filter_by(key_hash=cache_key, revoked=False)
+                    .filter(
+                        APIKey.key_hash == cache_key,
+                        APIKey.revoked.is_(False),
+                        or_(
+                            APIKey.expires_at.is_(None),
+                            APIKey.expires_at > datetime.now(UTC),
+                        ),
+                    )
                     .first()
                 )
                 resolved_user_id = row.user_id if row else None
