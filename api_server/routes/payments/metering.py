@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
-from api_server.auth.scopes import require_scopes
+from api_server.auth.scopes import BILLING_READ, BILLING_WRITE, require_scopes
 from api_server.billing.stripe_config import (
     ensure_stripe,
     get_included_units,
@@ -61,7 +61,7 @@ def _report_to_stripe(
 @router.post("/report")
 def report_usage(
     request: Request,
-    user: AuthenticatedUser = Depends(require_scopes("billing:write")),
+    user: AuthenticatedUser = Depends(require_scopes(BILLING_WRITE)),
     session: Session = Depends(get_db_session),
 ):
     """Report a single usage event via Stripe Billing Meter.
@@ -162,7 +162,7 @@ def report_usage(
 
 @router.get("/current")
 def get_current_usage(
-    user: AuthenticatedUser = Depends(require_scopes("billing:read")),
+    user: AuthenticatedUser = Depends(require_scopes(BILLING_READ)),
     session: Session = Depends(get_db_session),
 ):
     """Return current period usage, daily quota limit, and billing overage info."""

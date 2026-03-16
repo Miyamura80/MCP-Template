@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
-from api_server.auth.scopes import require_scopes
+from api_server.auth.scopes import BILLING_WRITE, require_scopes
 from api_server.billing.stripe_config import ensure_stripe, get_stripe_price_id
 from db.engine import get_db_session
 from db.models.subscription_types import SubscriptionStatus, SubscriptionTier
@@ -36,7 +36,7 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
 
 @router.post("/checkout/create")
 def create_checkout(
-    user: AuthenticatedUser = Depends(require_scopes("billing:write")),
+    user: AuthenticatedUser = Depends(require_scopes(BILLING_WRITE)),
     session: Session = Depends(get_db_session),
 ):
     """Create a Stripe Checkout Session for the Plus tier."""
@@ -140,7 +140,7 @@ def create_checkout(
 
 @router.post("/cancel")
 def cancel_subscription(
-    user: AuthenticatedUser = Depends(require_scopes("billing:write")),
+    user: AuthenticatedUser = Depends(require_scopes(BILLING_WRITE)),
     session: Session = Depends(get_db_session),
 ):
     """Cancel the user's Stripe subscription."""

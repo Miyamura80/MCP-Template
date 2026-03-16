@@ -8,7 +8,7 @@ from loguru import logger as log
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
-from api_server.auth.scopes import require_scopes
+from api_server.auth.scopes import BILLING_READ, require_scopes
 from api_server.billing.stripe_config import ensure_stripe
 from db.engine import get_db_session
 from db.models.subscription_types import SubscriptionTier
@@ -107,7 +107,7 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
 
 @router.get("/status")
 def subscription_status(
-    user: AuthenticatedUser = Depends(require_scopes("billing:read")),
+    user: AuthenticatedUser = Depends(require_scopes(BILLING_READ)),
     session: Session = Depends(get_db_session),
 ):
     """Return current subscription tier, status, usage, and payment info."""

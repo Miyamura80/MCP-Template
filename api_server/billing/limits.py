@@ -1,5 +1,6 @@
 """Daily usage limit enforcement."""
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -51,23 +52,33 @@ def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscript
     return sub
 
 
-def ensure_daily_limit(user_id: str) -> LimitStatus:
+def ensure_daily_limit(user_id: str, session: Session | None = None) -> LimitStatus:
     """Check and enforce the daily request limit for a user.
 
     Creates a free-tier subscription row if none exists.
     Raises HTTP 402 if the daily quota is exceeded.
 
-    Uses its own DB session to avoid committing uncommitted work on
-    a caller-provided session.  Uses an atomic UPDATE...WHERE to prevent
-    race conditions under concurrent load.  Uses ``daily_quota_reset_at``
-    (not ``current_period_start``) for day-boundary tracking so the
-    Stripe billing period is never corrupted.
+    When *session* is provided (e.g. from FastAPI's ``Depends(get_db_session)``),
+    it is reused to avoid opening a second pooled connection per request.
+    When ``None``, a standalone session is created internally.
+
+    Uses an atomic UPDATE...WHERE to prevent race conditions under concurrent
+    load.  Uses ``daily_quota_reset_at`` (not ``current_period_start``) for
+    day-boundary tracking so the Stripe billing period is never corrupted.
     """
     from common import global_config
 
     cfg = global_config.subscription_config
 
-    with use_db_session() as session:
+    @contextmanager
+    def _session_ctx():
+        if session is not None:
+            yield session
+        else:
+            with use_db_session() as s:
+                yield s
+
+    with _session_ctx() as session:
         sub = _get_or_create_subscription(session, user_id)
 
         tier_key = sub.subscription_tier

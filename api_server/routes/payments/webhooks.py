@@ -198,6 +198,20 @@ class _CustomerNotFoundError(Exception):
     """Raised when a webhook references an unknown customer (triggers retry)."""
 
 
+def _is_stale_event(data: dict, sub: UserSubscription) -> bool:
+    """Return True if this event predates the subscription's last DB update.
+
+    Stripe does not guarantee event delivery order. Comparing the event's
+    ``created`` timestamp against the subscription row's ``updated_at``
+    prevents an older event (e.g. subscription.updated with status=active)
+    from overwriting a newer state (e.g. subscription.deleted).
+    """
+    event_created = data.get("created")
+    if event_created and sub.updated_at:
+        return datetime.fromtimestamp(event_created, tz=UTC) < sub.updated_at
+    return False
+
+
 def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> None:
     customer_id = data.get("customer")
     if not customer_id:
@@ -254,6 +268,15 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
             )
             raise _CustomerNotFoundError(customer_id)
 
+        if _is_stale_event(data, sub):
+            log.debug(
+                "Skipping stale subscription.updated event {} for customer {}",
+                event_id,
+                customer_id,
+            )
+            session.commit()
+            return
+
         local_status, is_active = _map_stripe_status(data)
 
         # Preserve local CANCELING state: Stripe keeps status "active"
@@ -306,6 +329,16 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
                 customer_id,
             )
             raise _CustomerNotFoundError(customer_id)
+
+        if _is_stale_event(data, sub):
+            log.debug(
+                "Skipping stale {} event {} for customer {}",
+                event_type,
+                event_id,
+                customer_id,
+            )
+            session.commit()
+            return
 
         sub.subscription_tier = SubscriptionTier.FREE.value
         sub.subscription_status = SubscriptionStatus.CANCELED.value
