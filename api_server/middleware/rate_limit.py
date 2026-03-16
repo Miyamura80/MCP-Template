@@ -21,9 +21,9 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import JSONResponse
 
 # Paths that bypass rate limiting.
-# NOTE: The webhook path must match the route defined in
-# api_server/routes/payments/webhooks.py (prefix + endpoint).
-_EXEMPT_PATHS = frozenset({"/health", "/api/v1/billing/webhook/stripe"})
+from api_server.routes.payments.webhooks import STRIPE_WEBHOOK_PATH
+
+_EXEMPT_PATHS = frozenset({"/health", STRIPE_WEBHOOK_PATH})
 
 # TTL cache for API key hash → subscription tier (avoids DB hit on every request)
 _tier_cache: dict[str, tuple[str, float]] = {}

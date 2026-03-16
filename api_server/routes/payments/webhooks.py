@@ -19,7 +19,10 @@ from db.models.subscription_types import (
 )
 from db.models.user_subscriptions import UserSubscription
 
-router = APIRouter(prefix="/api/v1/billing/webhook", tags=["billing"])
+WEBHOOK_PREFIX = "/api/v1/billing/webhook"
+STRIPE_WEBHOOK_PATH = f"{WEBHOOK_PREFIX}/stripe"
+
+router = APIRouter(prefix=WEBHOOK_PREFIX, tags=["billing"])
 
 
 async def _dispatch_event(event_type: str, data: dict, event_id: str) -> None:
@@ -319,9 +322,9 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
 def _resolve_payment_error(data: dict) -> str | None:
     """Extract last_payment_error message from the PaymentIntent.
 
-    Called after a fast-path dedup check to avoid Stripe API calls on
-    retried events.  Runs outside the DB session to avoid holding a
-    connection during the network call.
+    Called after a fast-path dedup check (separate session) to skip
+    already-processed events.  Runs outside the main DB session to
+    avoid holding a pooled connection during the network call.
     """
     pi = data.get("payment_intent")
     if isinstance(pi, dict):
@@ -345,15 +348,22 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
     if not customer_id:
         return
 
+    # Fast-path dedup: skip the Stripe API call for already-processed events.
+    with use_db_session() as pre_session:
+        if pre_session.get(ProcessedStripeEvent, event_id) is not None:
+            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+            return
+
+    # Resolve outside the DB session to avoid holding a pooled connection
+    # during a potentially slow Stripe network call.
+    error_msg = _resolve_payment_error(data)
+
     # Single session for dedup + update so a rollback on customer-not-found
     # also undoes the dedup record, allowing Stripe to retry the event.
     with use_db_session() as session:
         if not _mark_event_processed(session, event_id, event_type):
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
-
-        # Resolve after dedup gate so duplicate events never hit Stripe.
-        error_msg = _resolve_payment_error(data)
 
         result = session.execute(
             update(UserSubscription)

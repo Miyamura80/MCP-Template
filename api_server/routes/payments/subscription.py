@@ -20,13 +20,18 @@ router = APIRouter(prefix="/api/v1/billing/subscription", tags=["billing"])
 # every request.  Keyed by stripe_subscription_id.
 _stripe_status_cache: dict[str, tuple[str, float]] = {}
 _stripe_status_lock = threading.Lock()
+_stripe_in_flight: set[str] = set()
 _STRIPE_STATUS_TTL = 60  # seconds
 _STRIPE_ERROR_TTL = 5  # seconds -- short TTL to avoid thundering herd on outage
 _STRIPE_ERROR_SENTINEL = "__error__"
 
 
 def _get_stripe_status(stripe_sub_id: str) -> str | None:
-    """Fetch Stripe subscription status with a 60s TTL cache."""
+    """Fetch Stripe subscription status with a 60s TTL cache.
+
+    Uses an in-flight set to prevent concurrent duplicate Stripe API
+    calls for the same subscription ID on cache miss.
+    """
     cached = _stripe_status_cache.get(stripe_sub_id)
     if cached and cached[1] > time.time():
         return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
@@ -34,14 +39,18 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
     if not ensure_stripe():
         return None
 
+    # Acquire in-flight gate: if another thread is already fetching this
+    # subscription, return the stale cache value (or None) instead of
+    # piling on with another Stripe API call.
     with _stripe_status_lock:
-        # Double-check after acquiring lock
         cached = _stripe_status_cache.get(stripe_sub_id)
         if cached and cached[1] > time.time():
             return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
+        if stripe_sub_id in _stripe_in_flight:
+            return cached[0] if cached else None
+        _stripe_in_flight.add(stripe_sub_id)
 
-    # Network I/O outside the lock so concurrent callers are not serialized
-    # behind a single slow Stripe response.
+    # Network I/O outside the lock.
     try:
         import stripe
 
@@ -68,6 +77,9 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
                 time.time() + _STRIPE_ERROR_TTL,
             )
         return None
+    finally:
+        with _stripe_status_lock:
+            _stripe_in_flight.discard(stripe_sub_id)
 
 
 @router.get("/status")
