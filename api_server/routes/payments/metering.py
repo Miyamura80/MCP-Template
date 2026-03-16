@@ -7,7 +7,8 @@ from loguru import logger as log
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from api_server.auth import AuthenticatedUser, get_authenticated_user
+from api_server.auth import AuthenticatedUser
+from api_server.auth.scopes import require_scopes
 from api_server.billing.stripe_config import (
     ensure_stripe,
     get_included_units,
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/v1/billing/usage", tags=["billing"])
 
 @router.post("/report")
 def report_usage(
-    user: AuthenticatedUser = Depends(get_authenticated_user),
+    user: AuthenticatedUser = Depends(require_scopes("billing:write")),
     session: Session = Depends(get_db_session),
 ):
     """Report a single usage event via Stripe Billing Meter."""
@@ -67,7 +68,7 @@ def report_usage(
 
 @router.get("/current")
 def get_current_usage(
-    user: AuthenticatedUser = Depends(get_authenticated_user),
+    user: AuthenticatedUser = Depends(require_scopes("billing:read")),
     session: Session = Depends(get_db_session),
 ):
     """Return current period usage and overage info."""

@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from api_server.auth import AuthenticatedUser, get_authenticated_user
+from api_server.auth import AuthenticatedUser
+from api_server.auth.scopes import require_scopes
 from api_server.billing.stripe_config import ensure_stripe
 from db.engine import get_db_session
 from db.models.subscription_types import SubscriptionTier
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/api/v1/billing/subscription", tags=["billing"])
 
 @router.get("/status")
 def subscription_status(
-    user: AuthenticatedUser = Depends(get_authenticated_user),
+    user: AuthenticatedUser = Depends(require_scopes("billing:read")),
     session: Session = Depends(get_db_session),
 ):
     """Return current subscription tier, status, usage, and payment info."""

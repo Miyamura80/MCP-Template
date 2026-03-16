@@ -7,15 +7,26 @@ from api_server.auth.unified_auth import AuthenticatedUser, get_authenticated_us
 # Scope constants
 SERVICES_READ = "services:read"
 SERVICES_EXECUTE = "services:execute"
+BILLING_READ = "billing:read"
+BILLING_WRITE = "billing:write"
 ADMIN_READ = "admin:read"
 ADMIN_WRITE = "admin:write"
 
-ALL_SCOPES = frozenset({SERVICES_READ, SERVICES_EXECUTE, ADMIN_READ, ADMIN_WRITE})
+ALL_SCOPES = frozenset(
+    {
+        SERVICES_READ,
+        SERVICES_EXECUTE,
+        BILLING_READ,
+        BILLING_WRITE,
+        ADMIN_READ,
+        ADMIN_WRITE,
+    }
+)
 
 # Scope templates
 SCOPE_TEMPLATES: dict[str, list[str]] = {
-    "read_only": [SERVICES_READ],
-    "standard": [SERVICES_READ, SERVICES_EXECUTE],
+    "read_only": [SERVICES_READ, BILLING_READ],
+    "standard": [SERVICES_READ, SERVICES_EXECUTE, BILLING_READ, BILLING_WRITE],
     "admin": ["*"],
 }
 
@@ -33,7 +44,9 @@ def validate_scopes(scopes: list[str]) -> list[str]:
         elif (
             s == "*"
             or s in ALL_SCOPES
-            or (s.endswith(":*") and s.split(":")[0] in {"services", "admin"})
+            or (
+                s.endswith(":*") and s.split(":")[0] in {"services", "billing", "admin"}
+            )
         ):
             resolved.append(s)
         else:
