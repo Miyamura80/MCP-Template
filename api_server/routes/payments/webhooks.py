@@ -72,6 +72,8 @@ async def stripe_webhook(request: Request):
 
     if event_type == "customer.subscription.created":
         _handle_subscription_created(data, event_id, event_type)
+    elif event_type == "customer.subscription.updated":
+        _handle_subscription_updated(data, event_id, event_type)
     elif event_type == "customer.subscription.deleted":
         _handle_subscription_deleted(data, event_id, event_type)
     elif event_type == "invoice.payment_failed":
@@ -109,6 +111,25 @@ def _mark_event_processed(session, event_id: str, event_type: str) -> bool:
         return False
 
 
+_STRIPE_STATUS_MAP = {
+    "trialing": SubscriptionStatus.TRIALING.value,
+    "active": SubscriptionStatus.ACTIVE.value,
+    "incomplete": SubscriptionStatus.INCOMPLETE.value,
+    "past_due": SubscriptionStatus.PAST_DUE.value,
+    "canceled": SubscriptionStatus.CANCELED.value,
+}
+
+
+def _map_stripe_status(data: dict) -> tuple[str, bool]:
+    """Map Stripe subscription status to local enum and is_active flag."""
+    stripe_status = data.get("status", "active")
+    local_status = _STRIPE_STATUS_MAP.get(
+        stripe_status, SubscriptionStatus.ACTIVE.value
+    )
+    is_active = stripe_status in ("trialing", "active")
+    return local_status, is_active
+
+
 def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> None:
     customer_id = data.get("customer")
     if not customer_id:
@@ -130,10 +151,11 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
                 status_code=500, detail="Customer not found, will retry"
             )
 
+        local_status, is_active = _map_stripe_status(data)
         sub.stripe_subscription_id = data.get("id")
         sub.subscription_tier = SubscriptionTier.PLUS.value
-        sub.subscription_status = SubscriptionStatus.ACTIVE.value
-        sub.is_active = True
+        sub.subscription_status = local_status
+        sub.is_active = is_active
 
         current_period = data.get("current_period_start")
         if current_period:
@@ -144,6 +166,36 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
 
         session.commit()
         log.info("Subscription created for customer {}", customer_id)
+
+
+def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> None:
+    customer_id = data.get("customer")
+    if not customer_id:
+        return
+
+    with use_db_session() as session:
+        if not _mark_event_processed(session, event_id, event_type):
+            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+            return
+
+        sub = _find_subscription_by_customer(session, customer_id)
+        if not sub:
+            session.commit()
+            return
+
+        local_status, is_active = _map_stripe_status(data)
+        sub.subscription_status = local_status
+        sub.is_active = is_active
+
+        current_period = data.get("current_period_start")
+        if current_period:
+            sub.current_period_start = datetime.fromtimestamp(current_period, tz=UTC)
+        period_end = data.get("current_period_end")
+        if period_end:
+            sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+
+        session.commit()
+        log.info("Subscription updated for customer {}", customer_id)
 
 
 def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> None:
