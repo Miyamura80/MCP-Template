@@ -1,6 +1,8 @@
 """Tests for billing: LimitStatus, ensure_daily_limit, subscription model, Stripe graceful degradation."""
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -24,6 +26,12 @@ def _make_session():
     return sessionmaker(bind=engine)()
 
 
+@contextmanager
+def _mock_use_db_session(session):
+    """Yield the pre-built in-memory session for use_db_session patching."""
+    yield session
+
+
 class TestLimitStatus(TestTemplate):
     def test_limit_status_dataclass(self):
         status = LimitStatus(
@@ -40,7 +48,11 @@ class TestLimitStatus(TestTemplate):
 class TestEnsureDailyLimit(TestTemplate):
     def test_creates_subscription_if_missing(self):
         session = _make_session()
-        status = ensure_daily_limit(session, "new-user")
+        with patch(
+            "api_server.billing.limits.use_db_session",
+            return_value=_mock_use_db_session(session),
+        ):
+            status = ensure_daily_limit("new-user")
         assert status.allowed is True
         assert status.current_usage == 1  # Incremented after check
         assert status.tier == SubscriptionTier.FREE.value
@@ -59,8 +71,14 @@ class TestEnsureDailyLimit(TestTemplate):
 
         from fastapi import HTTPException
 
-        with pytest.raises(HTTPException) as exc_info:
-            ensure_daily_limit(session, "limit-user")
+        with (
+            patch(
+                "api_server.billing.limits.use_db_session",
+                return_value=_mock_use_db_session(session),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            ensure_daily_limit("limit-user")
         assert exc_info.value.status_code == 402
 
     def test_allows_under_limit(self):
@@ -74,7 +92,11 @@ class TestEnsureDailyLimit(TestTemplate):
         session.add(sub)
         session.commit()
 
-        status = ensure_daily_limit(session, "ok-user")
+        with patch(
+            "api_server.billing.limits.use_db_session",
+            return_value=_mock_use_db_session(session),
+        ):
+            status = ensure_daily_limit("ok-user")
         assert status.allowed is True
         assert status.current_usage == 51  # Incremented
 

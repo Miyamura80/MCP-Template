@@ -1,5 +1,6 @@
 """Integration tests for API server route registration."""
 
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -22,6 +23,16 @@ Base.metadata.create_all(_engine)
 _SessionLocal = sessionmaker(bind=_engine)
 
 
+@contextmanager
+def _override_use_db_session():
+    """Yield a session from the in-memory test engine for use_db_session."""
+    session = _SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
 def _override_auth():
     return AuthenticatedUser(user_id="test-user", email="t@t.com", auth_method="jwt")
 
@@ -38,9 +49,16 @@ class TestAPIServer(TestTemplate):
     def setup_method(self):
         app.dependency_overrides[get_authenticated_user] = _override_auth
         app.dependency_overrides[get_db_session] = _override_db
+        # Patch use_db_session so ensure_daily_limit uses the test DB
+        self._use_db_patcher = patch(
+            "api_server.billing.limits.use_db_session",
+            _override_use_db_session,
+        )
+        self._use_db_patcher.start()
         self.client = TestClient(app)
 
     def teardown_method(self):
+        self._use_db_patcher.stop()
         app.dependency_overrides.clear()
 
     def test_health_endpoint(self):

@@ -70,7 +70,9 @@ def _get_tier_limits(tier: str) -> dict:
 def _identity(request: Request) -> str:
     """Resolve a stable identity for rate limiting.
 
-    Priority: API key hash > Bearer token prefix > client IP.
+    Priority: API key hash > JWT user ID > client IP.
+    JWT users are keyed on their stable user ID (not the ephemeral token
+    hash) so that token rotation does not reset rate-limit counters.
     """
     api_key = request.headers.get("X-API-KEY", "")
     if api_key:
@@ -78,6 +80,17 @@ def _identity(request: Request) -> str:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
+        try:
+            from api_server.auth.workos_auth import verify_workos_token
+
+            workos_user = verify_workos_token(token)
+            if workos_user:
+                return (
+                    "user:" + hashlib.sha256(workos_user.user_id.encode()).hexdigest()
+                )
+        except Exception:
+            pass
+        # Fall back to token hash if verification fails
         return "bearer:" + hashlib.sha256(token.encode()).hexdigest()
     # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
     # Skip X-Forwarded-For entirely for unauthenticated requests since

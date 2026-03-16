@@ -5,24 +5,36 @@ import threading
 from loguru import logger as log
 
 _stripe_initialized = False
+# Cached "no key configured" state -- lock-free fast path for environments
+# where Stripe is never configured.  Distinguished from transient init
+# failures (which are *not* cached, so the next call retries).
+_stripe_no_key = False
 _stripe_lock = threading.Lock()
 
 
 def ensure_stripe() -> bool:
     """Initialize Stripe SDK. Returns False if no keys are configured.
 
-    On failure, returns False without caching the negative result so the
-    next call will retry.  This allows recovery when secrets are injected
-    after startup (e.g. Railway / Kubernetes delayed secret binding).
+    On transient failure (e.g. import error), returns False without
+    caching the negative result so the next call retries.  This allows
+    recovery when secrets are injected after startup (e.g. Railway /
+    Kubernetes delayed secret binding).
+
+    When no key is explicitly configured, caches the result lock-free
+    to avoid serialising all callers through the mutex.
     """
-    global _stripe_initialized  # noqa: PLW0603
+    global _stripe_initialized, _stripe_no_key  # noqa: PLW0603
     if _stripe_initialized:
         return True
+    if _stripe_no_key:
+        return False
 
     with _stripe_lock:
         # Double-check after acquiring lock
         if _stripe_initialized:
             return True
+        if _stripe_no_key:
+            return False
 
         try:
             import stripe
@@ -45,6 +57,7 @@ def ensure_stripe() -> bool:
 
             if not key:
                 log.debug("Stripe not configured - billing features disabled")
+                _stripe_no_key = True
                 return False
 
             stripe.api_key = key
