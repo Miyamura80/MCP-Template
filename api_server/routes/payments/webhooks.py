@@ -317,30 +317,28 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
     if not customer_id:
         return
 
+    # Resolve the payment-error message BEFORE opening a DB connection
+    # so the session is not held open during a Stripe network call.
+    pi = data.get("payment_intent")
+    error_msg = None
+    if isinstance(pi, dict):
+        raw_err = pi.get("last_payment_error")
+        error_msg = raw_err.get("message") if isinstance(raw_err, dict) else None
+    elif isinstance(pi, str) and ensure_stripe():
+        try:
+            import stripe
+
+            pi_obj = stripe.PaymentIntent.retrieve(pi)
+            raw_err = getattr(pi_obj, "last_payment_error", None)
+            if raw_err:
+                error_msg = getattr(raw_err, "message", None)
+        except Exception:
+            log.debug("Failed to retrieve PaymentIntent {} for error details", pi)
+
     with use_db_session() as session:
         if not _mark_event_processed(session, event_id, event_type):
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
-
-        # last_payment_error lives on the PaymentIntent, not the Invoice.
-        # The invoice may carry payment_intent as an expanded object or a
-        # bare ID string (the default in webhook payloads).  Retrieve the
-        # PaymentIntent when it is unexpanded to capture the error message.
-        pi = data.get("payment_intent")
-        error_msg = None
-        if isinstance(pi, dict):
-            raw_err = pi.get("last_payment_error")
-            error_msg = raw_err.get("message") if isinstance(raw_err, dict) else None
-        elif isinstance(pi, str) and ensure_stripe():
-            try:
-                import stripe
-
-                pi_obj = stripe.PaymentIntent.retrieve(pi)
-                raw_err = getattr(pi_obj, "last_payment_error", None)
-                if raw_err:
-                    error_msg = getattr(raw_err, "message", None)
-            except Exception:
-                log.debug("Failed to retrieve PaymentIntent {} for error details", pi)
 
         result = session.execute(
             update(UserSubscription)
