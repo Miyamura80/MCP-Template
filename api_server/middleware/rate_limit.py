@@ -187,13 +187,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app, **kwargs)
         self._storage = _build_storage()
         self._limiter = MovingWindowRateLimiter(self._storage)
+        self._testing = os.getenv("TESTING") == "1"
+        if self._testing:
+            log.warning("Rate limiting disabled via TESTING=1 env var")
 
-    @staticmethod
-    def _should_skip(request: Request) -> bool:
+    def _should_skip(self, request: Request) -> bool:
         """Return True if this request should bypass rate limiting."""
         if request.url.path in _EXEMPT_PATHS:
             return True
-        if os.getenv("TESTING") == "1":
+        if self._testing:
             return True
         try:
             from common import global_config

@@ -79,7 +79,7 @@ def create_checkout(
         except SQLAlchemyError:
             session.rollback()
             log.error(
-                "DB error persisting Stripe customer {} for user {}",
+                "DB error persisting Stripe customer {} for user {} - customer may be orphaned in Stripe",
                 customer_id,
                 user.user_id,
             )

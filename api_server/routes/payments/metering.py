@@ -43,25 +43,14 @@ def report_usage(
 
     from datetime import UTC, datetime
 
-    # Atomic increment to prevent lost updates under concurrent load
-    session.execute(
-        update(UserSubscription)
-        .where(UserSubscription.user_id == user.user_id)
-        .values(
-            current_period_usage=UserSubscription.current_period_usage + 1,
-            updated_at=datetime.now(UTC),
-        )
-    )
-    session.commit()
-    session.refresh(sub)
-
-    # Report to Stripe if configured and user has a Stripe customer
+    # Report to Stripe first so the DB counter stays in sync with the
+    # billing meter.  When the client retries with the same
+    # Idempotency-Key, Stripe deduplicates the event and we skip the
+    # local increment, keeping both counters consistent.
+    idempotency_key = request.headers.get("Idempotency-Key")
     if ensure_stripe() and sub.stripe_customer_id:
         import stripe
 
-        # Use client-supplied Idempotency-Key when available so retries
-        # produce the same Stripe MeterEvent identifier (deduplication).
-        idempotency_key = request.headers.get("Idempotency-Key")
         identifier = idempotency_key or f"{sub.stripe_customer_id}-{uuid.uuid4().hex}"
         try:
             stripe.billing.MeterEvent.create(
@@ -77,6 +66,18 @@ def report_usage(
                 "Failed to report meter event for customer {}",
                 sub.stripe_customer_id,
             )
+
+    # Atomic increment to prevent lost updates under concurrent load
+    session.execute(
+        update(UserSubscription)
+        .where(UserSubscription.user_id == user.user_id)
+        .values(
+            current_period_usage=UserSubscription.current_period_usage + 1,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    session.refresh(sub)
 
     return {"usage": sub.current_period_usage}
 
