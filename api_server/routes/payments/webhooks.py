@@ -323,13 +323,24 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
             return
 
         # last_payment_error lives on the PaymentIntent, not the Invoice.
-        # The invoice may carry payment_intent as an expanded object or ID.
+        # The invoice may carry payment_intent as an expanded object or a
+        # bare ID string (the default in webhook payloads).  Retrieve the
+        # PaymentIntent when it is unexpanded to capture the error message.
         pi = data.get("payment_intent")
+        error_msg = None
         if isinstance(pi, dict):
             raw_err = pi.get("last_payment_error")
             error_msg = raw_err.get("message") if isinstance(raw_err, dict) else None
-        else:
-            error_msg = None
+        elif isinstance(pi, str) and ensure_stripe():
+            try:
+                import stripe
+
+                pi_obj = stripe.PaymentIntent.retrieve(pi)
+                raw_err = getattr(pi_obj, "last_payment_error", None)
+                if raw_err:
+                    error_msg = getattr(raw_err, "message", None)
+            except Exception:
+                log.debug("Failed to retrieve PaymentIntent {} for error details", pi)
 
         result = session.execute(
             update(UserSubscription)
