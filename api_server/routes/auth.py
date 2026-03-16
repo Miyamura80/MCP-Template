@@ -28,7 +28,12 @@ def create_key(
     user: AuthenticatedUser = Depends(get_authenticated_user),
     session: Session = Depends(get_db_session),
 ):
-    # Resolve scopes from template or explicit list
+    # Resolve scopes from template or explicit list (reject ambiguous requests)
+    if body.scope_template and body.scopes is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'scope_template' or 'scopes', not both.",
+        )
     scopes: list[str] | None = None
     if body.scope_template:
         if body.scope_template not in SCOPE_TEMPLATES:

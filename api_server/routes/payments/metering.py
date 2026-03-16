@@ -25,7 +25,13 @@ def report_usage(
     user: AuthenticatedUser = Depends(require_scopes("billing:write")),
     session: Session = Depends(get_db_session),
 ):
-    """Report a single usage event via Stripe Billing Meter."""
+    """Report a single usage event via Stripe Billing Meter.
+
+    This endpoint is for explicit metering (e.g. batch/external usage) and
+    is separate from the daily quota enforced by ``ensure_daily_limit`` on
+    service routes. Do not call this for actions that already pass through
+    the services route, as it would double-count usage.
+    """
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="No subscription found")

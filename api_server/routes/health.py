@@ -6,8 +6,15 @@ import os
 import subprocess
 import time
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 from fastapi import APIRouter
+
+try:
+    _APP_VERSION = _pkg_version("miyamura80-cli-template")
+except PackageNotFoundError:
+    _APP_VERSION = "0.1.0"
 
 router = APIRouter(tags=["health"])
 
@@ -120,7 +127,7 @@ def health_check():
 
     return {
         "status": overall,
-        "version": "0.1.0",
+        "version": _APP_VERSION,
         "commit": _get_git_commit(),
         "timestamp": datetime.now(UTC).isoformat(),
         "components": components,
