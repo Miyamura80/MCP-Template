@@ -186,10 +186,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._storage = _build_storage()
         self._limiter = MovingWindowRateLimiter(self._storage)
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        # Check if rate limiting is enabled
+    @staticmethod
+    def _should_skip(request: Request) -> bool:
+        """Return True if this request should bypass rate limiting."""
+        if request.url.path in _EXEMPT_PATHS:
+            return True
+        if os.getenv("TESTING") == "1":
+            return True
         try:
             from common import global_config
 
@@ -199,16 +202,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 and hasattr(rate_limit_cfg, "enabled")
                 and not rate_limit_cfg.enabled
             ):
-                return await call_next(request)
+                return True
         except Exception:
             pass
+        return False
 
-        # Skip exempt paths
-        if request.url.path in _EXEMPT_PATHS:
-            return await call_next(request)
-
-        # Skip rate limiting in test mode
-        if os.getenv("TESTING") == "1":
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        if self._should_skip(request):
             return await call_next(request)
 
         identity = _identity(request)
@@ -228,24 +230,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # between test() and hit() is acceptable: a concurrent request may
         # slip through, but guaranteed over-decrement under sustained load
         # is worse.
+        # Wrap in try/except so a Redis failure degrades gracefully (pass
+        # through) rather than converting every request to a 500.
         hit_window = None
         hit_item = None
-        for window_name, item in windows:
-            if not self._limiter.test(item, identity):
-                hit_window = window_name
-                hit_item = item
-                break
+        try:
+            for window_name, item in windows:
+                if not self._limiter.test(item, identity):
+                    hit_window = window_name
+                    hit_item = item
+                    break
 
-        if hit_window is None:
-            # All windows have capacity - consume a slot in each
-            for _, item in windows:
-                self._limiter.hit(item, identity)
+            if hit_window is None:
+                # All windows have capacity - consume a slot in each
+                for _, item in windows:
+                    self._limiter.hit(item, identity)
+        except Exception:
+            log.warning("Rate limiter error; allowing request through")
+            return await call_next(request)
 
         # Use minute window for response headers
         _minute_item = windows[1][1]
-        stats = self._limiter.get_window_stats(_minute_item, identity)
-        remaining = max(0, stats.remaining)
-        reset_time = stats.reset_time
+        try:
+            stats = self._limiter.get_window_stats(_minute_item, identity)
+            remaining = max(0, stats.remaining)
+            reset_time = stats.reset_time
+        except Exception:
+            remaining = 0
+            reset_time = time.time() + 60
         limit_val = limits_cfg.get("rpm", 60)
 
         if hit_window is not None and hit_item is not None:

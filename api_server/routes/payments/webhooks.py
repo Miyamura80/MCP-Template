@@ -149,8 +149,11 @@ _STRIPE_STATUS_MAP = {
     "trialing": SubscriptionStatus.TRIALING.value,
     "active": SubscriptionStatus.ACTIVE.value,
     "incomplete": SubscriptionStatus.INCOMPLETE.value,
+    "incomplete_expired": SubscriptionStatus.CANCELED.value,
     "past_due": SubscriptionStatus.PAST_DUE.value,
     "canceled": SubscriptionStatus.CANCELED.value,
+    "unpaid": SubscriptionStatus.PAST_DUE.value,
+    "paused": SubscriptionStatus.PAST_DUE.value,
 }
 
 
@@ -158,7 +161,7 @@ def _map_stripe_status(data: dict) -> tuple[str, bool]:
     """Map Stripe subscription status to local enum and is_active flag."""
     stripe_status = data.get("status", "active")
     local_status = _STRIPE_STATUS_MAP.get(
-        stripe_status, SubscriptionStatus.ACTIVE.value
+        stripe_status, SubscriptionStatus.PAST_DUE.value
     )
     is_active = stripe_status in ("trialing", "active")
     return local_status, is_active
