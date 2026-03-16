@@ -1,5 +1,6 @@
 """Structured error responses and request-ID propagation."""
 
+import json
 import uuid
 from typing import Any
 
@@ -92,7 +93,6 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 body_bytes = b""
                 async for chunk in response.body_iterator:  # type: ignore[union-attr]
                     body_bytes += chunk if isinstance(chunk, bytes) else chunk.encode()
-                import json
 
                 try:
                     data = json.loads(body_bytes)

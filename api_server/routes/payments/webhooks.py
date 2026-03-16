@@ -222,10 +222,13 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
 
         sub = _find_subscription_by_customer(session, customer_id)
         if not sub:
-            # Rollback so the processed-event record is not committed,
-            # allowing Stripe to retry (consistent with subscription.created).
+            # Rollback so the processed-event record is not committed
+            # and raise 500 so Stripe retries (consistent with
+            # subscription.created behavior).
             session.rollback()
-            return
+            raise HTTPException(
+                status_code=500, detail="Customer not found, will retry"
+            )
 
         local_status, is_active = _map_stripe_status(data)
 
