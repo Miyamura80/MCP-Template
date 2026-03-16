@@ -403,7 +403,7 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
             # Also reset daily_quota_reset_at so ensure_daily_limit re-triggers
             # the day-boundary reset on the next request (prevents quota bypass).
             sub.current_period_usage = 0
-            sub.daily_quota_reset_at = datetime(1970, 1, 1, tzinfo=UTC)
+            sub.daily_quota_reset_at = datetime.now(UTC)
             # Prefer subscription line-item period over invoice top-level
             # period_start/period_end, which may not match the subscription
             # billing cycle when invoices have multiple line items.

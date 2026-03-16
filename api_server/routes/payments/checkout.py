@@ -17,6 +17,23 @@ from db.models.user_subscriptions import UserSubscription
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
 
+def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) -> None:
+    """Best-effort cleanup of a Stripe customer orphaned by a checkout race."""
+    log.warning(
+        "Stripe customer {} orphaned due to concurrent checkout "
+        "race for user {}; using existing customer {}",
+        orphaned_id,
+        user_id,
+        winner_id,
+    )
+    try:
+        import stripe
+
+        stripe.Customer.delete(orphaned_id)
+    except Exception:
+        log.warning("Failed to delete orphaned Stripe customer {}", orphaned_id)
+
+
 @router.post("/checkout/create")
 def create_checkout(
     user: AuthenticatedUser = Depends(require_scopes("billing:write")),
@@ -82,12 +99,8 @@ def create_checkout(
             # otherwise keep the Stripe customer we just created.
             if sub and sub.stripe_customer_id:
                 customer_id = sub.stripe_customer_id
-                log.warning(
-                    "Stripe customer {} orphaned due to concurrent checkout "
-                    "race for user {}; using existing customer {}",
-                    orphaned_customer_id,
-                    user.user_id,
-                    customer_id,
+                _delete_orphaned_customer(
+                    orphaned_customer_id, user.user_id, customer_id
                 )
         except SQLAlchemyError:
             session.rollback()

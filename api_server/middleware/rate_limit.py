@@ -196,7 +196,7 @@ async def _resolve_tier(request: Request) -> str:
             from api_server.auth.workos_auth import verify_workos_token
 
             token = auth_header.removeprefix("Bearer ").strip()
-            workos_user = verify_workos_token(token)
+            workos_user = await asyncio.to_thread(verify_workos_token, token)
             if workos_user:
                 cache_key = f"jwt:{workos_user.user_id}"
                 return await asyncio.to_thread(
@@ -245,7 +245,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if self._should_skip(request):
             return await call_next(request)
 
-        identity = _identity(request)
+        identity = await asyncio.to_thread(_identity, request)
         tier = await _resolve_tier(request)
         limits_cfg = _get_tier_limits(tier)
 
