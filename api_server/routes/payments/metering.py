@@ -81,11 +81,12 @@ def report_usage(
             status_code=422,
             detail="Idempotency-Key header is required for metering requests",
         )
-    # "meter:" prefix (6 chars) + key must fit in event_id String(255)
-    if len(idempotency_key) > 249:
+    # DB key is "meter:{user_id}:{key}" and must fit in event_id String(255).
+    # Reserve 55 chars for the "meter:" prefix + user_id + colons.
+    if len(idempotency_key) > 200:
         raise HTTPException(
             status_code=422,
-            detail="Idempotency-Key must not exceed 249 characters",
+            detail="Idempotency-Key must not exceed 200 characters",
         )
 
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
@@ -103,13 +104,18 @@ def report_usage(
 
     from datetime import UTC, datetime
 
+    # Namespace dedup keys by user so two different users with the same
+    # Idempotency-Key header value don't collide.
+    db_dedup_key = f"meter:{user.user_id}:{idempotency_key}"
+    stripe_identifier = f"{sub.stripe_customer_id}:{idempotency_key}"
+
     # Re-use the processed_stripe_events table for PK-based dedup so
     # retries skip both the Stripe call and the local counter increment,
     # keeping the two in sync.
     try:
         session.add(
             ProcessedStripeEvent(
-                event_id=f"meter:{idempotency_key}",
+                event_id=db_dedup_key,
                 event_type="metering.report_usage",
             )
         )
@@ -123,7 +129,7 @@ def report_usage(
     # Report to Stripe (identifier deduplicates on Stripe's side).
     # If Stripe failed, rollback the dedup record so the caller can retry
     # with the same idempotency key.  Do not increment the local counter.
-    if not _report_to_stripe(sub, user.user_id, idempotency_key):
+    if not _report_to_stripe(sub, user.user_id, stripe_identifier):
         session.rollback()
         session.refresh(sub)
         raise HTTPException(

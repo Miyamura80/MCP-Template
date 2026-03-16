@@ -264,16 +264,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             pass
         return False
 
+    # Map window name → config key so 429 headers reflect the exceeded window.
+    _WINDOW_CFG_KEY = {"second": "rps", "minute": "rpm", "hour": "rph", "day": "rpd"}
+
     def _build_429(
         self,
         request: Request,
         hit_window: str,
         hit_item,
         identity: str,
-        limit_val: int,
         limits_cfg: dict,
     ) -> JSONResponse:
         """Build a 429 Too Many Requests response."""
+        cfg_key = self._WINDOW_CFG_KEY.get(hit_window, "rpm")
+        exceeded_limit = limits_cfg.get(cfg_key, 60)
         try:
             hit_stats = self._limiter.get_window_stats(hit_item, identity)
             retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
@@ -282,10 +286,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             retry_after = 60
             reset_ts = int(time.time()) + 60
         headers = {
-            "X-RateLimit-Limit": str(limit_val),
+            "X-RateLimit-Limit": str(exceeded_limit),
             "X-RateLimit-Remaining": "0",
             "X-RateLimit-Reset": str(reset_ts),
-            "RateLimit": f"limit={limit_val}, remaining=0, reset={reset_ts}",
+            "RateLimit": f"limit={exceeded_limit}, remaining=0, reset={reset_ts}",
             "RateLimit-Policy": f"{limits_cfg.get('rps', 5)};w=1, {limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600, {limits_cfg.get('rpd', 5000)};w=86400",
             "Retry-After": str(retry_after),
         }
@@ -376,9 +380,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limit_val = limits_cfg.get("rpm", 60)
 
         if hit_window is not None and hit_item is not None:
-            return self._build_429(
-                request, hit_window, hit_item, identity, limit_val, limits_cfg
-            )
+            return self._build_429(request, hit_window, hit_item, identity, limits_cfg)
 
         response = await call_next(request)
 

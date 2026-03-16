@@ -162,7 +162,9 @@ def cancel_subscription(
             cancel_at_period_end=True,
         )
     except stripe.InvalidRequestError as exc:
-        raise HTTPException(status_code=400, detail=str(exc.user_message)) from exc
+        raise HTTPException(
+            status_code=400, detail=exc.user_message or str(exc)
+        ) from exc
     except stripe.StripeError:
         raise HTTPException(
             status_code=502, detail="Failed to cancel subscription; please retry"
