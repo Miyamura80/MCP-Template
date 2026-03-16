@@ -319,9 +319,9 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
 def _resolve_payment_error(data: dict) -> str | None:
     """Extract last_payment_error message from the PaymentIntent.
 
-    Called after dedup to avoid Stripe API calls on retried events.
-    Runs outside the DB session to avoid holding a connection during
-    the network call.
+    Called after a fast-path dedup check to avoid Stripe API calls on
+    retried events.  Runs outside the DB session to avoid holding a
+    connection during the network call.
     """
     pi = data.get("payment_intent")
     if isinstance(pi, dict):
@@ -345,7 +345,13 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
     if not customer_id:
         return
 
-    # Resolve payment-error message before opening a DB session so the
+    # Fast-path: skip the Stripe API call for already-processed events.
+    with use_db_session() as pre_session:
+        if pre_session.get(ProcessedStripeEvent, event_id) is not None:
+            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+            return
+
+    # Resolve payment-error message outside the main DB session so the
     # connection is not held open during a Stripe network call.
     error_msg = _resolve_payment_error(data)
 

@@ -4,6 +4,7 @@ import collections.abc
 import functools
 import os
 import subprocess
+import threading
 import time
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
@@ -21,6 +22,7 @@ router = APIRouter(tags=["health"])
 # TTL cache for component health checks (avoids DB/Redis hit on every poll)
 _HEALTH_TTL = 15  # seconds
 _health_cache: dict[str, tuple[dict, float]] = {}
+_health_lock = threading.Lock()
 
 
 def _cached_check(name: str, check_fn: collections.abc.Callable[[], dict]) -> dict:
@@ -29,9 +31,15 @@ def _cached_check(name: str, check_fn: collections.abc.Callable[[], dict]) -> di
     now = time.monotonic()
     if cached and cached[1] > now:
         return cached[0]
-    result = check_fn()
-    _health_cache[name] = (result, now + _HEALTH_TTL)
-    return result
+    with _health_lock:
+        # Double-check after acquiring lock
+        cached = _health_cache.get(name)
+        now = time.monotonic()
+        if cached and cached[1] > now:
+            return cached[0]
+        result = check_fn()
+        _health_cache[name] = (result, now + _HEALTH_TTL)
+        return result
 
 
 def _check_database() -> dict:
