@@ -65,6 +65,9 @@ class UserSubscription(Base):
     current_period_usage: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )
+    daily_quota_reset_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     current_period_start: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

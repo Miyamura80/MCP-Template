@@ -3,11 +3,27 @@
 import functools
 import os
 import subprocess
+import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
 router = APIRouter(tags=["health"])
+
+# TTL cache for component health checks (avoids DB/Redis hit on every poll)
+_HEALTH_TTL = 15  # seconds
+_health_cache: dict[str, tuple[dict, float]] = {}
+
+
+def _cached_check(name: str, check_fn: callable) -> dict:
+    """Return cached result if fresh, otherwise call check_fn."""
+    cached = _health_cache.get(name)
+    now = time.monotonic()
+    if cached and cached[1] > now:
+        return cached[0]
+    result = check_fn()
+    _health_cache[name] = (result, now + _HEALTH_TTL)
+    return result
 
 
 def _check_database() -> dict:
@@ -89,9 +105,9 @@ def _get_git_commit() -> str | None:
 def health_check():
     components = {
         "api": {"status": "ok"},
-        "database": _check_database(),
-        "redis": _check_redis(),
-        "stripe": _check_stripe(),
+        "database": _cached_check("database", _check_database),
+        "redis": _cached_check("redis", _check_redis),
+        "stripe": _cached_check("stripe", _check_stripe),
     }
 
     # "ok" if all components are ok or not_configured; "degraded" if any errored

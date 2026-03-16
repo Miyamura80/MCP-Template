@@ -28,7 +28,9 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
     Raises HTTP 402 if the daily quota is exceeded.
 
     Uses an atomic UPDATE...WHERE to prevent race conditions under
-    concurrent load.
+    concurrent load. Uses ``daily_quota_reset_at`` (not
+    ``current_period_start``) for day-boundary tracking so the Stripe
+    billing period is never corrupted.
     """
     from common import global_config
 
@@ -37,10 +39,11 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
     sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
     if sub is None:
         try:
+            now = datetime.now(UTC)
             sub = UserSubscription(
                 user_id=user_id,
                 subscription_tier=SubscriptionTier.FREE.value,
-                current_period_start=datetime.now(UTC),
+                daily_quota_reset_at=now,
             )
             session.add(sub)
             session.commit()
@@ -57,37 +60,41 @@ def ensure_daily_limit(session: Session, user_id: str) -> LimitStatus:
     tier_cfg = cfg.tier_limits.get(tier_key)
     daily_limit = tier_cfg.daily_requests if tier_cfg else 100
 
-    # Initialise current_period_start if missing (e.g., checkout-created rows)
-    if sub.current_period_start is None:
+    # Initialise daily_quota_reset_at if missing (e.g., pre-migration rows)
+    reset_at = sub.daily_quota_reset_at
+    if reset_at is None:
+        now = datetime.now(UTC)
         session.execute(
             update(UserSubscription)
             .where(
                 UserSubscription.user_id == user_id,
-                UserSubscription.current_period_start.is_(None),
+                UserSubscription.daily_quota_reset_at.is_(None),
             )
             .values(
-                current_period_start=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
+                daily_quota_reset_at=now,
+                updated_at=now,
             )
         )
         session.commit()
         session.refresh(sub)
+        reset_at = sub.daily_quota_reset_at
 
     # Atomic day-boundary reset: merge reset + first increment into one
     # statement so concurrent requests can't clobber each other's counts.
-    if sub.current_period_start:
+    # Only touches daily_quota_reset_at, never current_period_start.
+    if reset_at:
         now = datetime.now(UTC)
-        if now.date() > sub.current_period_start.date():
+        if now.date() > reset_at.date():
             day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             result = session.execute(
                 update(UserSubscription)
                 .where(
                     UserSubscription.user_id == user_id,
-                    UserSubscription.current_period_start < day_start,
+                    UserSubscription.daily_quota_reset_at < day_start,
                 )
                 .values(
                     current_period_usage=1,
-                    current_period_start=now,
+                    daily_quota_reset_at=now,
                     updated_at=now,
                 )
             )
