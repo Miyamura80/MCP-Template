@@ -70,11 +70,11 @@ def _identity(request: Request) -> str:
     """
     api_key = request.headers.get("X-API-KEY", "")
     if api_key:
-        return "key:" + hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        return "key:" + hashlib.sha256(api_key.encode()).hexdigest()
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
-        return "bearer:" + hashlib.sha256(token.encode()).hexdigest()[:16]
+        return "bearer:" + hashlib.sha256(token.encode()).hexdigest()
     # Use the last X-Forwarded-For entry (appended by the trusted edge proxy).
     # Earlier entries are client-supplied and spoofable.
     forwarded_ips = request.headers.get("X-Forwarded-For", "").split(",")

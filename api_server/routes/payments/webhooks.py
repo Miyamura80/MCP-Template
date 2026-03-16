@@ -1,5 +1,6 @@
 """Stripe webhook handler with dual-secret verification."""
 
+import asyncio
 import random
 from datetime import UTC, datetime, timedelta
 
@@ -71,16 +72,24 @@ async def stripe_webhook(request: Request):
     event_type = event["type"]
     data = event["data"]["object"]
 
+    # Dispatch to sync handlers via asyncio.to_thread to avoid blocking
+    # the event loop during synchronous SQLAlchemy DB operations.
     if event_type == "customer.subscription.created":
-        _handle_subscription_created(data, event_id, event_type)
+        await asyncio.to_thread(
+            _handle_subscription_created, data, event_id, event_type
+        )
     elif event_type == "customer.subscription.updated":
-        _handle_subscription_updated(data, event_id, event_type)
+        await asyncio.to_thread(
+            _handle_subscription_updated, data, event_id, event_type
+        )
     elif event_type == "customer.subscription.deleted":
-        _handle_subscription_deleted(data, event_id, event_type)
+        await asyncio.to_thread(
+            _handle_subscription_deleted, data, event_id, event_type
+        )
     elif event_type == "invoice.payment_failed":
-        _handle_payment_failed(data, event_id, event_type)
+        await asyncio.to_thread(_handle_payment_failed, data, event_id, event_type)
     elif event_type == "invoice.payment_succeeded":
-        _handle_payment_succeeded(data, event_id, event_type)
+        await asyncio.to_thread(_handle_payment_succeeded, data, event_id, event_type)
     else:
         log.debug("Unhandled webhook event: {}", event_type)
 
