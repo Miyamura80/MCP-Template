@@ -121,10 +121,6 @@ def _get_git_commit() -> str | None:
         return None
 
 
-# Warm the cache at import time so the first health probe is fast.
-_get_git_commit()
-
-
 @router.get("/health")
 def health_check():
     components = {

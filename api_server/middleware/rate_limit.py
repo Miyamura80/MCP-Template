@@ -144,8 +144,10 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
                     .first()
                 )
                 tier = sub.subscription_tier if sub else "default"
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Tier lookup failed for key {}; defaulting: {}", cache_key[:8], exc)
+        # Don't cache failed lookups so the next request retries immediately
+        return tier
 
     # Evict entries if cache is at capacity.  Use a lock to prevent
     # multiple threads from evicting concurrently (which could over-evict
