@@ -106,6 +106,31 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
             now = datetime.now(UTC)
             if now.date() > reset_at.date():
                 day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                # Zero-quota tiers: reset the clock without claiming a slot
+                if daily_limit == 0:
+                    session.execute(
+                        update(UserSubscription)
+                        .where(
+                            UserSubscription.user_id == user_id,
+                            UserSubscription.daily_quota_reset_at < day_start,
+                        )
+                        .values(
+                            current_period_usage=0,
+                            daily_quota_reset_at=now,
+                            updated_at=now,
+                        )
+                    )
+                    session.commit()
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "code": "quota_exceeded",
+                            "message": f"Daily request limit (0) exceeded for {tier_key} tier.",
+                            "current_usage": 0,
+                            "daily_limit": 0,
+                            "tier": tier_key,
+                        },
+                    )
                 result = session.execute(
                     update(UserSubscription)
                     .where(
@@ -121,18 +146,6 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 session.commit()
                 session.refresh(sub)
                 if result.rowcount > 0:
-                    # We reset and claimed the first slot atomically
-                    if daily_limit == 0:
-                        raise HTTPException(
-                            status_code=402,
-                            detail={
-                                "code": "quota_exceeded",
-                                "message": f"Daily request limit (0) exceeded for {tier_key} tier.",
-                                "current_usage": 1,
-                                "daily_limit": 0,
-                                "tier": tier_key,
-                            },
-                        )
                     return LimitStatus(
                         allowed=True,
                         current_usage=1,

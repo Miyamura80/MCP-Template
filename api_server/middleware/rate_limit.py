@@ -73,6 +73,10 @@ def _identity(request: Request) -> str:
     Priority: API key hash > JWT user ID > client IP.
     JWT users are keyed on their stable user ID (not the ephemeral token
     hash) so that token rotation does not reset rate-limit counters.
+
+    Caches the resolved ``_rl_user_id`` on ``request.state`` so that
+    ``_resolve_tier`` can reuse it without calling ``verify_workos_token``
+    a second time.
     """
     api_key = request.headers.get("X-API-KEY", "")
     if api_key:
@@ -85,6 +89,7 @@ def _identity(request: Request) -> str:
 
             workos_user = verify_workos_token(token)
             if workos_user:
+                request.state._rl_user_id = workos_user.user_id
                 return (
                     "user:" + hashlib.sha256(workos_user.user_id.encode()).hexdigest()
                 )
@@ -178,7 +183,14 @@ async def _resolve_tier(request: Request) -> str:
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()
         return await asyncio.to_thread(_lookup_tier_sync, key_hash)
 
-    # For JWT Bearer tokens, decode the user_id and look up tier
+    # For JWT Bearer tokens, reuse the user_id resolved by _identity()
+    # (cached on request.state) to avoid calling verify_workos_token twice.
+    cached_user_id = getattr(request.state, "_rl_user_id", None)
+    if cached_user_id:
+        cache_key = f"jwt:{cached_user_id}"
+        return await asyncio.to_thread(
+            _lookup_tier_sync, cache_key, user_id=cached_user_id
+        )
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
