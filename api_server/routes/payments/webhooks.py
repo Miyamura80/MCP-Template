@@ -265,6 +265,8 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
         sub.is_active = is_active
         # Only promote to PLUS when subscription is actually active;
         # downgrade to FREE on cancellation/expiry so quota matches.
+        # PAST_DUE intentionally keeps PLUS tier as a grace period --
+        # downgrade occurs only on customer.subscription.deleted.
         # For multi-tier, resolve from data["items"]["data"][0]["price"]["id"].
         if is_active:
             sub.subscription_tier = SubscriptionTier.PLUS.value

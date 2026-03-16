@@ -17,6 +17,7 @@ from api_server.billing.stripe_config import (
 )
 from db.engine import get_db_session
 from db.models.processed_stripe_events import ProcessedStripeEvent
+from db.models.subscription_types import SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
 
 router = APIRouter(prefix="/api/v1/billing/usage", tags=["billing"])
@@ -35,11 +36,17 @@ def report_usage(
     service routes. Do not call this for actions that already pass through
     the services route, as it would double-count usage.
 
-    Pass an ``Idempotency-Key`` header to make retries safe: the key is
-    used to deduplicate both the Stripe MeterEvent and the local DB
-    counter increment.  Without a key, each call is treated as a unique
-    event.
+    Requires an ``Idempotency-Key`` header so that retries are safe: the
+    key deduplicates both the Stripe MeterEvent and the local DB counter
+    increment.
     """
+    idempotency_key = request.headers.get("Idempotency-Key")
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key header is required for metering requests",
+        )
+
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="No subscription found")
@@ -49,8 +56,6 @@ def report_usage(
         )
 
     from datetime import UTC, datetime
-
-    idempotency_key = request.headers.get("Idempotency-Key")
 
     # When an idempotency key is provided, check if we have already
     # processed this request.  Re-use the processed_stripe_events table
@@ -94,11 +99,9 @@ def report_usage(
                 sub.stripe_customer_id,
             )
 
-    # If Stripe failed and we have an idempotency key, rollback the dedup
-    # record and return without incrementing the local counter.  The caller
-    # can retry with the same key; the retry will own both the Stripe call
-    # and the counter update together.
-    if not stripe_ok and idempotency_key:
+    # If Stripe failed, rollback the dedup record so the caller can retry
+    # with the same idempotency key.  Do not increment the local counter.
+    if not stripe_ok:
         session.rollback()
         session.refresh(sub)
         raise HTTPException(
@@ -118,10 +121,7 @@ def report_usage(
     session.commit()
     session.refresh(sub)
 
-    result: dict = {"usage": sub.current_period_usage}
-    if not stripe_ok:
-        result["stripe_ok"] = False
-    return result
+    return {"usage": sub.current_period_usage}
 
 
 @router.get("/current")
@@ -129,17 +129,31 @@ def get_current_usage(
     user: AuthenticatedUser = Depends(require_scopes("billing:read")),
     session: Session = Depends(get_db_session),
 ):
-    """Return current period usage and overage info."""
+    """Return current period usage, daily quota limit, and billing overage info."""
+    from common import global_config
+
+    sub_cfg = global_config.subscription_config
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
+
+    tier_key = sub.subscription_tier if sub else SubscriptionTier.FREE.value
+    tier_cfg = sub_cfg.tier_limits.get(tier_key)
+    daily_limit = tier_cfg.daily_requests if tier_cfg else 100
+
     if not sub:
-        return {"usage": 0, "included": get_included_units(), "overage": 0}
+        return {
+            "usage": 0,
+            "daily_limit": daily_limit,
+            "billing_included_units": get_included_units(),
+            "overage": 0,
+        }
 
     included = get_included_units()
     overage = max(0, sub.current_period_usage - included)
 
     return {
         "usage": sub.current_period_usage,
-        "included": included,
+        "daily_limit": daily_limit,
+        "billing_included_units": included,
         "overage": overage,
         "period_start": sub.current_period_start.isoformat()
         if sub.current_period_start
