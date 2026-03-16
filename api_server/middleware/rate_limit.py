@@ -149,27 +149,24 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
         # Don't cache failed lookups so the next request retries immediately
         return tier
 
-    # Evict entries if cache is at capacity.  Use a lock to prevent
-    # multiple threads from evicting concurrently (which could over-evict
-    # and cause a thundering herd of cache misses).
-    if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
-        with _tier_cache_lock:
-            # Double-check after acquiring lock
+    # Evict entries if cache is at capacity and then write the new entry,
+    # all under the same lock to prevent the cache from transiently
+    # exceeding _TIER_CACHE_MAX_SIZE under concurrent load.
+    with _tier_cache_lock:
+        if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
+            now = time.time()
+            # First pass: remove expired entries
+            expired = [k for k, (_, exp) in list(_tier_cache.items()) if exp <= now]
+            for k in expired:
+                _tier_cache.pop(k, None)
+            # If still full, evict oldest 10% by expiry
             if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
-                now = time.time()
-                # First pass: remove expired entries
-                expired = [k for k, (_, exp) in list(_tier_cache.items()) if exp <= now]
-                for k in expired:
+                snapshot = list(_tier_cache.items())
+                by_expiry = sorted(snapshot, key=lambda x: x[1][1])
+                evict_count = max(1, len(by_expiry) // 10)
+                for k, _ in by_expiry[:evict_count]:
                     _tier_cache.pop(k, None)
-                # If still full, evict oldest 10% by expiry
-                if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
-                    snapshot = list(_tier_cache.items())
-                    by_expiry = sorted(snapshot, key=lambda x: x[1][1])
-                    evict_count = max(1, len(by_expiry) // 10)
-                    for k, _ in by_expiry[:evict_count]:
-                        _tier_cache.pop(k, None)
-
-    _tier_cache[cache_key] = (tier, time.time() + _TIER_CACHE_TTL)
+        _tier_cache[cache_key] = (tier, time.time() + _TIER_CACHE_TTL)
     return tier
 
 

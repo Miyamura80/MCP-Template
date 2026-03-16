@@ -352,9 +352,16 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
                 updated_at=datetime.now(UTC),
             )
         )
+        if result.rowcount == 0:
+            session.rollback()
+            log.warning(
+                "Received {} for unknown customer {}; will retry",
+                event_type,
+                customer_id,
+            )
+            raise _CustomerNotFoundError(customer_id)
         session.commit()
-        if result.rowcount:
-            log.warning("Payment failed for customer {}", customer_id)
+        log.warning("Payment failed for customer {}", customer_id)
 
 
 def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> None:
@@ -392,9 +399,10 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
             session.commit()
             log.info("Payment succeeded for customer {}", customer_id)
         else:
+            session.rollback()
             log.warning(
-                "Received {} for unknown customer {}; event marked processed",
+                "Received {} for unknown customer {}; will retry",
                 event_type,
                 customer_id,
             )
-            session.commit()
+            raise _CustomerNotFoundError(customer_id)

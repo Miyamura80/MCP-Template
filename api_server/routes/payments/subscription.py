@@ -1,5 +1,7 @@
 """Subscription status endpoint (dual-source: Stripe API + DB fallback)."""
 
+import time
+
 from fastapi import APIRouter, Depends
 from loguru import logger as log
 from sqlalchemy.orm import Session
@@ -12,6 +14,39 @@ from db.models.subscription_types import SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
 
 router = APIRouter(prefix="/api/v1/billing/subscription", tags=["billing"])
+
+# TTL cache for Stripe subscription status to avoid a live API call on
+# every request.  Keyed by stripe_subscription_id.
+_stripe_status_cache: dict[str, tuple[str, float]] = {}
+_STRIPE_STATUS_TTL = 60  # seconds
+
+
+def _get_stripe_status(stripe_sub_id: str) -> str | None:
+    """Fetch Stripe subscription status with a 60s TTL cache."""
+    cached = _stripe_status_cache.get(stripe_sub_id)
+    if cached and cached[1] > time.time():
+        return cached[0]
+
+    if not ensure_stripe():
+        return None
+
+    try:
+        import stripe
+
+        stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
+        if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
+            status = "canceling"
+        else:
+            status = stripe_sub.status
+        _stripe_status_cache[stripe_sub_id] = (status, time.time() + _STRIPE_STATUS_TTL)
+        return status
+    except Exception as exc:
+        log.debug(
+            "Stripe subscription lookup failed for {}: {}; falling back to DB",
+            stripe_sub_id,
+            exc,
+        )
+        return None
 
 
 @router.get("/status")
@@ -30,25 +65,9 @@ def subscription_status(
             "payment_status": "current",
         }
 
-    # Try Stripe for authoritative status if available
     stripe_status = None
-    if ensure_stripe() and sub.stripe_subscription_id:
-        try:
-            import stripe
-
-            stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id)
-            # Preserve local CANCELING: Stripe returns "active" when
-            # cancel_at_period_end=True, but we track cancellation separately.
-            if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
-                stripe_status = "canceling"
-            else:
-                stripe_status = stripe_sub.status
-        except Exception as exc:
-            log.debug(
-                "Stripe subscription lookup failed for {}: {}; falling back to DB",
-                sub.stripe_subscription_id,
-                exc,
-            )
+    if sub.stripe_subscription_id:
+        stripe_status = _get_stripe_status(sub.stripe_subscription_id)
 
     return {
         "tier": sub.subscription_tier,
