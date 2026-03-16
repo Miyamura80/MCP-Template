@@ -1,5 +1,6 @@
 """Health-check endpoint with component status (no auth required)."""
 
+import collections.abc
 import functools
 import os
 import subprocess
@@ -15,7 +16,7 @@ _HEALTH_TTL = 15  # seconds
 _health_cache: dict[str, tuple[dict, float]] = {}
 
 
-def _cached_check(name: str, check_fn: callable) -> dict:
+def _cached_check(name: str, check_fn: collections.abc.Callable[[], dict]) -> dict:
     """Return cached result if fresh, otherwise call check_fn."""
     cached = _health_cache.get(name)
     now = time.monotonic()

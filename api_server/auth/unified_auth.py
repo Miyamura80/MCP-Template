@@ -46,13 +46,6 @@ def get_authenticated_user(
     if api_key:
         row = validate_api_key(session, api_key)
         if row:
-            # Resolve subscription tier for rate limiting middleware
-            from db.models.user_subscriptions import UserSubscription
-
-            sub = session.query(UserSubscription).filter_by(user_id=row.user_id).first()
-            request.state.subscription_tier = (
-                sub.subscription_tier if sub else "default"
-            )
             return AuthenticatedUser(
                 user_id=row.user_id,
                 auth_method="api_key",
