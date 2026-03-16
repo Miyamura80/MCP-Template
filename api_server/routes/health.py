@@ -69,7 +69,7 @@ def _check_redis() -> dict:
             return {"status": "not_configured"}
         import redis
 
-        r = redis.from_url(redis_url, socket_connect_timeout=2)
+        r = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
         try:
             r.ping()
         finally:

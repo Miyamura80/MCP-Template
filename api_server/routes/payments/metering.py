@@ -86,6 +86,11 @@ def report_usage(
     # correct regardless of ID length.
     prefix_len = len(f"meter:{user.user_id}:")
     max_key_len = 255 - prefix_len
+    if max_key_len <= 0:
+        raise HTTPException(
+            status_code=500,
+            detail="User ID too long for metering dedup key",
+        )
     if len(idempotency_key) > max_key_len:
         raise HTTPException(
             status_code=422,

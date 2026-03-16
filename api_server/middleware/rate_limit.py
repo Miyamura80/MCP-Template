@@ -241,7 +241,17 @@ async def _resolve_tier(request: Request) -> str:
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Per-request rate limiting with tier-aware sliding windows."""
+    """Per-request rate limiting with tier-aware sliding windows.
+
+    Uses a two-phase ``test()`` then ``hit()`` approach instead of a
+    single ``hit()`` per window.  This avoids over-decrementing earlier
+    windows when a later window rejects, but introduces a TOCTOU gap
+    where up to N concurrent workers can pass ``test()`` simultaneously
+    before any of them calls ``hit()``.  Under sustained burst load this
+    may briefly exceed the per-second limit.  The trade-off is acceptable
+    for general API traffic; billing-critical endpoints are additionally
+    protected by the atomic ``UPDATE...WHERE`` in ``ensure_daily_limit``.
+    """
 
     def __init__(self, app, **kwargs):
         super().__init__(app, **kwargs)
