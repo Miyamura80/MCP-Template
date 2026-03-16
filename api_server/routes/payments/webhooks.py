@@ -153,7 +153,7 @@ _STRIPE_STATUS_MAP = {
     "past_due": SubscriptionStatus.PAST_DUE.value,
     "canceled": SubscriptionStatus.CANCELED.value,
     "unpaid": SubscriptionStatus.PAST_DUE.value,
-    "paused": SubscriptionStatus.PAST_DUE.value,
+    "paused": SubscriptionStatus.ACTIVE.value,  # Paused is voluntary, not delinquent
 }
 
 
@@ -163,7 +163,7 @@ def _map_stripe_status(data: dict) -> tuple[str, bool]:
     local_status = _STRIPE_STATUS_MAP.get(
         stripe_status, SubscriptionStatus.PAST_DUE.value
     )
-    is_active = stripe_status in ("trialing", "active")
+    is_active = stripe_status in ("trialing", "active", "paused")
     return local_status, is_active
 
 
