@@ -1,7 +1,7 @@
 """Daily usage limit enforcement."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from loguru import logger as log
@@ -136,6 +136,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     )
                 )
                 session.commit()
+                next_reset = day_start + timedelta(days=1)
                 raise HTTPException(
                     status_code=402,
                     detail={
@@ -144,6 +145,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                         "current_usage": 0,
                         "daily_limit": 0,
                         "tier": tier_key,
+                        "quota_reset_at": next_reset.isoformat(),
                     },
                 )
             result = session.execute(
@@ -191,6 +193,10 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
 
         if result.rowcount == 0:
             session.refresh(sub)
+            reset_ts = sub.daily_quota_reset_at or datetime.now(UTC)
+            next_reset = reset_ts.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) + timedelta(days=1)
             raise HTTPException(
                 status_code=402,
                 detail={
@@ -199,6 +205,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     "current_usage": sub.current_period_usage,
                     "daily_limit": daily_limit,
                     "tier": tier_key,
+                    "quota_reset_at": next_reset.isoformat(),
                 },
             )
 

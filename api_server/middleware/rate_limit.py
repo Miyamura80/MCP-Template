@@ -34,18 +34,25 @@ _tier_cache_lock = threading.Lock()
 
 def _build_storage() -> Storage:
     """Use Redis when REDIS_URL is set, otherwise in-memory."""
+    redis_url = None
     try:
         from common import global_config
 
         redis_url = getattr(global_config, "REDIS_URL", None)
-        if redis_url:
+    except Exception:
+        pass
+
+    if redis_url:
+        try:
             from limits.storage import RedisStorage
 
             return RedisStorage(redis_url)
-    except Exception:
-        log.warning(
-            "Redis unavailable for rate limiting, falling back to memory storage"
-        )
+        except Exception:
+            log.warning(
+                "Redis unavailable for rate limiting, falling back to memory storage"
+            )
+            return MemoryStorage()
+
     log.warning(
         "REDIS_URL not set: rate limiting uses in-memory storage. "
         "Limits will not be enforced across multiple workers or replicas."

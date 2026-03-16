@@ -1,6 +1,7 @@
 """API key scope definitions and validation."""
 
 from fastapi import Depends, HTTPException
+from loguru import logger as log
 
 from api_server.auth.unified_auth import AuthenticatedUser, get_authenticated_user
 
@@ -89,9 +90,15 @@ def require_scopes(*scopes: str):
         user: AuthenticatedUser = Depends(get_authenticated_user),
     ) -> AuthenticatedUser:
         if not check_scopes(list(scopes), user.scopes):
+            log.debug(
+                "Scope check failed for user {}: required={}, granted={}",
+                user.user_id,
+                list(scopes),
+                user.scopes,
+            )
             raise HTTPException(
                 status_code=403,
-                detail=f"Insufficient scopes. Required: {list(scopes)}",
+                detail="Insufficient permissions for this operation.",
             )
         return user
 
