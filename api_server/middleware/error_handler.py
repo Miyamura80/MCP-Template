@@ -61,10 +61,23 @@ def _build_error_response(
 class RequestIdMiddleware(BaseHTTPMiddleware):
     """Inject ``X-Request-ID`` from the incoming header or generate a uuid4."""
 
+    _MAX_ID_LEN = 128
+    _SAFE_CHARS = frozenset(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+    )
+
+    @classmethod
+    def _sanitize_request_id(cls, raw: str) -> str:
+        """Truncate and strip unsafe characters from a client-supplied ID."""
+        return "".join(c for c in raw[: cls._MAX_ID_LEN] if c in cls._SAFE_CHARS)
+
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        raw_id = request.headers.get("X-Request-ID", "")
+        request_id = self._sanitize_request_id(raw_id) if raw_id else uuid.uuid4().hex
+        if not request_id:
+            request_id = uuid.uuid4().hex
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id

@@ -54,6 +54,11 @@ def report_usage(
         raise HTTPException(
             status_code=402, detail="No active subscription for metering"
         )
+    if sub.subscription_tier == SubscriptionTier.FREE.value:
+        raise HTTPException(
+            status_code=402,
+            detail="Metering reporting requires an active paid subscription",
+        )
 
     from datetime import UTC, datetime
 
