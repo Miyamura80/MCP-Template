@@ -28,12 +28,11 @@ def _report_to_stripe(
     if not ensure_stripe():
         return True
     if not sub.stripe_customer_id:
-        log.warning(
-            "Skipping Stripe meter event for user {} (paid tier, no stripe_customer_id); "
-            "local counter will still increment -- billing drift possible",
+        log.error(
+            "Paid user {} has no stripe_customer_id; cannot report meter event",
             user_id,
         )
-        return True
+        return False
     import stripe
 
     try:

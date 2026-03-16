@@ -95,6 +95,9 @@ def _identity(request: Request) -> str:
                 )
         except Exception:
             pass
+        # Mark that JWT resolution was attempted (even if it failed) so
+        # _resolve_tier doesn't call verify_workos_token a second time.
+        request.state._rl_user_id_resolved = True
         # Fall back to token hash if verification fails
         return "bearer:" + hashlib.sha256(token.encode()).hexdigest()
     # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
@@ -190,6 +193,10 @@ async def _resolve_tier(request: Request) -> str:
         return await asyncio.to_thread(
             _lookup_tier_sync, cache_key, user_id=cached_user_id
         )
+    # If _identity already attempted JWT verification and it failed, don't
+    # call verify_workos_token a second time; fall through to default.
+    if getattr(request.state, "_rl_user_id_resolved", False):
+        return "default"
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:

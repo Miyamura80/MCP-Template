@@ -296,24 +296,24 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
             return
 
         sub = _find_subscription_by_customer(session, customer_id)
-        if sub:
-            sub.subscription_tier = SubscriptionTier.FREE.value
-            sub.subscription_status = SubscriptionStatus.CANCELED.value
-            sub.stripe_subscription_id = None
-            sub.is_active = False
-            # Reset usage so the user is not immediately quota-blocked
-            # on the lower free tier daily limit.
-            sub.current_period_usage = 0
-            sub.daily_quota_reset_at = datetime.now(UTC)
-            session.commit()
-            log.info("Subscription canceled for customer {}", customer_id)
-        else:
-            log.warning(
-                "Received {} for unknown customer {}; event marked processed",
+        if not sub:
+            log.error(
+                "Received {} for unknown customer {}; will retry",
                 event_type,
                 customer_id,
             )
-            session.commit()
+            raise _CustomerNotFoundError(customer_id)
+
+        sub.subscription_tier = SubscriptionTier.FREE.value
+        sub.subscription_status = SubscriptionStatus.CANCELED.value
+        sub.stripe_subscription_id = None
+        sub.is_active = False
+        # Reset usage so the user is not immediately quota-blocked
+        # on the lower free tier daily limit.
+        sub.current_period_usage = 0
+        sub.daily_quota_reset_at = datetime.now(UTC)
+        session.commit()
+        log.info("Subscription canceled for customer {}", customer_id)
 
 
 def _resolve_payment_error(data: dict) -> str | None:

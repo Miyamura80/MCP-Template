@@ -114,7 +114,10 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
         # statement so concurrent requests can't clobber each other's counts.
         # Only touches daily_quota_reset_at, never current_period_start.
         # reset_at is guaranteed non-None here (initialised above if missing).
-        assert reset_at is not None
+        if reset_at is None:
+            raise RuntimeError(
+                f"daily_quota_reset_at unexpectedly None for user {user_id}"
+            )
         now = datetime.now(UTC)
         if now.date() > reset_at.date():
             day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
