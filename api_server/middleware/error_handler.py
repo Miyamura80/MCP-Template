@@ -79,6 +79,62 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     """Catch exceptions and return a consistent JSON error envelope."""
 
+    @staticmethod
+    async def _rewrite_error_response(response: Response, request_id: str) -> Response:
+        """Buffer a JSON error body and wrap it in a consistent envelope."""
+        max_error_body = 1 << 20  # 1 MB cap
+        body_bytes = b""
+        async for chunk in response.body_iterator:  # type: ignore[union-attr]
+            body_bytes += chunk if isinstance(chunk, bytes) else chunk.encode()
+            if len(body_bytes) > max_error_body:
+                # Too large to rewrite; drain remaining chunks to
+                # avoid leaving the iterator in a partial state.
+                async for rest in response.body_iterator:  # type: ignore[union-attr]
+                    body_bytes += rest if isinstance(rest, bytes) else rest.encode()
+                return Response(
+                    content=body_bytes,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type,
+                )
+
+        try:
+            data = json.loads(body_bytes)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = {}
+
+        # If it already has our error envelope, just add the request ID
+        if "error" in data and isinstance(data["error"], dict):
+            data["error"]["request_id"] = request_id
+            fwd_headers = {
+                k: v
+                for k, v in response.headers.items()
+                if k.lower() not in ("content-length", "content-type")
+            }
+            return JSONResponse(
+                status_code=response.status_code,
+                content=data,
+                headers=fwd_headers,
+            )
+
+        # Convert FastAPI's {"detail": "..."} format
+        message = data.get("detail", "An error occurred")
+        if isinstance(message, list):
+            return _build_error_response(
+                response.status_code,
+                "Validation error",
+                request_id,
+                details={"errors": message},
+            )
+        if isinstance(message, dict):
+            return _build_error_response(
+                response.status_code,
+                message.get("message", "An error occurred"),
+                request_id,
+                details={k: v for k, v in message.items() if k != "message"},
+            )
+        return _build_error_response(response.status_code, str(message), request_id)
+
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
@@ -88,63 +144,8 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             # Convert non-2xx FastAPI/Starlette error responses into structured format.
             # Only buffer JSON responses to avoid breaking streaming endpoints.
             content_type = response.headers.get("content-type", "")
-            max_error_body = 1 << 20  # 1 MB cap
             if response.status_code >= 400 and "application/json" in content_type:
-                # Read the body to check if it's already structured
-                body_bytes = b""
-                async for chunk in response.body_iterator:  # type: ignore[union-attr]
-                    body_bytes += chunk if isinstance(chunk, bytes) else chunk.encode()
-                    if len(body_bytes) > max_error_body:
-                        # Too large to rewrite; pass through unchanged
-                        return Response(
-                            content=body_bytes,
-                            status_code=response.status_code,
-                            headers=dict(response.headers),
-                            media_type=response.media_type,
-                        )
-
-                try:
-                    data = json.loads(body_bytes)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    data = {}
-
-                # If it already has our error envelope, just add the request ID
-                if "error" in data and isinstance(data["error"], dict):
-                    data["error"]["request_id"] = request_id
-                    # Strip content-length/content-type so JSONResponse recomputes
-                    # them from the (possibly mutated) body.
-                    fwd_headers = {
-                        k: v
-                        for k, v in response.headers.items()
-                        if k.lower() not in ("content-length", "content-type")
-                    }
-                    return JSONResponse(
-                        status_code=response.status_code,
-                        content=data,
-                        headers=fwd_headers,
-                    )
-
-                # Convert FastAPI's {"detail": "..."} format
-                message = data.get("detail", "An error occurred")
-                if isinstance(message, list):
-                    # Pydantic validation errors
-                    return _build_error_response(
-                        response.status_code,
-                        "Validation error",
-                        request_id,
-                        details={"errors": message},
-                    )
-                if isinstance(message, dict):
-                    # Structured detail dict (e.g. 402 quota exceeded)
-                    return _build_error_response(
-                        response.status_code,
-                        message.get("message", "An error occurred"),
-                        request_id,
-                        details={k: v for k, v in message.items() if k != "message"},
-                    )
-                return _build_error_response(
-                    response.status_code, str(message), request_id
-                )
+                return await self._rewrite_error_response(response, request_id)
 
             return response
 

@@ -171,24 +171,23 @@ _STRIPE_STATUS_MAP = {
     "past_due": SubscriptionStatus.PAST_DUE.value,
     "canceled": SubscriptionStatus.CANCELED.value,
     "unpaid": SubscriptionStatus.PAST_DUE.value,
-    "paused": SubscriptionStatus.ACTIVE.value,  # Paused is voluntary, not delinquent
+    "paused": SubscriptionStatus.PAST_DUE.value,  # Treat paused as grace period
 }
 
 
 def _map_stripe_status(data: dict) -> tuple[str, bool]:
     """Map Stripe subscription status to local enum and is_active flag.
 
-    **Policy decision**: ``paused`` subscriptions retain active entitlements.
-    Stripe pauses collection voluntarily (e.g., customer request), so the
-    user is not delinquent.  If paused users should lose paid-tier access,
-    change the mapping to ``SubscriptionStatus.PAST_DUE`` and remove
-    ``"paused"`` from the ``is_active`` set below.
+    ``paused`` subscriptions are mapped to ``PAST_DUE`` and ``is_active=False``
+    because Stripe may pause collection during dunning flows, not only on
+    voluntary customer requests.  Paid-tier access is revoked until the
+    subscription returns to ``active`` or ``trialing``.
     """
     stripe_status = data.get("status", "active")
     local_status = _STRIPE_STATUS_MAP.get(
         stripe_status, SubscriptionStatus.PAST_DUE.value
     )
-    is_active = stripe_status in ("trialing", "active", "paused")
+    is_active = stripe_status in ("trialing", "active")
     return local_status, is_active
 
 

@@ -73,12 +73,20 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
         tier_key = sub.subscription_tier
         tier_cfg = cfg.tier_limits.get(tier_key)
         if tier_cfg is None:
-            log.warning(
-                "Unknown subscription tier {!r} for user {}; applying default limit",
+            log.error(
+                "Unknown subscription tier {!r} for user {}; "
+                "blocking request until tier is configured",
                 tier_key,
                 user_id,
             )
-        daily_limit = tier_cfg.daily_requests if tier_cfg else 100
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "misconfiguration",
+                    "message": "Subscription tier not configured",
+                },
+            )
+        daily_limit = tier_cfg.daily_requests
 
         # Initialise daily_quota_reset_at if missing (e.g., pre-migration rows)
         reset_at = sub.daily_quota_reset_at
