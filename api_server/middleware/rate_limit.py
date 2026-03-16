@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import math
 import os
+import threading
 import time
 
 from fastapi import Request, Response
@@ -28,6 +29,7 @@ _EXEMPT_PATHS = frozenset({"/health", "/api/v1/billing/webhook/stripe"})
 _tier_cache: dict[str, tuple[str, float]] = {}
 _TIER_CACHE_TTL = 60  # seconds
 _TIER_CACHE_MAX_SIZE = 10_000
+_tier_cache_lock = threading.Lock()
 
 
 def _build_storage() -> Storage:
@@ -127,22 +129,25 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
     except Exception:
         pass
 
-    # Evict entries if cache is at capacity.
-    # Iterate over snapshot lists to avoid RuntimeError from concurrent
-    # dict mutation in asyncio.to_thread workers.
+    # Evict entries if cache is at capacity.  Use a lock to prevent
+    # multiple threads from evicting concurrently (which could over-evict
+    # and cause a thundering herd of cache misses).
     if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
-        now = time.time()
-        # First pass: remove expired entries
-        expired = [k for k, (_, exp) in list(_tier_cache.items()) if exp <= now]
-        for k in expired:
-            _tier_cache.pop(k, None)
-        # If still full, evict oldest 10% by expiry to avoid thundering herd
-        if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
-            snapshot = list(_tier_cache.items())
-            by_expiry = sorted(snapshot, key=lambda x: x[1][1])
-            evict_count = max(1, len(by_expiry) // 10)
-            for k, _ in by_expiry[:evict_count]:
-                _tier_cache.pop(k, None)
+        with _tier_cache_lock:
+            # Double-check after acquiring lock
+            if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
+                now = time.time()
+                # First pass: remove expired entries
+                expired = [k for k, (_, exp) in list(_tier_cache.items()) if exp <= now]
+                for k in expired:
+                    _tier_cache.pop(k, None)
+                # If still full, evict oldest 10% by expiry
+                if len(_tier_cache) >= _TIER_CACHE_MAX_SIZE:
+                    snapshot = list(_tier_cache.items())
+                    by_expiry = sorted(snapshot, key=lambda x: x[1][1])
+                    evict_count = max(1, len(by_expiry) // 10)
+                    for k, _ in by_expiry[:evict_count]:
+                        _tier_cache.pop(k, None)
 
     _tier_cache[cache_key] = (tier, time.time() + _TIER_CACHE_TTL)
     return tier

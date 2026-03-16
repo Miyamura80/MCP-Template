@@ -114,7 +114,10 @@ def report_usage(
     session.commit()
     session.refresh(sub)
 
-    return {"usage": sub.current_period_usage}
+    result: dict = {"usage": sub.current_period_usage}
+    if not stripe_ok:
+        result["stripe_ok"] = False
+    return result
 
 
 @router.get("/current")

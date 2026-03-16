@@ -22,6 +22,28 @@ from db.models.user_subscriptions import UserSubscription
 router = APIRouter(prefix="/api/v1/billing/webhook", tags=["billing"])
 
 
+async def _dispatch_event(event_type: str, data: dict, event_id: str) -> None:
+    """Route a webhook event to the appropriate sync handler."""
+    if event_type == "customer.subscription.created":
+        await asyncio.to_thread(
+            _handle_subscription_created, data, event_id, event_type
+        )
+    elif event_type == "customer.subscription.updated":
+        await asyncio.to_thread(
+            _handle_subscription_updated, data, event_id, event_type
+        )
+    elif event_type == "customer.subscription.deleted":
+        await asyncio.to_thread(
+            _handle_subscription_deleted, data, event_id, event_type
+        )
+    elif event_type == "invoice.payment_failed":
+        await asyncio.to_thread(_handle_payment_failed, data, event_id, event_type)
+    elif event_type == "invoice.payment_succeeded":
+        await asyncio.to_thread(_handle_payment_succeeded, data, event_id, event_type)
+    else:
+        log.debug("Unhandled webhook event: {}", event_type)
+
+
 def _try_construct_event(payload: bytes, sig_header: str):
     """Try to verify with primary secret, then fallback to test secret."""
     import stripe
@@ -74,24 +96,14 @@ async def stripe_webhook(request: Request):
 
     # Dispatch to sync handlers via asyncio.to_thread to avoid blocking
     # the event loop during synchronous SQLAlchemy DB operations.
-    if event_type == "customer.subscription.created":
-        await asyncio.to_thread(
-            _handle_subscription_created, data, event_id, event_type
-        )
-    elif event_type == "customer.subscription.updated":
-        await asyncio.to_thread(
-            _handle_subscription_updated, data, event_id, event_type
-        )
-    elif event_type == "customer.subscription.deleted":
-        await asyncio.to_thread(
-            _handle_subscription_deleted, data, event_id, event_type
-        )
-    elif event_type == "invoice.payment_failed":
-        await asyncio.to_thread(_handle_payment_failed, data, event_id, event_type)
-    elif event_type == "invoice.payment_succeeded":
-        await asyncio.to_thread(_handle_payment_succeeded, data, event_id, event_type)
-    else:
-        log.debug("Unhandled webhook event: {}", event_type)
+    # _CustomerNotFoundError is a domain exception raised by handlers;
+    # convert it to an HTTP 500 here so Stripe retries the webhook.
+    try:
+        await _dispatch_event(event_type, data, event_id)
+    except _CustomerNotFoundError:
+        raise HTTPException(
+            status_code=500, detail="Customer not found, will retry"
+        ) from None
 
     # Probabilistic cleanup of old processed events (1% of requests)
     if random.random() < 0.01:  # noqa: S311
@@ -176,44 +188,37 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
     if not customer_id:
         return
 
-    try:
-        with use_db_session() as session:
-            if not _mark_event_processed(session, event_id, event_type):
-                log.debug("Duplicate event {} for customer {}", event_id, customer_id)
-                return
+    with use_db_session() as session:
+        if not _mark_event_processed(session, event_id, event_type):
+            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+            return
 
-            sub = _find_subscription_by_customer(session, customer_id)
-            if not sub:
-                log.error(
-                    "Received subscription.created for unknown customer {}; will retry",
-                    customer_id,
-                )
-                raise _CustomerNotFoundError(customer_id)
+        sub = _find_subscription_by_customer(session, customer_id)
+        if not sub:
+            log.error(
+                "Received subscription.created for unknown customer {}; will retry",
+                customer_id,
+            )
+            raise _CustomerNotFoundError(customer_id)
 
-            local_status, is_active = _map_stripe_status(data)
-            sub.stripe_subscription_id = data.get("id")
-            # Currently only the PLUS tier goes through Stripe checkout.
-            # If additional tiers are added, resolve via Stripe price/product
-            # metadata: data["items"]["data"][0]["price"]["id"].
-            sub.subscription_tier = SubscriptionTier.PLUS.value
-            sub.subscription_status = local_status
-            sub.is_active = is_active
+        local_status, is_active = _map_stripe_status(data)
+        sub.stripe_subscription_id = data.get("id")
+        # Currently only the PLUS tier goes through Stripe checkout.
+        # If additional tiers are added, resolve via Stripe price/product
+        # metadata: data["items"]["data"][0]["price"]["id"].
+        sub.subscription_tier = SubscriptionTier.PLUS.value
+        sub.subscription_status = local_status
+        sub.is_active = is_active
 
-            current_period = data.get("current_period_start")
-            if current_period:
-                sub.current_period_start = datetime.fromtimestamp(
-                    current_period, tz=UTC
-                )
-            period_end = data.get("current_period_end")
-            if period_end:
-                sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+        current_period = data.get("current_period_start")
+        if current_period:
+            sub.current_period_start = datetime.fromtimestamp(current_period, tz=UTC)
+        period_end = data.get("current_period_end")
+        if period_end:
+            sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
 
-            session.commit()
-            log.info("Subscription created for customer {}", customer_id)
-    except _CustomerNotFoundError:
-        raise HTTPException(
-            status_code=500, detail="Customer not found, will retry"
-        ) from None
+        session.commit()
+        log.info("Subscription created for customer {}", customer_id)
 
 
 def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> None:
@@ -221,51 +226,44 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
     if not customer_id:
         return
 
-    try:
-        with use_db_session() as session:
-            if not _mark_event_processed(session, event_id, event_type):
-                log.debug("Duplicate event {} for customer {}", event_id, customer_id)
-                return
+    with use_db_session() as session:
+        if not _mark_event_processed(session, event_id, event_type):
+            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
+            return
 
-            sub = _find_subscription_by_customer(session, customer_id)
-            if not sub:
-                log.error(
-                    "Received subscription.updated for unknown customer {}; will retry",
-                    customer_id,
-                )
-                raise _CustomerNotFoundError(customer_id)
+        sub = _find_subscription_by_customer(session, customer_id)
+        if not sub:
+            log.error(
+                "Received subscription.updated for unknown customer {}; will retry",
+                customer_id,
+            )
+            raise _CustomerNotFoundError(customer_id)
 
-            local_status, is_active = _map_stripe_status(data)
+        local_status, is_active = _map_stripe_status(data)
 
-            # Preserve local CANCELING state: Stripe keeps status "active"
-            # when cancel_at_period_end=True, but we track it separately.
-            if local_status == SubscriptionStatus.ACTIVE.value and data.get(
-                "cancel_at_period_end"
-            ):
-                local_status = SubscriptionStatus.CANCELING.value
+        # Preserve local CANCELING state: Stripe keeps status "active"
+        # when cancel_at_period_end=True, but we track it separately.
+        if local_status == SubscriptionStatus.ACTIVE.value and data.get(
+            "cancel_at_period_end"
+        ):
+            local_status = SubscriptionStatus.CANCELING.value
 
-            sub.subscription_status = local_status
-            sub.is_active = is_active
-            # Keep tier in sync with Stripe on plan changes.
-            # Currently only PLUS; for multi-tier, resolve from
-            # data["items"]["data"][0]["price"]["id"].
-            sub.subscription_tier = SubscriptionTier.PLUS.value
+        sub.subscription_status = local_status
+        sub.is_active = is_active
+        # Keep tier in sync with Stripe on plan changes.
+        # Currently only PLUS; for multi-tier, resolve from
+        # data["items"]["data"][0]["price"]["id"].
+        sub.subscription_tier = SubscriptionTier.PLUS.value
 
-            current_period = data.get("current_period_start")
-            if current_period:
-                sub.current_period_start = datetime.fromtimestamp(
-                    current_period, tz=UTC
-                )
-            period_end = data.get("current_period_end")
-            if period_end:
-                sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+        current_period = data.get("current_period_start")
+        if current_period:
+            sub.current_period_start = datetime.fromtimestamp(current_period, tz=UTC)
+        period_end = data.get("current_period_end")
+        if period_end:
+            sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
 
-            session.commit()
-            log.info("Subscription updated for customer {}", customer_id)
-    except _CustomerNotFoundError:
-        raise HTTPException(
-            status_code=500, detail="Customer not found, will retry"
-        ) from None
+        session.commit()
+        log.info("Subscription updated for customer {}", customer_id)
 
 
 def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> None:
