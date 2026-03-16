@@ -95,7 +95,7 @@ async def stripe_webhook(request: Request):
 
     # Probabilistic cleanup of old processed events (1% of requests)
     if random.random() < 0.01:  # noqa: S311
-        _cleanup_old_events()
+        await asyncio.to_thread(_cleanup_old_events)
 
     return {"received": True}
 

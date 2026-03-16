@@ -78,7 +78,7 @@ def _identity(request: Request) -> str:
     # Use the last X-Forwarded-For entry (appended by the trusted edge proxy).
     # Earlier entries are client-supplied and spoofable.
     forwarded_ips = request.headers.get("X-Forwarded-For", "").split(",")
-    forwarded = forwarded_ips[-1].strip() if forwarded_ips[0] else ""
+    forwarded = forwarded_ips[-1].strip() if forwarded_ips[-1].strip() else ""
     real_ip = (
         forwarded
         or request.headers.get("X-Real-IP", "")
