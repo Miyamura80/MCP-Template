@@ -100,12 +100,12 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         async for chunk in response.body_iterator:  # type: ignore[union-attr]
             body_bytes += chunk if isinstance(chunk, bytes) else chunk.encode()
             if len(body_bytes) > max_error_body:
-                # Too large to rewrite; drain remaining chunks to
-                # avoid leaving the iterator in a partial state.
-                async for rest in response.body_iterator:  # type: ignore[union-attr]
-                    body_bytes += rest if isinstance(rest, bytes) else rest.encode()
+                # Too large to rewrite; drain iterator without buffering
+                # to avoid unbounded memory usage.
+                async for _ in response.body_iterator:  # type: ignore[union-attr]
+                    pass
                 return Response(
-                    content=body_bytes,
+                    content=body_bytes,  # partial body up to the cap
                     status_code=response.status_code,
                     headers=dict(response.headers),
                     media_type=response.media_type,

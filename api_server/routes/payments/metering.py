@@ -44,6 +44,12 @@ def report_usage(
             status_code=422,
             detail="Idempotency-Key header is required for metering requests",
         )
+    # "meter:" prefix (6 chars) + key must fit in event_id String(255)
+    if len(idempotency_key) > 249:
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key must not exceed 249 characters",
+        )
 
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub:

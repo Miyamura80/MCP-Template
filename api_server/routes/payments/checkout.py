@@ -61,6 +61,7 @@ def create_checkout(
             session.commit()
         except IntegrityError:
             session.rollback()
+            orphaned_customer_id = customer_id
             sub = (
                 session.query(UserSubscription).filter_by(user_id=user.user_id).first()
             )
@@ -81,6 +82,13 @@ def create_checkout(
             # otherwise keep the Stripe customer we just created.
             if sub and sub.stripe_customer_id:
                 customer_id = sub.stripe_customer_id
+                log.warning(
+                    "Stripe customer {} orphaned due to concurrent checkout "
+                    "race for user {}; using existing customer {}",
+                    orphaned_customer_id,
+                    user.user_id,
+                    customer_id,
+                )
         except SQLAlchemyError:
             session.rollback()
             log.error(

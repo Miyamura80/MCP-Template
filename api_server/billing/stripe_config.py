@@ -14,6 +14,11 @@ def ensure_stripe() -> bool:
     Negative results are never cached so that secrets injected after
     startup (e.g. Railway / Kubernetes delayed secret binding) are
     picked up on the next call without a restart.
+
+    The positive cache is permanent for the process lifetime: once
+    initialized, ``ensure_stripe()`` will not detect a rotated or
+    revoked key.  Key validation happens on the first real Stripe API
+    call; a process restart is required after key rotation.
     """
     global _stripe_initialized  # noqa: PLW0603
     if _stripe_initialized:
