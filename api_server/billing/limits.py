@@ -24,8 +24,15 @@ class LimitStatus:
     tier: str
 
 
-def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscription:
-    """Return the user's subscription, creating a free-tier row if needed."""
+def _get_or_create_subscription(
+    session: Session, user_id: str, *, own_session: bool = True
+) -> UserSubscription:
+    """Return the user's subscription, creating a free-tier row if needed.
+
+    When *own_session* is ``False`` (caller provided an external session),
+    uses ``flush()`` instead of ``commit()`` to avoid prematurely committing
+    the caller's pending work.
+    """
     sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
     if sub is not None:
         return sub
@@ -38,7 +45,10 @@ def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscript
             daily_quota_reset_at=now,
         )
         session.add(sub)
-        session.commit()
+        if own_session:
+            session.commit()
+        else:
+            session.flush()
         session.refresh(sub)
         return sub
     except IntegrityError:
@@ -70,6 +80,8 @@ def ensure_daily_limit(user_id: str, db_session: Session | None = None) -> Limit
 
     cfg = global_config.subscription_config
 
+    _own_session = db_session is None
+
     @contextmanager
     def _session_ctx():
         if db_session is not None:
@@ -79,7 +91,7 @@ def ensure_daily_limit(user_id: str, db_session: Session | None = None) -> Limit
                 yield s
 
     with _session_ctx() as session:
-        sub = _get_or_create_subscription(session, user_id)
+        sub = _get_or_create_subscription(session, user_id, own_session=_own_session)
 
         tier_key = sub.subscription_tier
         tier_cfg = cfg.tier_limits.get(tier_key)

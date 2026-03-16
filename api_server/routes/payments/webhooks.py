@@ -232,6 +232,15 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
             )
             raise _CustomerNotFoundError(customer_id)
 
+        if _is_stale_event(data, sub):
+            log.debug(
+                "Skipping stale subscription.created event {} for customer {}",
+                event_id,
+                customer_id,
+            )
+            session.commit()
+            return
+
         local_status, is_active = _map_stripe_status(data)
         sub.stripe_subscription_id = data.get("id")
         # Currently only the PLUS tier goes through Stripe checkout.
