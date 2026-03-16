@@ -184,6 +184,14 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
             return
 
         local_status, is_active = _map_stripe_status(data)
+
+        # Preserve local CANCELING state: Stripe keeps status "active"
+        # when cancel_at_period_end=True, but we track it separately.
+        if local_status == SubscriptionStatus.ACTIVE.value and data.get(
+            "cancel_at_period_end"
+        ):
+            local_status = SubscriptionStatus.CANCELING.value
+
         sub.subscription_status = local_status
         sub.is_active = is_active
 
@@ -268,8 +276,11 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
             sub.payment_status = PaymentStatus.CURRENT.value
             sub.payment_failure_count = 0
             sub.last_payment_error = None
-            # Reset usage and advance period boundaries for the new billing cycle
+            # Reset usage and advance period boundaries for the new billing cycle.
+            # Also reset daily_quota_reset_at so ensure_daily_limit re-triggers
+            # the day-boundary reset on the next request (prevents quota bypass).
             sub.current_period_usage = 0
+            sub.daily_quota_reset_at = datetime(1970, 1, 1, tzinfo=UTC)
             period_start = data.get("period_start")
             if period_start:
                 sub.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)

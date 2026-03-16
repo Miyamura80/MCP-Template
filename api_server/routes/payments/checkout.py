@@ -1,6 +1,7 @@
 """Stripe checkout session creation and subscription cancellation."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
@@ -53,7 +54,27 @@ def create_checkout(
                 stripe_customer_id=customer_id,
             )
             session.add(sub)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            sub = (
+                session.query(UserSubscription).filter_by(user_id=user.user_id).first()
+            )
+            if (
+                sub
+                and sub.subscription_tier == SubscriptionTier.PLUS.value
+                and sub.subscription_status
+                in (
+                    SubscriptionStatus.ACTIVE.value,
+                    SubscriptionStatus.CANCELING.value,
+                )
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Active Plus subscription already exists",
+                ) from None
+            customer_id = sub.stripe_customer_id if sub else customer_id
 
     price_id = get_stripe_price_id()
     if not price_id:
