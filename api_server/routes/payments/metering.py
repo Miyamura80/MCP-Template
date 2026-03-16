@@ -91,9 +91,16 @@ def report_usage(
             )
 
     # If Stripe failed and we have an idempotency key, rollback the dedup
-    # record so the caller can retry and Stripe eventually gets billed.
+    # record and return without incrementing the local counter.  The caller
+    # can retry with the same key; the retry will own both the Stripe call
+    # and the counter update together.
     if not stripe_ok and idempotency_key:
         session.rollback()
+        session.refresh(sub)
+        raise HTTPException(
+            status_code=502,
+            detail="Stripe meter event failed; retry with the same Idempotency-Key",
+        )
 
     # Atomic increment to prevent lost updates under concurrent load
     session.execute(
