@@ -307,11 +307,12 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
 
-        raw_err = data.get("last_payment_error")
-        if isinstance(raw_err, dict):
-            error_msg = raw_err.get("message")
-        elif raw_err is not None:
-            error_msg = str(raw_err)
+        # last_payment_error lives on the PaymentIntent, not the Invoice.
+        # The invoice may carry payment_intent as an expanded object or ID.
+        pi = data.get("payment_intent")
+        if isinstance(pi, dict):
+            raw_err = pi.get("last_payment_error")
+            error_msg = raw_err.get("message") if isinstance(raw_err, dict) else None
         else:
             error_msg = None
 
