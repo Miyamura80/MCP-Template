@@ -131,7 +131,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     )
                     .values(
                         current_period_usage=0,
-                        daily_quota_reset_at=now,
+                        daily_quota_reset_at=day_start,
                         updated_at=now,
                     )
                 )
@@ -154,7 +154,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 )
                 .values(
                     current_period_usage=1,
-                    daily_quota_reset_at=now,
+                    daily_quota_reset_at=day_start,
                     updated_at=now,
                 )
             )

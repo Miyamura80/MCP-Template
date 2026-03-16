@@ -71,12 +71,15 @@ def _get_tier_limits(tier: str) -> dict:
     return {"rps": 5, "rpm": 60, "rph": 1000, "rpd": 5000}
 
 
-def _identity(request: Request) -> str:
+async def _identity(request: Request) -> str:
     """Resolve a stable identity for rate limiting.
 
     Priority: API key hash > JWT user ID > client IP.
     JWT users are keyed on their stable user ID (not the ephemeral token
     hash) so that token rotation does not reset rate-limit counters.
+
+    Only the blocking ``verify_workos_token`` call is offloaded via
+    ``asyncio.to_thread``; all other paths are pure in-memory work.
 
     Caches the resolved ``_rl_user_id`` on ``request.state`` so that
     ``_resolve_tier`` can reuse it without calling ``verify_workos_token``
@@ -91,7 +94,7 @@ def _identity(request: Request) -> str:
         try:
             from api_server.auth.workos_auth import verify_workos_token
 
-            workos_user = verify_workos_token(token)
+            workos_user = await asyncio.to_thread(verify_workos_token, token)
             if workos_user:
                 request.state._rl_user_id = workos_user.user_id
                 return (
@@ -256,7 +259,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if self._should_skip(request):
             return await call_next(request)
 
-        identity = await asyncio.to_thread(_identity, request)
+        identity = await _identity(request)
         tier = await _resolve_tier(request)
         limits_cfg = _get_tier_limits(tier)
 

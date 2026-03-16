@@ -40,30 +40,34 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         if cached and cached[1] > time.time():
             return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
 
-        try:
-            import stripe
+    # Network I/O outside the lock so concurrent callers are not serialized
+    # behind a single slow Stripe response.
+    try:
+        import stripe
 
-            stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
-            if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
-                status = "canceling"
-            else:
-                status = stripe_sub.status
+        stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
+        if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
+            status = "canceling"
+        else:
+            status = stripe_sub.status
+        with _stripe_status_lock:
             _stripe_status_cache[stripe_sub_id] = (
                 status,
                 time.time() + _STRIPE_STATUS_TTL,
             )
-            return status
-        except Exception as exc:
-            log.debug(
-                "Stripe subscription lookup failed for {}: {}; falling back to DB",
-                stripe_sub_id,
-                exc,
-            )
+        return status
+    except Exception as exc:
+        log.debug(
+            "Stripe subscription lookup failed for {}: {}; falling back to DB",
+            stripe_sub_id,
+            exc,
+        )
+        with _stripe_status_lock:
             _stripe_status_cache[stripe_sub_id] = (
                 _STRIPE_ERROR_SENTINEL,
                 time.time() + _STRIPE_ERROR_TTL,
             )
-            return None
+        return None
 
 
 @router.get("/status")

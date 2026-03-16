@@ -1,7 +1,6 @@
 """Health-check endpoint with component status (no auth required)."""
 
 import collections.abc
-import functools
 import os
 import subprocess
 import threading
@@ -106,30 +105,46 @@ def _check_stripe() -> dict:
         return {"status": "error", "message": type(exc).__name__}
 
 
-@functools.cache
+_git_commit_lock = threading.Lock()
+_git_commit_value: str | None = None
+_git_commit_resolved = False
+
+
 def _get_git_commit() -> str | None:
     """Get current git commit hash (cached after first call).
 
     Prefers build-time env vars (GIT_SHA, RENDER_GIT_COMMIT) for
     containerized deployments where git may not be available.
-    The subprocess fallback runs at most once (@functools.cache) and
-    executes in FastAPI's sync-endpoint threadpool, so it does not
-    block the async event loop.
+    Uses double-checked locking so the subprocess runs exactly once,
+    even under concurrent cold-start calls.  Executes in FastAPI's
+    sync-endpoint threadpool, so it does not block the async event loop.
     """
-    for var in ("GIT_SHA", "RENDER_GIT_COMMIT"):
-        val = os.getenv(var)
-        if val:
-            return val[:7]
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        return result.stdout.strip() if result.returncode == 0 else None
-    except Exception:
-        return None
+    global _git_commit_value, _git_commit_resolved
+    if _git_commit_resolved:
+        return _git_commit_value
+    with _git_commit_lock:
+        if _git_commit_resolved:
+            return _git_commit_value
+        for var in ("GIT_SHA", "RENDER_GIT_COMMIT"):
+            val = os.getenv(var)
+            if val:
+                _git_commit_value = val[:7]
+                _git_commit_resolved = True
+                return _git_commit_value
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            _git_commit_value = (
+                result.stdout.strip() if result.returncode == 0 else None
+            )
+        except Exception:
+            _git_commit_value = None
+        _git_commit_resolved = True
+        return _git_commit_value
 
 
 @router.get("/health")
