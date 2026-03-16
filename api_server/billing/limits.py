@@ -52,13 +52,13 @@ def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscript
     return sub
 
 
-def ensure_daily_limit(user_id: str, session: Session | None = None) -> LimitStatus:
+def ensure_daily_limit(user_id: str, db_session: Session | None = None) -> LimitStatus:
     """Check and enforce the daily request limit for a user.
 
     Creates a free-tier subscription row if none exists.
     Raises HTTP 402 if the daily quota is exceeded.
 
-    When *session* is provided (e.g. from FastAPI's ``Depends(get_db_session)``),
+    When *db_session* is provided (e.g. from FastAPI's ``Depends(get_db_session)``),
     it is reused to avoid opening a second pooled connection per request.
     When ``None``, a standalone session is created internally.
 
@@ -72,8 +72,8 @@ def ensure_daily_limit(user_id: str, session: Session | None = None) -> LimitSta
 
     @contextmanager
     def _session_ctx():
-        if session is not None:
-            yield session
+        if db_session is not None:
+            yield db_session
         else:
             with use_db_session() as s:
                 yield s

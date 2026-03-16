@@ -49,8 +49,11 @@ class UserSubscription(Base):
         String(255), nullable=True
     )
 
-    # Webhook deduplication
+    # Webhook deduplication and ordering
     last_stripe_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stripe_state_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Payment
     payment_status: Mapped[str] = mapped_column(

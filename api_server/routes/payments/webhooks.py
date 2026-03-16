@@ -199,16 +199,18 @@ class _CustomerNotFoundError(Exception):
 
 
 def _is_stale_event(data: dict, sub: UserSubscription) -> bool:
-    """Return True if this event predates the subscription's last DB update.
+    """Return True if this event predates the last webhook-driven state change.
 
     Stripe does not guarantee event delivery order. Comparing the event's
-    ``created`` timestamp against the subscription row's ``updated_at``
-    prevents an older event (e.g. subscription.updated with status=active)
-    from overwriting a newer state (e.g. subscription.deleted).
+    ``created`` timestamp against ``stripe_state_updated_at`` (set only by
+    webhook handlers, not by usage tracking or daily quota resets) prevents
+    an older event from overwriting a newer state.
     """
     event_created = data.get("created")
-    if event_created and sub.updated_at:
-        return datetime.fromtimestamp(event_created, tz=UTC) < sub.updated_at
+    if event_created and sub.stripe_state_updated_at:
+        return (
+            datetime.fromtimestamp(event_created, tz=UTC) < sub.stripe_state_updated_at
+        )
     return False
 
 
@@ -238,6 +240,7 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
         sub.subscription_tier = SubscriptionTier.PLUS.value
         sub.subscription_status = local_status
         sub.is_active = is_active
+        sub.stripe_state_updated_at = datetime.now(UTC)
 
         current_period = data.get("current_period_start")
         if current_period:
@@ -300,6 +303,8 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
             # Clear to prevent stale Stripe polling from the status endpoint
             sub.stripe_subscription_id = None
 
+        sub.stripe_state_updated_at = datetime.now(UTC)
+
         current_period = data.get("current_period_start")
         if current_period:
             sub.current_period_start = datetime.fromtimestamp(current_period, tz=UTC)
@@ -344,6 +349,7 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
         sub.subscription_status = SubscriptionStatus.CANCELED.value
         sub.stripe_subscription_id = None
         sub.is_active = False
+        sub.stripe_state_updated_at = datetime.now(UTC)
         # Reset usage so the user is not immediately quota-blocked
         # on the lower free tier daily limit.
         sub.current_period_usage = 0

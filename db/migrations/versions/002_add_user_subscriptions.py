@@ -41,6 +41,7 @@ def upgrade() -> None:
         ),
         sa.Column("stripe_subscription_id", sa.String(255), nullable=True),
         sa.Column("stripe_meter_event_name", sa.String(255), nullable=True),
+        sa.Column("stripe_state_updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "payment_status", sa.String(50), nullable=False, server_default="current"
         ),

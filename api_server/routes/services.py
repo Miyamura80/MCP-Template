@@ -48,7 +48,7 @@ def _make_route(entry: ServiceEntry) -> None:
         # Quota is consumed before execution (charges for attempts, not
         # results) to prevent abuse via intentional error-triggering.
         # Pass the existing session to avoid opening a second DB connection.
-        ensure_daily_limit(_user.user_id, session=_session)
+        ensure_daily_limit(_user.user_id, db_session=_session)
         return func(body)
 
 

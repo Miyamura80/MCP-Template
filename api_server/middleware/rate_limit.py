@@ -144,26 +144,10 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
         with use_db_session() as session:
             resolved_user_id = user_id
             if resolved_user_id is None:
-                # cache_key is an API key hash - look up the user
-                from datetime import UTC, datetime
+                # Reuse the canonical key validity check from api_key_auth
+                from api_server.auth.api_key_auth import get_user_id_for_key_hash
 
-                from sqlalchemy import or_
-
-                from db.models.api_keys import APIKey
-
-                row = (
-                    session.query(APIKey.user_id)
-                    .filter(
-                        APIKey.key_hash == cache_key,
-                        APIKey.revoked.is_(False),
-                        or_(
-                            APIKey.expires_at.is_(None),
-                            APIKey.expires_at > datetime.now(UTC),
-                        ),
-                    )
-                    .first()
-                )
-                resolved_user_id = row.user_id if row else None
+                resolved_user_id = get_user_id_for_key_hash(session, cache_key)
 
             if resolved_user_id:
                 sub = (
