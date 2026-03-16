@@ -81,11 +81,11 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         else:
             status = stripe_sub.status
         with _stripe_status_lock:
+            _evict_stripe_cache()
             _stripe_status_cache[stripe_sub_id] = (
                 status,
                 time.time() + _STRIPE_STATUS_TTL,
             )
-            _evict_stripe_cache()
         return status
     except Exception as exc:
         log.debug(
@@ -94,11 +94,11 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
             exc,
         )
         with _stripe_status_lock:
+            _evict_stripe_cache()
             _stripe_status_cache[stripe_sub_id] = (
                 _STRIPE_ERROR_SENTINEL,
                 time.time() + _STRIPE_ERROR_TTL,
             )
-            _evict_stripe_cache()
         return None
     finally:
         with _stripe_status_lock:

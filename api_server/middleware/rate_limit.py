@@ -264,14 +264,70 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             pass
         return False
 
+    def _build_429(
+        self,
+        request: Request,
+        hit_window: str,
+        hit_item,
+        identity: str,
+        limit_val: int,
+        limits_cfg: dict,
+    ) -> JSONResponse:
+        """Build a 429 Too Many Requests response."""
+        try:
+            hit_stats = self._limiter.get_window_stats(hit_item, identity)
+            retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
+            reset_ts = int(hit_stats.reset_time)
+        except Exception:
+            retry_after = 60
+            reset_ts = int(time.time()) + 60
+        headers = {
+            "X-RateLimit-Limit": str(limit_val),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(reset_ts),
+            "RateLimit": f"limit={limit_val}, remaining=0, reset={reset_ts}",
+            "RateLimit-Policy": f"{limits_cfg.get('rps', 5)};w=1, {limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600, {limits_cfg.get('rpd', 5000)};w=86400",
+            "Retry-After": str(retry_after),
+        }
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "code": "rate_limited",
+                    "message": f"Rate limit exceeded ({hit_window} window). Retry after {retry_after}s.",
+                    "request_id": getattr(request.state, "request_id", ""),
+                }
+            },
+            headers=headers,
+        )
+
+    async def _resolve_request_context(
+        self, request: Request
+    ) -> tuple[str, str] | None:
+        """Resolve identity and tier for a request.
+
+        Returns ``(identity, tier)`` or ``None`` on failure.
+        """
+        try:
+            identity = await _identity(request)
+            tier = await _resolve_tier(request)
+            return identity, tier
+        except Exception:
+            log.warning(
+                "Rate limiter identity/tier resolution error; allowing request through"
+            )
+            return None
+
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
         if self._should_skip(request):
             return await call_next(request)
 
-        identity = await _identity(request)
-        tier = await _resolve_tier(request)
+        ctx = await self._resolve_request_context(request)
+        if ctx is None:
+            return await call_next(request)
+        identity, tier = ctx
         limits_cfg = _get_tier_limits(tier)
 
         # Build rate limit items for each window
@@ -320,33 +376,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limit_val = limits_cfg.get("rpm", 60)
 
         if hit_window is not None and hit_item is not None:
-            # Rate limited - wrap stats call so Redis errors degrade
-            # to a generic 429 rather than a 500.
-            try:
-                hit_stats = self._limiter.get_window_stats(hit_item, identity)
-                retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
-                reset_ts = int(hit_stats.reset_time)
-            except Exception:
-                retry_after = 60
-                reset_ts = int(time.time()) + 60
-            headers = {
-                "X-RateLimit-Limit": str(limit_val),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(reset_ts),
-                "RateLimit": f"limit={limit_val}, remaining=0, reset={reset_ts}",
-                "RateLimit-Policy": f"{limits_cfg.get('rps', 5)};w=1, {limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600, {limits_cfg.get('rpd', 5000)};w=86400",
-                "Retry-After": str(retry_after),
-            }
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": {
-                        "code": "rate_limited",
-                        "message": f"Rate limit exceeded ({hit_window} window). Retry after {retry_after}s.",
-                        "request_id": getattr(request.state, "request_id", ""),
-                    }
-                },
-                headers=headers,
+            return self._build_429(
+                request, hit_window, hit_item, identity, limit_val, limits_cfg
             )
 
         response = await call_next(request)

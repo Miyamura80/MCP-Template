@@ -51,7 +51,9 @@ def validate_scopes(scopes: list[str], *, allow_templates: bool = True) -> list[
             s == "*"
             or s in ALL_SCOPES
             or (
-                s.endswith(":*") and s.split(":")[0] in {"services", "billing", "admin"}
+                s.endswith(":*")
+                and s.split(":")[0]
+                in {scope.split(":")[0] for scope in ALL_SCOPES if ":" in scope}
             )
         ):
             resolved.append(s)
