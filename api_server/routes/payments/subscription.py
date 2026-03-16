@@ -47,7 +47,9 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         if cached and cached[1] > time.time():
             return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
         if stripe_sub_id in _stripe_in_flight:
-            return cached[0] if cached else None
+            if cached:
+                return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
+            return None
         _stripe_in_flight.add(stripe_sub_id)
 
     # Network I/O outside the lock.
