@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from loguru import logger as log
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from db.engine import use_db_session
 from db.models.subscription_types import SubscriptionTier
@@ -20,6 +21,34 @@ class LimitStatus:
     daily_limit: int
     remaining: int
     tier: str
+
+
+def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscription:
+    """Return the user's subscription, creating a free-tier row if needed."""
+    sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
+    if sub is not None:
+        return sub
+
+    try:
+        now = datetime.now(UTC)
+        sub = UserSubscription(
+            user_id=user_id,
+            subscription_tier=SubscriptionTier.FREE.value,
+            daily_quota_reset_at=now,
+        )
+        session.add(sub)
+        session.commit()
+        session.refresh(sub)
+        return sub
+    except IntegrityError:
+        session.rollback()
+        sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
+
+    if sub is None:
+        raise RuntimeError(
+            f"Failed to create or retrieve subscription for user {user_id}"
+        )
+    return sub
 
 
 def ensure_daily_limit(user_id: str) -> LimitStatus:
@@ -39,26 +68,8 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
     cfg = global_config.subscription_config
 
     with use_db_session() as session:
-        sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
-        if sub is None:
-            try:
-                now = datetime.now(UTC)
-                sub = UserSubscription(
-                    user_id=user_id,
-                    subscription_tier=SubscriptionTier.FREE.value,
-                    daily_quota_reset_at=now,
-                )
-                session.add(sub)
-                session.commit()
-                session.refresh(sub)
-            except IntegrityError:
-                session.rollback()
-                sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
+        sub = _get_or_create_subscription(session, user_id)
 
-        if sub is None:
-            raise RuntimeError(
-                f"Failed to create or retrieve subscription for user {user_id}"
-            )
         tier_key = sub.subscription_tier
         tier_cfg = cfg.tier_limits.get(tier_key)
         if tier_cfg is None:
@@ -111,6 +122,17 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 session.refresh(sub)
                 if result.rowcount > 0:
                     # We reset and claimed the first slot atomically
+                    if daily_limit == 0:
+                        raise HTTPException(
+                            status_code=402,
+                            detail={
+                                "code": "quota_exceeded",
+                                "message": f"Daily request limit (0) exceeded for {tier_key} tier.",
+                                "current_usage": 1,
+                                "daily_limit": 0,
+                                "tier": tier_key,
+                            },
+                        )
                     return LimitStatus(
                         allowed=True,
                         current_usage=1,

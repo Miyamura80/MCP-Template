@@ -88,11 +88,20 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             # Convert non-2xx FastAPI/Starlette error responses into structured format.
             # Only buffer JSON responses to avoid breaking streaming endpoints.
             content_type = response.headers.get("content-type", "")
+            max_error_body = 1 << 20  # 1 MB cap
             if response.status_code >= 400 and "application/json" in content_type:
                 # Read the body to check if it's already structured
                 body_bytes = b""
                 async for chunk in response.body_iterator:  # type: ignore[union-attr]
                     body_bytes += chunk if isinstance(chunk, bytes) else chunk.encode()
+                    if len(body_bytes) > max_error_body:
+                        # Too large to rewrite; pass through unchanged
+                        return Response(
+                            content=body_bytes,
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            media_type=response.media_type,
+                        )
 
                 try:
                     data = json.loads(body_bytes)
