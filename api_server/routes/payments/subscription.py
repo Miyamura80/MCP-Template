@@ -1,5 +1,6 @@
 """Subscription status endpoint (dual-source: Stripe API + DB fallback)."""
 
+import threading
 import time
 
 from fastapi import APIRouter, Depends
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api/v1/billing/subscription", tags=["billing"])
 # TTL cache for Stripe subscription status to avoid a live API call on
 # every request.  Keyed by stripe_subscription_id.
 _stripe_status_cache: dict[str, tuple[str, float]] = {}
+_stripe_status_lock = threading.Lock()
 _STRIPE_STATUS_TTL = 60  # seconds
 
 
@@ -30,23 +32,32 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
     if not ensure_stripe():
         return None
 
-    try:
-        import stripe
+    with _stripe_status_lock:
+        # Double-check after acquiring lock
+        cached = _stripe_status_cache.get(stripe_sub_id)
+        if cached and cached[1] > time.time():
+            return cached[0]
 
-        stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
-        if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
-            status = "canceling"
-        else:
-            status = stripe_sub.status
-        _stripe_status_cache[stripe_sub_id] = (status, time.time() + _STRIPE_STATUS_TTL)
-        return status
-    except Exception as exc:
-        log.debug(
-            "Stripe subscription lookup failed for {}: {}; falling back to DB",
-            stripe_sub_id,
-            exc,
-        )
-        return None
+        try:
+            import stripe
+
+            stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
+            if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
+                status = "canceling"
+            else:
+                status = stripe_sub.status
+            _stripe_status_cache[stripe_sub_id] = (
+                status,
+                time.time() + _STRIPE_STATUS_TTL,
+            )
+            return status
+        except Exception as exc:
+            log.debug(
+                "Stripe subscription lookup failed for {}: {}; falling back to DB",
+                stripe_sub_id,
+                exc,
+            )
+            return None
 
 
 @router.get("/status")

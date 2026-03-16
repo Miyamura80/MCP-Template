@@ -271,6 +271,8 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
             sub.subscription_tier = SubscriptionTier.PLUS.value
         elif local_status == SubscriptionStatus.CANCELED.value:
             sub.subscription_tier = SubscriptionTier.FREE.value
+            # Clear to prevent stale Stripe polling from the status endpoint
+            sub.stripe_subscription_id = None
 
         current_period = data.get("current_period_start")
         if current_period:
@@ -314,34 +316,47 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
             session.commit()
 
 
-def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
-    customer_id = data.get("customer")
-    if not customer_id:
-        return
+def _resolve_payment_error(data: dict) -> str | None:
+    """Extract last_payment_error message from the PaymentIntent.
 
-    # Resolve the payment-error message BEFORE opening a DB connection
-    # so the session is not held open during a Stripe network call.
+    Called after dedup to avoid Stripe API calls on retried events.
+    Runs outside the DB session to avoid holding a connection during
+    the network call.
+    """
     pi = data.get("payment_intent")
-    error_msg = None
     if isinstance(pi, dict):
         raw_err = pi.get("last_payment_error")
-        error_msg = raw_err.get("message") if isinstance(raw_err, dict) else None
-    elif isinstance(pi, str) and ensure_stripe():
+        return raw_err.get("message") if isinstance(raw_err, dict) else None
+    if isinstance(pi, str) and ensure_stripe():
         try:
             import stripe
 
             pi_obj = stripe.PaymentIntent.retrieve(pi)
             raw_err = getattr(pi_obj, "last_payment_error", None)
             if raw_err:
-                error_msg = getattr(raw_err, "message", None)
+                return getattr(raw_err, "message", None)
         except Exception:
             log.debug("Failed to retrieve PaymentIntent {} for error details", pi)
+    return None
 
+
+def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
+    customer_id = data.get("customer")
+    if not customer_id:
+        return
+
+    # Dedup first to avoid unnecessary Stripe API calls on retried events.
     with use_db_session() as session:
         if not _mark_event_processed(session, event_id, event_type):
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
+        session.commit()
 
+    # Resolve payment-error message outside DB session so the connection
+    # is not held open during a Stripe network call.
+    error_msg = _resolve_payment_error(data)
+
+    with use_db_session() as session:
         result = session.execute(
             update(UserSubscription)
             .where(UserSubscription.stripe_customer_id == customer_id)

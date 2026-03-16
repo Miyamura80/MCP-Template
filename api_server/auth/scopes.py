@@ -31,15 +31,21 @@ SCOPE_TEMPLATES: dict[str, list[str]] = {
 }
 
 
-def validate_scopes(scopes: list[str]) -> list[str]:
+def validate_scopes(scopes: list[str], *, allow_templates: bool = True) -> list[str]:
     """Expand templates and validate scope strings.
 
     Returns the resolved list of scopes.
     Raises ``ValueError`` for unknown scopes.
+    Set *allow_templates* to ``False`` to reject template names
+    (callers should use the ``scope_template`` field instead).
     """
     resolved: list[str] = []
     for s in scopes:
         if s in SCOPE_TEMPLATES:
+            if not allow_templates:
+                raise ValueError(
+                    f"{s!r} is a scope template; use the 'scope_template' field instead"
+                )
             resolved.extend(SCOPE_TEMPLATES[s])
         elif (
             s == "*"

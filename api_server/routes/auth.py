@@ -45,7 +45,7 @@ def create_key(
         scopes = validate_scopes([body.scope_template])
     elif body.scopes is not None:
         try:
-            scopes = validate_scopes(body.scopes)
+            scopes = validate_scopes(body.scopes, allow_templates=False)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
