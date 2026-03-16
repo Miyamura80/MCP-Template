@@ -1,7 +1,5 @@
 """Metered usage reporting via Stripe Billing Meter API."""
 
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger as log
 from sqlalchemy import update
@@ -84,7 +82,7 @@ def report_usage(
     if ensure_stripe() and sub.stripe_customer_id:
         import stripe
 
-        identifier = idempotency_key or f"{sub.stripe_customer_id}-{uuid.uuid4().hex}"
+        identifier = idempotency_key
         try:
             stripe.billing.MeterEvent.create(
                 event_name=get_meter_event_name(),

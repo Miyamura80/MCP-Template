@@ -113,58 +113,59 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
         # Atomic day-boundary reset: merge reset + first increment into one
         # statement so concurrent requests can't clobber each other's counts.
         # Only touches daily_quota_reset_at, never current_period_start.
-        if reset_at:
-            now = datetime.now(UTC)
-            if now.date() > reset_at.date():
-                day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                # Zero-quota tiers: reset the clock without claiming a slot
-                if daily_limit == 0:
-                    session.execute(
-                        update(UserSubscription)
-                        .where(
-                            UserSubscription.user_id == user_id,
-                            UserSubscription.daily_quota_reset_at < day_start,
-                        )
-                        .values(
-                            current_period_usage=0,
-                            daily_quota_reset_at=now,
-                            updated_at=now,
-                        )
-                    )
-                    session.commit()
-                    raise HTTPException(
-                        status_code=402,
-                        detail={
-                            "code": "quota_exceeded",
-                            "message": f"Daily request limit (0) exceeded for {tier_key} tier.",
-                            "current_usage": 0,
-                            "daily_limit": 0,
-                            "tier": tier_key,
-                        },
-                    )
-                result = session.execute(
+        # reset_at is guaranteed non-None here (initialised above if missing).
+        assert reset_at is not None
+        now = datetime.now(UTC)
+        if now.date() > reset_at.date():
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Zero-quota tiers: reset the clock without claiming a slot
+            if daily_limit == 0:
+                session.execute(
                     update(UserSubscription)
                     .where(
                         UserSubscription.user_id == user_id,
                         UserSubscription.daily_quota_reset_at < day_start,
                     )
                     .values(
-                        current_period_usage=1,
+                        current_period_usage=0,
                         daily_quota_reset_at=now,
                         updated_at=now,
                     )
                 )
                 session.commit()
-                session.refresh(sub)
-                if result.rowcount > 0:
-                    return LimitStatus(
-                        allowed=True,
-                        current_usage=1,
-                        daily_limit=daily_limit,
-                        remaining=daily_limit - 1,
-                        tier=tier_key,
-                    )
-                # Another request already reset; fall through to normal increment
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "code": "quota_exceeded",
+                        "message": f"Daily request limit (0) exceeded for {tier_key} tier.",
+                        "current_usage": 0,
+                        "daily_limit": 0,
+                        "tier": tier_key,
+                    },
+                )
+            result = session.execute(
+                update(UserSubscription)
+                .where(
+                    UserSubscription.user_id == user_id,
+                    UserSubscription.daily_quota_reset_at < day_start,
+                )
+                .values(
+                    current_period_usage=1,
+                    daily_quota_reset_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+            session.refresh(sub)
+            if result.rowcount > 0:
+                return LimitStatus(
+                    allowed=True,
+                    current_usage=1,
+                    daily_limit=daily_limit,
+                    remaining=daily_limit - 1,
+                    tier=tier_key,
+                )
+            # Another request already reset; fall through to normal increment
 
         # Atomic increment: only succeeds if usage is still under the limit.
         result = session.execute(
