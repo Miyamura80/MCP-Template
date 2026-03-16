@@ -1,5 +1,7 @@
 """Stripe checkout session creation and subscription cancellation."""
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger as log
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -104,7 +106,9 @@ def create_checkout(
         success_url=f"{frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{frontend_url}/billing/cancel",
         metadata={"user_id": user.user_id},
-        idempotency_key=f"checkout-{user.user_id}-{price_id}",
+        # Include a 5-minute bucket so rapid double-clicks are deduped
+        # but abandoned sessions don't block re-checkout for 24 hours.
+        idempotency_key=f"checkout-{user.user_id}-{price_id}-{int(time.time()) // 300}",
     )
 
     return {"checkout_url": checkout_session.url, "session_id": checkout_session.id}

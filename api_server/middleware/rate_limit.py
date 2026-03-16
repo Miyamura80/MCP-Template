@@ -78,16 +78,13 @@ def _identity(request: Request) -> str:
         token = auth_header[7:]
         return "bearer:" + hashlib.sha256(token.encode()).hexdigest()
     # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
-    # Fall back to the first X-Forwarded-For entry (original client claim)
-    # since the last entry is often the proxy's own outbound IP in
-    # multi-hop setups, which would collapse all clients into one bucket.
-    real_ip = request.headers.get("X-Real-IP", "").strip()
-    if not real_ip:
-        xff = request.headers.get("X-Forwarded-For", "")
-        if xff:
-            real_ip = xff.split(",")[0].strip()
-    if not real_ip:
-        real_ip = request.client.host if request.client else "unknown"
+    # Skip X-Forwarded-For entirely for unauthenticated requests since
+    # it is client-controlled and can be spoofed to rotate rate-limit
+    # buckets.  Fall back to the TCP-level client address which cannot
+    # be spoofed without controlling the connection.
+    real_ip = request.headers.get("X-Real-IP", "").strip() or (
+        request.client.host if request.client else "unknown"
+    )
     return "ip:" + real_ip
 
 
