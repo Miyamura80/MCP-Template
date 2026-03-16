@@ -283,7 +283,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": str(reset_ts),
                 "RateLimit": f"limit={limit_val}, remaining=0, reset={reset_ts}",
-                "RateLimit-Policy": f"{limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600",
+                "RateLimit-Policy": f"{limits_cfg.get('rps', 5)};w=1, {limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600, {limits_cfg.get('rpd', 5000)};w=86400",
                 "Retry-After": str(retry_after),
             }
             return JSONResponse(
@@ -308,7 +308,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             f"limit={limit_val}, remaining={remaining}, reset={int(reset_time)}"
         )
         response.headers["RateLimit-Policy"] = (
-            f"{limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600"
+            f"{limits_cfg.get('rps', 5)};w=1, {limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600, {limits_cfg.get('rpd', 5000)};w=86400"
         )
 
         return response

@@ -250,10 +250,13 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
 
         sub.subscription_status = local_status
         sub.is_active = is_active
-        # Keep tier in sync with Stripe on plan changes.
-        # Currently only PLUS; for multi-tier, resolve from
-        # data["items"]["data"][0]["price"]["id"].
-        sub.subscription_tier = SubscriptionTier.PLUS.value
+        # Only promote to PLUS when subscription is actually active;
+        # downgrade to FREE on cancellation/expiry so quota matches.
+        # For multi-tier, resolve from data["items"]["data"][0]["price"]["id"].
+        if is_active:
+            sub.subscription_tier = SubscriptionTier.PLUS.value
+        elif local_status == SubscriptionStatus.CANCELED.value:
+            sub.subscription_tier = SubscriptionTier.FREE.value
 
         current_period = data.get("current_period_start")
         if current_period:
