@@ -261,13 +261,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limit_val = limits_cfg.get("rpm", 60)
 
         if hit_window is not None and hit_item is not None:
-            # Rate limited
-            hit_stats = self._limiter.get_window_stats(hit_item, identity)
-            retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
+            # Rate limited - wrap stats call so Redis errors degrade
+            # to a generic 429 rather than a 500.
+            try:
+                hit_stats = self._limiter.get_window_stats(hit_item, identity)
+                retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
+                reset_ts = int(hit_stats.reset_time)
+            except Exception:
+                retry_after = 60
+                reset_ts = int(time.time()) + 60
             headers = {
                 "X-RateLimit-Limit": str(limit_val),
                 "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(int(hit_stats.reset_time)),
+                "X-RateLimit-Reset": str(reset_ts),
                 "RateLimit": f"limit={limit_val}, remaining=0",
                 "RateLimit-Policy": f"{limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600",
                 "Retry-After": str(retry_after),
