@@ -45,6 +45,8 @@ def _make_route(entry: ServiceEntry) -> None:
         _user: AuthenticatedUser = Depends(require_scopes("services:execute")),
         _session: Session = Depends(get_db_session),
     ):
+        # Quota is consumed before execution (charges for attempts, not
+        # results) to prevent abuse via intentional error-triggering.
         ensure_daily_limit(_session, _user.user_id)
         return func(body)
 

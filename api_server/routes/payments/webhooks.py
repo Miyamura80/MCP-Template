@@ -1,10 +1,11 @@
 """Stripe webhook handler with dual-secret verification."""
 
-from datetime import UTC, datetime
+import random
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger as log
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.exc import IntegrityError
 
 from api_server.billing.stripe_config import ensure_stripe, get_webhook_secret
@@ -83,7 +84,31 @@ async def stripe_webhook(request: Request):
     else:
         log.debug("Unhandled webhook event: {}", event_type)
 
+    # Probabilistic cleanup of old processed events (1% of requests)
+    if random.random() < 0.01:  # noqa: S311
+        _cleanup_old_events()
+
     return {"received": True}
+
+
+_EVENT_RETENTION = timedelta(days=7)
+
+
+def _cleanup_old_events() -> None:
+    """Delete processed_stripe_events older than 7 days."""
+    try:
+        cutoff = datetime.now(UTC) - _EVENT_RETENTION
+        with use_db_session() as session:
+            result = session.execute(
+                delete(ProcessedStripeEvent).where(
+                    ProcessedStripeEvent.processed_at < cutoff
+                )
+            )
+            session.commit()
+            if result.rowcount:
+                log.info("Cleaned up {} old processed stripe events", result.rowcount)
+    except Exception:
+        log.debug("Failed to clean up old processed stripe events")
 
 
 def _find_subscription_by_customer(
