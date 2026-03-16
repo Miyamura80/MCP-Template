@@ -118,8 +118,10 @@ _EVENT_RETENTION = timedelta(days=7)
 def _cleanup_old_events() -> None:
     """Delete processed_stripe_events older than 7 days.
 
-    Excludes ``meter:`` prefixed records which are metering idempotency
-    keys managed by the usage-reporting endpoint with their own lifecycle.
+    Both webhook dedup records and ``meter:`` metering idempotency keys
+    share the same 7-day retention window.  This is sufficient for
+    metering callers since Stripe itself expires idempotency keys after
+    24 hours.
     """
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
@@ -127,7 +129,6 @@ def _cleanup_old_events() -> None:
             result = session.execute(
                 delete(ProcessedStripeEvent).where(
                     ProcessedStripeEvent.processed_at < cutoff,
-                    ~ProcessedStripeEvent.event_id.startswith("meter:"),
                 )
             )
             session.commit()
