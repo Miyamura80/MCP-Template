@@ -88,6 +88,10 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
             )
         return status
     except Exception as exc:
+        if type(exc).__name__ == "AuthenticationError":
+            from api_server.billing.stripe_config import reset_stripe_on_auth_error
+
+            reset_stripe_on_auth_error()
         log.debug(
             "Stripe subscription lookup failed for {}: {}; falling back to DB",
             stripe_sub_id,

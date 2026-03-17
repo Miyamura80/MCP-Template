@@ -35,15 +35,21 @@ def _is_stripe_error(exc: Exception) -> bool:
     return type(exc).__module__.startswith("stripe")
 
 
+def _is_stripe_auth_error(exc: Exception) -> bool:
+    """Check if an exception is a Stripe AuthenticationError."""
+    return _is_stripe_error(exc) and type(exc).__name__ == "AuthenticationError"
+
+
 def _build_error_response(
     status_code: int,
     message: str,
     request_id: str,
     details: dict[str, Any] | None = None,
+    code_override: str | None = None,
 ) -> JSONResponse:
     body: dict[str, Any] = {
         "error": {
-            "code": _error_code(status_code),
+            "code": code_override or _error_code(status_code),
             "message": message,
             "request_id": request_id,
         }
@@ -140,11 +146,15 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 details={"errors": message},
             )
         if isinstance(message, dict):
+            domain_code = message.get("code")
             return _build_error_response(
                 response.status_code,
                 message.get("message", "An error occurred"),
                 request_id,
-                details={k: v for k, v in message.items() if k != "message"},
+                details={
+                    k: v for k, v in message.items() if k not in ("message", "code")
+                },
+                code_override=domain_code,
             )
         return _build_error_response(response.status_code, str(message), request_id)
 
@@ -167,6 +177,12 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
 
             # Sanitize Stripe errors
             if _is_stripe_error(exc):
+                if _is_stripe_auth_error(exc):
+                    from api_server.billing.stripe_config import (
+                        reset_stripe_on_auth_error,
+                    )
+
+                    reset_stripe_on_auth_error()
                 return _build_error_response(
                     502,
                     "Payment processing error",

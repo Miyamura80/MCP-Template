@@ -55,6 +55,10 @@ def _report_to_stripe(
         )
         return True
     except Exception as exc:
+        if type(exc).__name__ == "AuthenticationError":
+            from api_server.billing.stripe_config import reset_stripe_on_auth_error
+
+            reset_stripe_on_auth_error()
         log.warning(
             "Failed to report meter event for customer {}; "
             "rolling back dedup record so caller can retry: {}",

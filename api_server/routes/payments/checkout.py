@@ -192,6 +192,13 @@ def cancel_subscription(
             sub.stripe_subscription_id,
             cancel_at_period_end=True,
         )
+    except stripe.AuthenticationError:
+        from api_server.billing.stripe_config import reset_stripe_on_auth_error
+
+        reset_stripe_on_auth_error()
+        raise HTTPException(
+            status_code=503, detail="Stripe authentication failed; please retry"
+        ) from None
     except stripe.InvalidRequestError as exc:
         raise HTTPException(
             status_code=400, detail=exc.user_message or str(exc)
