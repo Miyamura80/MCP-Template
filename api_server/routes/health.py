@@ -137,6 +137,9 @@ def _get_git_commit() -> str | None:
 
     Prefers build-time env vars (GIT_SHA, RENDER_GIT_COMMIT) for
     containerized deployments where git may not be available.
+    Production deployments should always set GIT_SHA so the subprocess
+    fallback is never invoked (it adds latency on cold start and requires
+    git to be installed in the container image).
     Uses double-checked locking so the subprocess runs exactly once,
     even under concurrent cold-start calls.  Executes in FastAPI's
     sync-endpoint threadpool, so it does not block the async event loop.

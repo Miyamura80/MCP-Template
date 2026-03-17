@@ -1,5 +1,7 @@
 """Metered usage reporting via Stripe Billing Meter API."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger as log
 from sqlalchemy import update
@@ -109,8 +111,6 @@ def report_usage(
             status_code=402,
             detail="Metering reporting requires an active paid subscription",
         )
-
-    from datetime import UTC, datetime
 
     # Namespace dedup keys by user so two different users with the same
     # Idempotency-Key header value don't collide.

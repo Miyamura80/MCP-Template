@@ -34,6 +34,76 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
         log.warning("Failed to delete orphaned Stripe customer {}", orphaned_id)
 
 
+def _ensure_stripe_customer(
+    user: AuthenticatedUser, session: Session, sub: UserSubscription | None
+) -> tuple[str, UserSubscription | None]:
+    """Find or create a Stripe customer, persisting the ID to prevent duplicates.
+
+    Returns ``(customer_id, sub)`` where *sub* may be newly created.
+    """
+    import stripe
+
+    customer_id = sub.stripe_customer_id if sub else None
+    if customer_id:
+        return customer_id, sub
+
+    if not user.email:
+        raise HTTPException(
+            status_code=422,
+            detail="An email address is required to create a billing account.",
+        )
+    customer = stripe.Customer.create(
+        metadata={"user_id": user.user_id},
+        email=user.email,
+        idempotency_key=f"create-customer-{user.user_id}",
+    )
+    customer_id = customer.id
+    if sub:
+        sub.stripe_customer_id = customer_id
+    else:
+        sub = UserSubscription(
+            user_id=user.user_id,
+            stripe_customer_id=customer_id,
+        )
+        session.add(sub)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        orphaned_customer_id = customer_id
+        sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
+        if (
+            sub
+            and sub.subscription_tier == SubscriptionTier.PLUS.value
+            and sub.subscription_status
+            in (
+                SubscriptionStatus.ACTIVE.value,
+                SubscriptionStatus.CANCELING.value,
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Active Plus subscription already exists",
+            ) from None
+        # Only overwrite customer_id if the recovered row actually has one;
+        # otherwise keep the Stripe customer we just created.
+        if sub and sub.stripe_customer_id:
+            customer_id = sub.stripe_customer_id
+            _delete_orphaned_customer(orphaned_customer_id, user.user_id, customer_id)
+    except SQLAlchemyError:
+        session.rollback()
+        log.error(
+            "DB error persisting Stripe customer {} for user {} - customer may be orphaned in Stripe",
+            customer_id,
+            user.user_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Database error during checkout",
+        ) from None
+    return customer_id, sub
+
+
 @router.post("/checkout/create")
 def create_checkout(
     user: AuthenticatedUser = Depends(require_scopes(BILLING_WRITE)),
@@ -57,62 +127,7 @@ def create_checkout(
             status_code=409, detail="Active Plus subscription already exists"
         )
 
-    # Find or create Stripe customer, persisting the ID to prevent duplicates
-    customer_id = sub.stripe_customer_id if sub else None
-    if not customer_id:
-        customer = stripe.Customer.create(
-            metadata={"user_id": user.user_id},
-            email=user.email,
-            idempotency_key=f"create-customer-{user.user_id}",
-        )
-        customer_id = customer.id
-        if sub:
-            sub.stripe_customer_id = customer_id
-        else:
-            sub = UserSubscription(
-                user_id=user.user_id,
-                stripe_customer_id=customer_id,
-            )
-            session.add(sub)
-        try:
-            session.commit()
-        except IntegrityError:
-            session.rollback()
-            orphaned_customer_id = customer_id
-            sub = (
-                session.query(UserSubscription).filter_by(user_id=user.user_id).first()
-            )
-            if (
-                sub
-                and sub.subscription_tier == SubscriptionTier.PLUS.value
-                and sub.subscription_status
-                in (
-                    SubscriptionStatus.ACTIVE.value,
-                    SubscriptionStatus.CANCELING.value,
-                )
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Active Plus subscription already exists",
-                ) from None
-            # Only overwrite customer_id if the recovered row actually has one;
-            # otherwise keep the Stripe customer we just created.
-            if sub and sub.stripe_customer_id:
-                customer_id = sub.stripe_customer_id
-                _delete_orphaned_customer(
-                    orphaned_customer_id, user.user_id, customer_id
-                )
-        except SQLAlchemyError:
-            session.rollback()
-            log.error(
-                "DB error persisting Stripe customer {} for user {} - customer may be orphaned in Stripe",
-                customer_id,
-                user.user_id,
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="Database error during checkout",
-            ) from None
+    customer_id, sub = _ensure_stripe_customer(user, session, sub)
 
     price_id = get_stripe_price_id()
     if not price_id:
