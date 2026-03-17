@@ -112,10 +112,6 @@ async def stripe_webhook(request: Request):
     # with a time-based fallback so low-traffic deployments don't let
     # the table grow indefinitely.
     if random.random() < 0.01 or _cleanup_overdue():  # noqa: S311
-        # Optimistic reset before dispatching to prevent concurrent
-        # requests from all triggering cleanup simultaneously.
-        global _last_cleanup  # noqa: PLW0603
-        _last_cleanup = time.monotonic()
         await asyncio.to_thread(_cleanup_old_events)
 
     return {"received": True}
@@ -222,14 +218,16 @@ def _resolve_tier(data: dict) -> str:
     items = data.get("items", {}).get("data", [])
     price_id = items[0].get("price", {}).get("id") if items else None
     expected_plus_id = get_stripe_price_id()
-    if price_id and expected_plus_id and price_id != expected_plus_id:
-        log.error(
-            "Unknown Stripe price ID {}; expected PLUS price {}. "
-            "Defaulting to PLUS tier -- update _resolve_tier for new tiers",
-            price_id,
-            expected_plus_id,
-        )
-    return SubscriptionTier.PLUS.value
+    if price_id == expected_plus_id:
+        return SubscriptionTier.PLUS.value
+
+    log.error(
+        "Unknown Stripe price ID {}; expected PLUS price {}. "
+        "Defaulting to FREE tier -- update _resolve_tier for new tiers",
+        price_id,
+        expected_plus_id,
+    )
+    return SubscriptionTier.FREE.value
 
 
 class _CustomerNotFoundError(Exception):

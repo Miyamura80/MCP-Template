@@ -125,7 +125,7 @@ def report_usage(
     # Namespace dedup keys by user so two different users with the same
     # Idempotency-Key header value don't collide.
     db_dedup_key = f"meter:{user.user_id}:{idempotency_key}"
-    stripe_identifier = f"{sub.stripe_customer_id}:{idempotency_key}"
+    stripe_identifier = f"{stripe_cid}:{idempotency_key}"
 
     # Re-use the processed_stripe_events table for PK-based dedup so
     # retries skip both the Stripe call and the local counter increment,
