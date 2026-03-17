@@ -10,7 +10,11 @@ from loguru import logger as log
 from sqlalchemy import delete, update
 from sqlalchemy.exc import IntegrityError
 
-from api_server.billing.stripe_config import ensure_stripe, get_webhook_secret
+from api_server.billing.stripe_config import (
+    ensure_stripe,
+    get_webhook_secret,
+    is_production,
+)
 from db.engine import use_db_session
 from db.models.processed_stripe_events import ProcessedStripeEvent
 from db.models.subscription_types import (
@@ -22,10 +26,6 @@ from db.models.subscription_types import (
 from db.models.user_subscriptions import UserSubscription
 
 WEBHOOK_PREFIX = "/api/v1/billing/webhook"
-
-# Environments where the test-secret webhook fallback is allowed.
-# Any value NOT in this set is treated as production (fail-closed).
-_NON_PROD_ENVS = frozenset({"dev", "development", "staging", "test", "local"})
 
 router = APIRouter(prefix=WEBHOOK_PREFIX, tags=["billing"])
 
@@ -66,10 +66,10 @@ def _try_construct_event(payload: bytes, sig_header: str):
         # Only try fallback secret in non-production environments.
         # In production, accepting a test-signed webhook would be a
         # security risk (test-mode dashboard access could inject events).
-        from common import global_config
-
-        if global_config.DEV_ENV.lower() not in _NON_PROD_ENVS:
+        if is_production():
             raise
+
+        from common import global_config
 
         fallback = (
             global_config.STRIPE_TEST_WEBHOOK_SECRET

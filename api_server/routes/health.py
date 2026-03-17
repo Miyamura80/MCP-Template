@@ -64,22 +64,35 @@ def _check_database() -> dict:
         return {"status": "error", "message": type(exc).__name__}
 
 
-_redis_health_client = None
+_redis_health_client: object | None = None
 _redis_health_client_lock = threading.Lock()
+_REDIS_NOT_CONFIGURED = object()  # sentinel: REDIS_URL was absent
 
 
 def _get_redis_health_client():
-    """Return a reusable Redis client for health checks (created once)."""
-    global _redis_health_client
-    if _redis_health_client is not None:
-        return _redis_health_client
+    """Return a reusable Redis client for health checks.
+
+    Returns ``None`` to signal "please create one", the
+    ``_REDIS_NOT_CONFIGURED`` sentinel when no URL is set, or an
+    existing client instance.
+    """
+    global _redis_health_client  # noqa: PLW0603
+    val = _redis_health_client
+    if val is _REDIS_NOT_CONFIGURED:
+        return None
+    if val is not None:
+        return val
     with _redis_health_client_lock:
-        if _redis_health_client is not None:
-            return _redis_health_client
+        val = _redis_health_client
+        if val is _REDIS_NOT_CONFIGURED:
+            return None
+        if val is not None:
+            return val
         from common import global_config
 
         redis_url = getattr(global_config, "REDIS_URL", None)
         if not redis_url:
+            _redis_health_client = _REDIS_NOT_CONFIGURED
             return None
         import redis
 
@@ -91,6 +104,7 @@ def _get_redis_health_client():
 
 def _check_redis() -> dict:
     """Check Redis connectivity."""
+    global _redis_health_client  # noqa: PLW0603
     try:
         client = _get_redis_health_client()
         if client is None:
@@ -98,6 +112,8 @@ def _check_redis() -> dict:
         client.ping()
         return {"status": "ok"}
     except Exception as exc:
+        # Reset so the next health probe re-creates the client
+        _redis_health_client = None
         return {"status": "error", "message": type(exc).__name__}
 
 

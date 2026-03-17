@@ -29,6 +29,7 @@ _EXEMPT_PATHS = frozenset({"/health", STRIPE_WEBHOOK_PATH})
 # TTL cache for API key hash → subscription tier (avoids DB hit on every request)
 _tier_cache: dict[str, tuple[str, float]] = {}
 _TIER_CACHE_TTL = 60  # seconds
+_INVALID_KEY_TIER = "__invalid__"  # sentinel: API key not found in DB
 _TIER_CACHE_MAX_SIZE = 10_000
 _tier_cache_lock = threading.Lock()
 
@@ -103,7 +104,14 @@ async def _identity(request: Request) -> str:
     """
     api_key = request.headers.get("X-API-KEY", "")
     if api_key:
-        return "key:" + hashlib.sha256(api_key.encode()).hexdigest()
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        # Validate the key before using it as a rate-limit bucket.
+        # Without this, rotating fake keys creates unlimited fresh buckets
+        # (same vulnerability the JWT path already guards against).
+        tier = await asyncio.to_thread(_lookup_tier_sync, key_hash)
+        if tier == _INVALID_KEY_TIER:
+            return "ip:" + _client_ip(request)
+        return "key:" + key_hash
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
@@ -171,6 +179,9 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
                     .first()
                 )
                 tier = sub.subscription_tier if sub else "default"
+            elif user_id is None:
+                # API key path: key hash not found in DB
+                tier = _INVALID_KEY_TIER
     except Exception as exc:
         log.warning("Tier lookup failed for key {}; defaulting: {}", cache_key[:8], exc)
         # Don't cache failed lookups so the next request retries immediately
@@ -207,7 +218,8 @@ async def _resolve_tier(request: Request) -> str:
     api_key = request.headers.get("X-API-KEY", "")
     if api_key:
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-        return await asyncio.to_thread(_lookup_tier_sync, key_hash)
+        tier = await asyncio.to_thread(_lookup_tier_sync, key_hash)
+        return "default" if tier == _INVALID_KEY_TIER else tier
 
     # For JWT Bearer tokens, reuse the user_id resolved by _identity()
     # (cached on request.state) to avoid calling verify_workos_token twice.

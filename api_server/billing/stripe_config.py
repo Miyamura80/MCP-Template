@@ -7,6 +7,18 @@ from loguru import logger as log
 # Canonical webhook path shared by the route module and rate-limit middleware.
 STRIPE_WEBHOOK_PATH = "/api/v1/billing/webhook/stripe"
 
+# Environments where test keys / webhook fallback are allowed.
+# Any value NOT in this set is treated as production (fail-closed).
+_NON_PROD_ENVS = frozenset({"dev", "development", "staging", "test", "local"})
+
+
+def is_production() -> bool:
+    """Return True if the current environment is considered production."""
+    from common import global_config
+
+    return global_config.DEV_ENV.lower() not in _NON_PROD_ENVS
+
+
 _stripe_initialized = False
 _stripe_lock = threading.Lock()
 
@@ -39,7 +51,7 @@ def ensure_stripe() -> bool:
             cfg = global_config.subscription_config.stripe
 
             # Pick the right key based on environment
-            if global_config.DEV_ENV == "prod":
+            if is_production():
                 key = global_config.STRIPE_SECRET_KEY
             else:
                 key = global_config.STRIPE_TEST_SECRET_KEY
@@ -94,7 +106,7 @@ def get_stripe_price_id() -> str:
     from common import global_config
 
     cfg = global_config.subscription_config.stripe
-    if global_config.DEV_ENV == "prod":
+    if is_production():
         return cfg.price_ids.get("prod", "")
     return cfg.price_ids.get("test", "")
 
@@ -117,7 +129,7 @@ def get_webhook_secret() -> str | None:
     """Return the Stripe webhook signing secret for the current environment."""
     from common import global_config
 
-    if global_config.DEV_ENV == "prod":
+    if is_production():
         return global_config.STRIPE_WEBHOOK_SECRET
     return (
         global_config.STRIPE_TEST_WEBHOOK_SECRET or global_config.STRIPE_WEBHOOK_SECRET
