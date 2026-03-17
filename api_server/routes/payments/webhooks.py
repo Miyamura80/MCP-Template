@@ -428,7 +428,6 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
             )
         )
         if result.rowcount == 0:
-            session.rollback()
             log.warning(
                 "Received {} for unknown customer {}; will retry",
                 event_type,

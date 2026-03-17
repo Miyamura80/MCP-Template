@@ -67,21 +67,38 @@ def _check_database() -> dict:
         return {"status": "error", "message": type(exc).__name__}
 
 
-def _check_redis() -> dict:
-    """Check Redis connectivity."""
-    try:
+_redis_health_client = None
+_redis_health_client_lock = threading.Lock()
+
+
+def _get_redis_health_client():
+    """Return a reusable Redis client for health checks (created once)."""
+    global _redis_health_client
+    if _redis_health_client is not None:
+        return _redis_health_client
+    with _redis_health_client_lock:
+        if _redis_health_client is not None:
+            return _redis_health_client
         from common import global_config
 
         redis_url = getattr(global_config, "REDIS_URL", None)
         if not redis_url:
-            return {"status": "not_configured"}
+            return None
         import redis
 
-        r = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
-        try:
-            r.ping()
-        finally:
-            r.close()
+        _redis_health_client = redis.from_url(
+            redis_url, socket_connect_timeout=2, socket_timeout=2
+        )
+        return _redis_health_client
+
+
+def _check_redis() -> dict:
+    """Check Redis connectivity."""
+    try:
+        client = _get_redis_health_client()
+        if client is None:
+            return {"status": "not_configured"}
+        client.ping()
         return {"status": "ok"}
     except Exception as exc:
         return {"status": "error", "message": type(exc).__name__}

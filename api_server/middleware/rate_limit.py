@@ -311,6 +311,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             headers=headers,
         )
 
+    def _most_constrained_stats(
+        self, windows: list, identity: str, limits_cfg: dict
+    ) -> tuple[int, int, float]:
+        """Return (limit, remaining, reset_time) for the most constrained window."""
+        remaining = None
+        reset_time = time.time() + 60
+        limit_val = limits_cfg.get("rpm", 60)
+        for window_name, item in windows:
+            try:
+                s = self._limiter.get_window_stats(item, identity)
+                if remaining is None or s.remaining < remaining:
+                    remaining = s.remaining
+                    cfg_key = self._WINDOW_CFG_KEY.get(window_name, "rpm")
+                    limit_val = limits_cfg.get(cfg_key, 60)
+                    reset_time = s.reset_time
+            except Exception:
+                pass
+        return limit_val, max(0, remaining) if remaining is not None else 0, reset_time
+
     async def _resolve_request_context(
         self, request: Request
     ) -> tuple[str, str] | None:
@@ -374,16 +393,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             log.warning("Rate limiter error; allowing request through")
             return await call_next(request)
 
-        # Use minute window for response headers
-        _minute_item = windows[1][1]
-        try:
-            stats = self._limiter.get_window_stats(_minute_item, identity)
-            remaining = max(0, stats.remaining)
-            reset_time = stats.reset_time
-        except Exception:
-            remaining = 0
-            reset_time = time.time() + 60
-        limit_val = limits_cfg.get("rpm", 60)
+        # Report the most constrained window (lowest remaining) so clients
+        # get an accurate backpressure signal before hitting harder limits.
+        limit_val, remaining, reset_time = self._most_constrained_stats(
+            windows, identity, limits_cfg
+        )
 
         if hit_window is not None and hit_item is not None:
             return self._build_429(request, hit_window, hit_item, identity, limits_cfg)
