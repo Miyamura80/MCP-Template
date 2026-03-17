@@ -167,6 +167,8 @@ def _get_git_commit() -> str | None:
         if _git_commit_resolved:
             return _git_commit_value
         for var in ("GIT_SHA", "RENDER_GIT_COMMIT"):
+            # Prefer build-time env vars; the subprocess fallback below
+            # requires git in the container image and adds cold-start latency.
             val = os.getenv(var)
             if val:
                 _git_commit_value = val[:7]

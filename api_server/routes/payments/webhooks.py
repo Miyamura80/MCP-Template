@@ -145,7 +145,7 @@ def _cleanup_old_events() -> None:
     global _last_cleanup  # noqa: PLW0603
     with _cleanup_lock:
         if not _cleanup_overdue() and random.random() >= 0.01:  # noqa: S311
-            return  # another thread already handled it
+            return  # not due yet or lost the 1% lottery
         _last_cleanup = time.monotonic()
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
