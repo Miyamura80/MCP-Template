@@ -162,7 +162,6 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 )
             )
             session.commit()
-            session.refresh(sub)
             if result.rowcount > 0:
                 return LimitStatus(
                     allowed=True,

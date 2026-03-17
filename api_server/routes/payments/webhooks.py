@@ -14,6 +14,7 @@ from api_server.billing.stripe_config import ensure_stripe, get_webhook_secret
 from db.engine import use_db_session
 from db.models.processed_stripe_events import ProcessedStripeEvent
 from db.models.subscription_types import (
+    STRIPE_STATUS_MAP,
     PaymentStatus,
     SubscriptionStatus,
     SubscriptionTier,
@@ -182,18 +183,6 @@ def _mark_event_processed(session, event_id: str, event_type: str) -> bool:
         return False
 
 
-_STRIPE_STATUS_MAP = {
-    "trialing": SubscriptionStatus.TRIALING.value,
-    "active": SubscriptionStatus.ACTIVE.value,
-    "incomplete": SubscriptionStatus.INCOMPLETE.value,
-    "incomplete_expired": SubscriptionStatus.CANCELED.value,
-    "past_due": SubscriptionStatus.PAST_DUE.value,
-    "canceled": SubscriptionStatus.CANCELED.value,
-    "unpaid": SubscriptionStatus.PAST_DUE.value,
-    "paused": SubscriptionStatus.PAST_DUE.value,  # Treat paused as grace period
-}
-
-
 def _map_stripe_status(data: dict) -> tuple[str, bool]:
     """Map Stripe subscription status to local enum and is_active flag.
 
@@ -203,7 +192,7 @@ def _map_stripe_status(data: dict) -> tuple[str, bool]:
     subscription returns to ``active`` or ``trialing``.
     """
     stripe_status = data.get("status", "active")
-    local_status = _STRIPE_STATUS_MAP.get(
+    local_status = STRIPE_STATUS_MAP.get(
         stripe_status, SubscriptionStatus.PAST_DUE.value
     )
     is_active = stripe_status in ("trialing", "active")

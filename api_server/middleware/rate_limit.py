@@ -254,11 +254,28 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app, **kwargs):
         super().__init__(app, **kwargs)
-        self._storage = _build_storage()
-        self._limiter = MovingWindowRateLimiter(self._storage)
+        self._storage: Storage | None = None
+        self._limiter: MovingWindowRateLimiter | None = None
+        self._storage_is_memory = False
         self._testing = os.getenv("TESTING") == "1"
         if self._testing:
             log.warning("Rate limiting disabled via TESTING=1 env var")
+
+    def _get_limiter(self) -> MovingWindowRateLimiter:
+        """Return the rate limiter, building storage lazily.
+
+        If the previous attempt fell back to MemoryStorage (e.g. Redis
+        was unreachable at startup), retry Redis on the next call so
+        that cross-worker enforcement recovers once Redis is healthy.
+        """
+        if self._limiter is not None and not self._storage_is_memory:
+            return self._limiter
+        storage = _build_storage()
+        is_memory = isinstance(storage, MemoryStorage)
+        self._storage = storage
+        self._limiter = MovingWindowRateLimiter(storage)
+        self._storage_is_memory = is_memory
+        return self._limiter
 
     def _should_skip(self, request: Request) -> bool:
         """Return True if this request should bypass rate limiting."""
@@ -295,7 +312,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         cfg_key = self._WINDOW_CFG_KEY.get(hit_window, "rpm")
         exceeded_limit = limits_cfg.get(cfg_key, 60)
         try:
-            hit_stats = self._limiter.get_window_stats(hit_item, identity)
+            hit_stats = self._get_limiter().get_window_stats(hit_item, identity)
             retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
             reset_ts = int(hit_stats.reset_time)
         except Exception:
@@ -330,7 +347,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limit_val = limits_cfg.get("rpm", 60)
         for window_name, item in windows:
             try:
-                s = self._limiter.get_window_stats(item, identity)
+                s = self._get_limiter().get_window_stats(item, identity)
                 if remaining is None or s.remaining < remaining:
                     remaining = s.remaining
                     cfg_key = self._WINDOW_CFG_KEY.get(window_name, "rpm")
@@ -390,7 +407,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         hit_item = None
         try:
             for window_name, item in windows:
-                if not self._limiter.test(item, identity):
+                if not self._get_limiter().test(item, identity):
                     hit_window = window_name
                     hit_item = item
                     break
@@ -398,7 +415,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if hit_window is None:
                 # All windows have capacity - consume a slot in each
                 for _, item in windows:
-                    self._limiter.hit(item, identity)
+                    self._get_limiter().hit(item, identity)
         except Exception:
             log.warning("Rate limiter error; allowing request through")
             return await call_next(request)

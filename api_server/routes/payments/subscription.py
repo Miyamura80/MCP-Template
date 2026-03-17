@@ -11,7 +11,11 @@ from api_server.auth import AuthenticatedUser
 from api_server.auth.scopes import BILLING_READ, require_scopes
 from api_server.billing.stripe_config import ensure_stripe
 from db.engine import get_db_session
-from db.models.subscription_types import SubscriptionTier
+from db.models.subscription_types import (
+    STRIPE_STATUS_MAP,
+    SubscriptionStatus,
+    SubscriptionTier,
+)
 from db.models.user_subscriptions import UserSubscription
 
 router = APIRouter(prefix="/api/v1/billing/subscription", tags=["billing"])
@@ -77,9 +81,11 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
 
         stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
         if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
-            status = "canceling"
+            status = SubscriptionStatus.CANCELING.value
         else:
-            status = stripe_sub.status
+            status = STRIPE_STATUS_MAP.get(
+                stripe_sub.status, SubscriptionStatus.PAST_DUE.value
+            )
         with _stripe_status_lock:
             _evict_stripe_cache()
             _stripe_status_cache[stripe_sub_id] = (
