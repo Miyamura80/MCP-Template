@@ -302,6 +302,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._storage_is_memory = is_memory
         return self._limiter
 
+    def _check_and_hit(
+        self, windows: list, identity: str
+    ) -> tuple[str | None, object | None]:
+        """Test all windows and consume a slot if allowed (synchronous).
+
+        Offloaded to a thread via ``asyncio.to_thread`` so the blocking
+        Redis I/O in ``test()`` / ``hit()`` does not stall the event loop.
+        """
+        for window_name, item in windows:
+            if not self._get_limiter().test(item, identity):
+                return window_name, item
+        for _, item in windows:
+            self._get_limiter().hit(item, identity)
+        return None, None
+
     def _should_skip(self, request: Request) -> bool:
         """Return True if this request should bypass rate limiting."""
         if request.url.path in _EXEMPT_PATHS:
@@ -428,19 +443,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # doesn't expose window stats needed for response headers.
         # Wrap in try/except so a Redis failure degrades gracefully (pass
         # through) rather than converting every request to a 500.
-        hit_window = None
-        hit_item = None
         try:
-            for window_name, item in windows:
-                if not self._get_limiter().test(item, identity):
-                    hit_window = window_name
-                    hit_item = item
-                    break
-
-            if hit_window is None:
-                # All windows have capacity - consume a slot in each
-                for _, item in windows:
-                    self._get_limiter().hit(item, identity)
+            hit_window, hit_item = await asyncio.to_thread(
+                self._check_and_hit, windows, identity
+            )
         except Exception:
             log.warning("Rate limiter error; allowing request through")
             return await call_next(request)
@@ -450,8 +456,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Report the most constrained window (lowest remaining) so clients
         # get an accurate backpressure signal before hitting harder limits.
-        limit_val, remaining, reset_time = self._most_constrained_stats(
-            windows, identity, limits_cfg
+        limit_val, remaining, reset_time = await asyncio.to_thread(
+            self._most_constrained_stats, windows, identity, limits_cfg
         )
 
         response = await call_next(request)
