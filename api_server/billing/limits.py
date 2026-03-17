@@ -1,6 +1,5 @@
 """Daily usage limit enforcement."""
 
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -24,15 +23,8 @@ class LimitStatus:
     tier: str
 
 
-def _get_or_create_subscription(
-    session: Session, user_id: str, *, own_session: bool = True
-) -> UserSubscription:
-    """Return the user's subscription, creating a free-tier row if needed.
-
-    When *own_session* is ``False`` (caller provided an external session),
-    uses ``flush()`` instead of ``commit()`` to avoid prematurely committing
-    the caller's pending work.
-    """
+def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscription:
+    """Return the user's subscription, creating a free-tier row if needed."""
     sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
     if sub is not None:
         return sub
@@ -45,10 +37,7 @@ def _get_or_create_subscription(
             daily_quota_reset_at=now,
         )
         session.add(sub)
-        if own_session:
-            session.commit()
-        else:
-            session.flush()
+        session.commit()
         session.refresh(sub)
         return sub
     except IntegrityError:
@@ -62,15 +51,14 @@ def _get_or_create_subscription(
     return sub
 
 
-def ensure_daily_limit(user_id: str, db_session: Session | None = None) -> LimitStatus:
+def ensure_daily_limit(user_id: str) -> LimitStatus:
     """Check and enforce the daily request limit for a user.
 
     Creates a free-tier subscription row if none exists.
     Raises HTTP 402 if the daily quota is exceeded.
 
-    When *db_session* is provided (e.g. from FastAPI's ``Depends(get_db_session)``),
-    it is reused to avoid opening a second pooled connection per request.
-    When ``None``, a standalone session is created internally.
+    Always uses its own short-lived session to avoid committing or rolling
+    back pending work on a caller-provided session.
 
     Uses an atomic UPDATE...WHERE to prevent race conditions under concurrent
     load.  Uses ``daily_quota_reset_at`` (not ``current_period_start``) for
@@ -80,18 +68,8 @@ def ensure_daily_limit(user_id: str, db_session: Session | None = None) -> Limit
 
     cfg = global_config.subscription_config
 
-    _own_session = db_session is None
-
-    @contextmanager
-    def _session_ctx():
-        if db_session is not None:
-            yield db_session
-        else:
-            with use_db_session() as s:
-                yield s
-
-    with _session_ctx() as session:
-        sub = _get_or_create_subscription(session, user_id, own_session=_own_session)
+    with use_db_session() as session:
+        sub = _get_or_create_subscription(session, user_id)
 
         tier_key = sub.subscription_tier
         tier_cfg = cfg.tier_limits.get(tier_key)

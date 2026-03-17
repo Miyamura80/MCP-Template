@@ -115,6 +115,11 @@ async def _identity(request: Request) -> str:
         # Fall back to token hash if verification fails
         return "bearer:" + hashlib.sha256(token.encode()).hexdigest()
     # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
+    # DEPLOYMENT ASSUMPTION: This header is only trustworthy when the
+    # server sits behind a reverse proxy (Railway, nginx, etc.) that
+    # overwrites X-Real-IP with the true client address.  If the server
+    # is directly reachable, clients can spoof this header to rotate
+    # rate-limit buckets.  Do NOT expose the server without a proxy.
     # Skip X-Forwarded-For entirely for unauthenticated requests since
     # it is client-controlled and can be spoofed to rotate rate-limit
     # buckets.  Fall back to the TCP-level client address which cannot

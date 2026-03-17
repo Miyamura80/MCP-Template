@@ -63,7 +63,7 @@ def _try_construct_event(payload: bytes, sig_header: str):
         # security risk (test-mode dashboard access could inject events).
         from common import global_config
 
-        if global_config.DEV_ENV == "prod":
+        if global_config.DEV_ENV.lower() == "prod":
             raise
 
         fallback = (
