@@ -112,6 +112,10 @@ async def stripe_webhook(request: Request):
     # with a time-based fallback so low-traffic deployments don't let
     # the table grow indefinitely.
     if random.random() < 0.01 or _cleanup_overdue():  # noqa: S311
+        # Optimistic reset before dispatching to prevent concurrent
+        # requests from all triggering cleanup simultaneously.
+        global _last_cleanup  # noqa: PLW0603
+        _last_cleanup = time.monotonic()
         await asyncio.to_thread(_cleanup_old_events)
 
     return {"received": True}
@@ -210,6 +214,12 @@ class _CustomerNotFoundError(Exception):
     """Raised when a webhook references an unknown customer (triggers retry)."""
 
 
+def _event_timestamp(data: dict) -> datetime:
+    """Return the Stripe event's own ``created`` timestamp (or server time as fallback)."""
+    event_ts = data.get("created")
+    return datetime.fromtimestamp(event_ts, tz=UTC) if event_ts else datetime.now(UTC)
+
+
 def _is_stale_event(data: dict, sub: UserSubscription) -> bool:
     """Return True if this event predates the last webhook-driven state change.
 
@@ -255,6 +265,11 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
             return
 
         local_status, is_active = _map_stripe_status(data)
+        # Preserve CANCELING state on creation (rare but valid via API).
+        if local_status == SubscriptionStatus.ACTIVE.value and data.get(
+            "cancel_at_period_end"
+        ):
+            local_status = SubscriptionStatus.CANCELING.value
         sub.stripe_subscription_id = data.get("id")
         # Currently only the PLUS tier goes through Stripe checkout.
         # If additional tiers are added, resolve via Stripe price/product
@@ -262,7 +277,7 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
         sub.subscription_tier = SubscriptionTier.PLUS.value
         sub.subscription_status = local_status
         sub.is_active = is_active
-        sub.stripe_state_updated_at = datetime.now(UTC)
+        sub.stripe_state_updated_at = _event_timestamp(data)
 
         current_period = data.get("current_period_start")
         if current_period:
@@ -329,7 +344,7 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
             sub.current_period_usage = 0
             sub.daily_quota_reset_at = datetime.now(UTC)
 
-        sub.stripe_state_updated_at = datetime.now(UTC)
+        sub.stripe_state_updated_at = _event_timestamp(data)
 
         current_period = data.get("current_period_start")
         if current_period:
@@ -375,7 +390,7 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
         sub.subscription_status = SubscriptionStatus.CANCELED.value
         sub.stripe_subscription_id = None
         sub.is_active = False
-        sub.stripe_state_updated_at = datetime.now(UTC)
+        sub.stripe_state_updated_at = _event_timestamp(data)
         # Reset usage so the user is not immediately quota-blocked
         # on the lower free tier daily limit.
         sub.current_period_usage = 0
