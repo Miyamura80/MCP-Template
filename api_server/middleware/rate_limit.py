@@ -72,8 +72,8 @@ def _get_tier_limits(tier: str) -> dict:
                 tier_cfg = tiers.get(tier, tiers.get("default", {}))
                 if isinstance(tier_cfg, dict):
                     return tier_cfg
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Rate limit config lookup failed; applying defaults: {}", exc)
     # Defaults if config not available
     return {"rps": 5, "rpm": 60, "rph": 1000, "rpd": 5000}
 

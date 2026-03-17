@@ -311,6 +311,10 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
             sub.subscription_tier = SubscriptionTier.FREE.value
             # Clear to prevent stale Stripe polling from the status endpoint
             sub.stripe_subscription_id = None
+            # Reset usage so the user isn't immediately quota-blocked on the
+            # free tier if subscription.deleted arrives late or is lost.
+            sub.current_period_usage = 0
+            sub.daily_quota_reset_at = datetime.now(UTC)
 
         sub.stripe_state_updated_at = datetime.now(UTC)
 

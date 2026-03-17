@@ -25,7 +25,13 @@ _health_lock = threading.Lock()
 
 
 def _cached_check(name: str, check_fn: collections.abc.Callable[[], dict]) -> dict:
-    """Return cached result if fresh, otherwise call check_fn."""
+    """Return cached result if fresh, otherwise call check_fn.
+
+    The check runs outside the lock so a slow DB/Redis probe doesn't
+    serialise every concurrent ``/health`` poll.  Two concurrent cache-miss
+    callers may both call *check_fn*, but that is benign compared to
+    queueing all callers behind a 30 s timeout.
+    """
     cached = _health_cache.get(name)
     now = time.monotonic()
     if cached and cached[1] > now:
@@ -36,9 +42,11 @@ def _cached_check(name: str, check_fn: collections.abc.Callable[[], dict]) -> di
         now = time.monotonic()
         if cached and cached[1] > now:
             return cached[0]
-        result = check_fn()
-        _health_cache[name] = (result, now + _HEALTH_TTL)
-        return result
+    # Run check outside the lock to avoid blocking concurrent callers
+    result = check_fn()
+    with _health_lock:
+        _health_cache[name] = (result, time.monotonic() + _HEALTH_TTL)
+    return result
 
 
 def _check_database() -> dict:
