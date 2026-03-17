@@ -22,6 +22,9 @@ from db.models.user_subscriptions import UserSubscription
 
 router = APIRouter(prefix="/api/v1/billing/usage", tags=["billing"])
 
+# Stripe's documented limit for MeterEvent identifier field.
+_STRIPE_IDENTIFIER_MAX = 100
+
 
 def _report_to_stripe(
     sub: UserSubscription, user_id: str, idempotency_key: str
@@ -51,11 +54,12 @@ def _report_to_stripe(
             identifier=idempotency_key,
         )
         return True
-    except Exception:
+    except Exception as exc:
         log.warning(
             "Failed to report meter event for customer {}; "
-            "rolling back dedup record so caller can retry",
+            "rolling back dedup record so caller can retry: {}",
             sub.stripe_customer_id,
+            exc,
         )
         return False
 
@@ -116,6 +120,11 @@ def report_usage(
     # Idempotency-Key header value don't collide.
     db_dedup_key = f"meter:{user.user_id}:{idempotency_key}"
     stripe_identifier = f"{sub.stripe_customer_id}:{idempotency_key}"
+    if len(stripe_identifier) > _STRIPE_IDENTIFIER_MAX:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Idempotency-Key too long: combined Stripe identifier exceeds {_STRIPE_IDENTIFIER_MAX} characters",
+        )
 
     # Re-use the processed_stripe_events table for PK-based dedup so
     # retries skip both the Stripe call and the local counter increment,

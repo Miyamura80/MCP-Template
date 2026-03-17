@@ -97,10 +97,15 @@ def _ensure_stripe_customer(
             except SQLAlchemyError:
                 session.rollback()
                 log.error(
-                    "Failed to persist stripe_customer_id {} for user {}",
+                    "Failed to persist stripe_customer_id {} for user {} "
+                    "- customer may be orphaned in Stripe",
                     orphaned_customer_id,
                     user.user_id,
                 )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database error during checkout",
+                ) from None
     except SQLAlchemyError:
         session.rollback()
         log.error(

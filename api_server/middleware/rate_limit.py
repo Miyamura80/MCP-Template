@@ -114,8 +114,12 @@ async def _identity(request: Request) -> str:
         # Mark that JWT resolution was attempted (even if it failed) so
         # _resolve_tier doesn't call verify_workos_token a second time.
         request.state._rl_user_id_resolved = True
-        # Fall back to token hash if verification fails
-        return "bearer:" + hashlib.sha256(token.encode()).hexdigest()
+        # Fall back to IP -- do NOT key on token hash, as rotating invalid
+        # tokens would give each request a fresh bucket, bypassing rate limiting.
+        real_ip = request.headers.get("X-Real-IP", "").strip() or (
+            request.client.host if request.client else f"unknown-{uuid.uuid4().hex}"
+        )
+        return "ip:" + real_ip
     # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
     # DEPLOYMENT ASSUMPTION: This header is only trustworthy when the
     # server sits behind a reverse proxy (Railway, nginx, etc.) that
