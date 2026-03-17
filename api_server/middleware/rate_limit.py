@@ -47,9 +47,10 @@ def _build_storage() -> Storage:
             from limits.storage import RedisStorage
 
             return RedisStorage(redis_url)
-        except Exception:
+        except Exception as exc:
             log.warning(
-                "Redis unavailable for rate limiting, falling back to memory storage"
+                "Redis unavailable for rate limiting ({}), falling back to memory storage",
+                exc,
             )
             return MemoryStorage()
 

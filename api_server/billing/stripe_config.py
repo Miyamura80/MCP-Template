@@ -56,8 +56,8 @@ def ensure_stripe() -> bool:
             _stripe_initialized = True
             log.info("Stripe SDK initialized (api_version={})", cfg.api_version)
             return True
-        except Exception:
-            log.warning("Failed to initialize Stripe; will retry on next call")
+        except Exception as exc:
+            log.warning("Failed to initialize Stripe; will retry on next call: {}", exc)
             return False
 
 
