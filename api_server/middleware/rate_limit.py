@@ -252,11 +252,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     protected by the atomic ``UPDATE...WHERE`` in ``ensure_daily_limit``.
     """
 
+    _REDIS_RETRY_INTERVAL = 60  # seconds between Redis reconnect attempts
+
     def __init__(self, app, **kwargs):
         super().__init__(app, **kwargs)
         self._storage: Storage | None = None
         self._limiter: MovingWindowRateLimiter | None = None
         self._storage_is_memory = False
+        self._last_storage_attempt = 0.0
         self._testing = os.getenv("TESTING") == "1"
         if self._testing:
             log.warning("Rate limiting disabled via TESTING=1 env var")
@@ -265,11 +268,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         """Return the rate limiter, building storage lazily.
 
         If the previous attempt fell back to MemoryStorage (e.g. Redis
-        was unreachable at startup), retry Redis on the next call so
-        that cross-worker enforcement recovers once Redis is healthy.
+        was unreachable at startup), retry Redis periodically so that
+        cross-worker enforcement recovers once Redis is healthy.
         """
         if self._limiter is not None and not self._storage_is_memory:
             return self._limiter
+        # When using MemoryStorage, only retry Redis every _REDIS_RETRY_INTERVAL
+        # seconds to avoid rebuilding storage (and losing counters) on every request.
+        now = time.time()
+        if (
+            self._limiter is not None
+            and self._storage_is_memory
+            and now - self._last_storage_attempt < self._REDIS_RETRY_INTERVAL
+        ):
+            return self._limiter
+        self._last_storage_attempt = now
         storage = _build_storage()
         is_memory = isinstance(storage, MemoryStorage)
         self._storage = storage
