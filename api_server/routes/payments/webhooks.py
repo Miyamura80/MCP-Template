@@ -338,13 +338,12 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
 
         sub.subscription_status = local_status
         sub.is_active = is_active
-        # Only promote to PLUS when subscription is actually active;
-        # downgrade to FREE on cancellation/expiry so quota matches.
-        # PAST_DUE intentionally keeps PLUS tier as a grace period --
+        # Resolve tier from price ID (same as subscription.created) so
+        # unrecognised prices are caught rather than silently granting PLUS.
+        # PAST_DUE intentionally keeps its current tier as a grace period --
         # downgrade occurs only on customer.subscription.deleted.
-        # For multi-tier, resolve from data["items"]["data"][0]["price"]["id"].
         if is_active:
-            sub.subscription_tier = SubscriptionTier.PLUS.value
+            sub.subscription_tier = _resolve_tier(data)
         elif local_status == SubscriptionStatus.CANCELED.value:
             sub.subscription_tier = SubscriptionTier.FREE.value
             # Clear to prevent stale Stripe polling from the status endpoint
