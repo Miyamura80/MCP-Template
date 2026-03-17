@@ -91,22 +91,6 @@ def report_usage(
             status_code=422,
             detail="Idempotency-Key header is required for metering requests",
         )
-    # DB key is "meter:{user_id}:{key}" and must fit in event_id String(255).
-    # Derive the allowed length from the actual user_id so the cap is always
-    # correct regardless of ID length.
-    prefix_len = len(f"meter:{user.user_id}:")
-    max_key_len = 255 - prefix_len
-    if max_key_len <= 0:
-        raise HTTPException(
-            status_code=500,
-            detail="User ID too long for metering dedup key",
-        )
-    if len(idempotency_key) > max_key_len:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Idempotency-Key must not exceed {max_key_len} characters",
-        )
-
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="No subscription found")
@@ -120,15 +104,28 @@ def report_usage(
             detail="Metering reporting requires an active paid subscription",
         )
 
+    # Compute the tightest key-length limit across both DB dedup key
+    # (String(255)) and Stripe identifier (100 chars).
+    db_prefix_len = len(f"meter:{user.user_id}:")
+    db_max_key_len = 255 - db_prefix_len
+    stripe_cid = sub.stripe_customer_id or ""
+    stripe_max_key_len = _STRIPE_IDENTIFIER_MAX - len(stripe_cid) - 1  # for ":"
+    effective_max = min(db_max_key_len, stripe_max_key_len)
+    if effective_max <= 0:
+        raise HTTPException(
+            status_code=500,
+            detail="User/customer ID too long for metering dedup key",
+        )
+    if len(idempotency_key) > effective_max:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Idempotency-Key must not exceed {effective_max} characters",
+        )
+
     # Namespace dedup keys by user so two different users with the same
     # Idempotency-Key header value don't collide.
     db_dedup_key = f"meter:{user.user_id}:{idempotency_key}"
     stripe_identifier = f"{sub.stripe_customer_id}:{idempotency_key}"
-    if len(stripe_identifier) > _STRIPE_IDENTIFIER_MAX:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Idempotency-Key too long: combined Stripe identifier exceeds {_STRIPE_IDENTIFIER_MAX} characters",
-        )
 
     # Re-use the processed_stripe_events table for PK-based dedup so
     # retries skip both the Stripe call and the local counter increment,

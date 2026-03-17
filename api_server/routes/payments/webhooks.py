@@ -153,7 +153,7 @@ def _cleanup_old_events() -> None:
             if result.rowcount:
                 log.info("Cleaned up {} old processed stripe events", result.rowcount)
     except Exception:
-        log.debug("Failed to clean up old processed stripe events")
+        log.warning("Failed to clean up old processed stripe events")
 
 
 def _find_subscription_by_customer(
@@ -208,6 +208,28 @@ def _map_stripe_status(data: dict) -> tuple[str, bool]:
     )
     is_active = stripe_status in ("trialing", "active")
     return local_status, is_active
+
+
+def _resolve_tier(data: dict) -> str:
+    """Map a Stripe subscription's price ID to a local tier.
+
+    Logs an error if the price ID is unrecognised so that adding a new
+    Stripe tier without updating this mapping is caught immediately
+    rather than silently assigning every subscriber to PLUS.
+    """
+    from api_server.billing.stripe_config import get_stripe_price_id
+
+    items = data.get("items", {}).get("data", [])
+    price_id = items[0].get("price", {}).get("id") if items else None
+    expected_plus_id = get_stripe_price_id()
+    if price_id and expected_plus_id and price_id != expected_plus_id:
+        log.error(
+            "Unknown Stripe price ID {}; expected PLUS price {}. "
+            "Defaulting to PLUS tier -- update _resolve_tier for new tiers",
+            price_id,
+            expected_plus_id,
+        )
+    return SubscriptionTier.PLUS.value
 
 
 class _CustomerNotFoundError(Exception):
@@ -271,10 +293,7 @@ def _handle_subscription_created(data: dict, event_id: str, event_type: str) -> 
         ):
             local_status = SubscriptionStatus.CANCELING.value
         sub.stripe_subscription_id = data.get("id")
-        # Currently only the PLUS tier goes through Stripe checkout.
-        # If additional tiers are added, resolve via Stripe price/product
-        # metadata: data["items"]["data"][0]["price"]["id"].
-        sub.subscription_tier = SubscriptionTier.PLUS.value
+        sub.subscription_tier = _resolve_tier(data)
         sub.subscription_status = local_status
         sub.is_active = is_active
         sub.stripe_state_updated_at = _event_timestamp(data)
