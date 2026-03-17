@@ -53,6 +53,7 @@ def validate_scopes(scopes: list[str], *, allow_templates: bool = True) -> list[
             or s in ALL_SCOPES
             or (
                 s.endswith(":*")
+                and s.count(":") == 1
                 and s.split(":")[0]
                 in {scope.split(":")[0] for scope in ALL_SCOPES if ":" in scope}
             )

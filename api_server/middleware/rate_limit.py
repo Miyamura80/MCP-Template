@@ -21,7 +21,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import JSONResponse
 
 # Paths that bypass rate limiting.
-from api_server.routes.payments.webhooks import STRIPE_WEBHOOK_PATH
+from api_server.billing.stripe_config import STRIPE_WEBHOOK_PATH
 
 _EXEMPT_PATHS = frozenset({"/health", STRIPE_WEBHOOK_PATH})
 
@@ -394,14 +394,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             log.warning("Rate limiter error; allowing request through")
             return await call_next(request)
 
+        if hit_window is not None and hit_item is not None:
+            return self._build_429(request, hit_window, hit_item, identity, limits_cfg)
+
         # Report the most constrained window (lowest remaining) so clients
         # get an accurate backpressure signal before hitting harder limits.
         limit_val, remaining, reset_time = self._most_constrained_stats(
             windows, identity, limits_cfg
         )
-
-        if hit_window is not None and hit_item is not None:
-            return self._build_429(request, hit_window, hit_item, identity, limits_cfg)
 
         response = await call_next(request)
 

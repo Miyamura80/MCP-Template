@@ -4,6 +4,9 @@ import threading
 
 from loguru import logger as log
 
+# Canonical webhook path shared by the route module and rate-limit middleware.
+STRIPE_WEBHOOK_PATH = "/api/v1/billing/webhook/stripe"
+
 _stripe_initialized = False
 _stripe_lock = threading.Lock()
 

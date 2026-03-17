@@ -20,7 +20,6 @@ from db.models.subscription_types import (
 from db.models.user_subscriptions import UserSubscription
 
 WEBHOOK_PREFIX = "/api/v1/billing/webhook"
-STRIPE_WEBHOOK_PATH = f"{WEBHOOK_PREFIX}/stripe"
 
 router = APIRouter(prefix=WEBHOOK_PREFIX, tags=["billing"])
 
@@ -156,13 +155,14 @@ def _mark_event_processed(session, event_id: str, event_type: str) -> bool:
 
     Returns True if the event was newly inserted (not a duplicate).
     Returns False if the event was already processed (IntegrityError on PK).
+    Uses a savepoint so only the INSERT is rolled back on conflict,
+    preserving any other pending session state.
     """
     try:
-        session.add(ProcessedStripeEvent(event_id=event_id, event_type=event_type))
-        session.flush()
+        with session.begin_nested():
+            session.add(ProcessedStripeEvent(event_id=event_id, event_type=event_type))
         return True
     except IntegrityError:
-        session.rollback()
         return False
 
 
