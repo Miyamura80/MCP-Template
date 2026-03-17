@@ -18,10 +18,10 @@ def ensure_stripe() -> bool:
     startup (e.g. Railway / Kubernetes delayed secret binding) are
     picked up on the next call without a restart.
 
-    The positive cache is permanent for the process lifetime: once
-    initialized, ``ensure_stripe()`` will not detect a rotated or
-    revoked key.  Key validation happens on the first real Stripe API
-    call; a process restart is required after key rotation.
+    The positive cache is permanent unless explicitly reset via
+    ``reset_stripe_on_auth_error()``, which should be called when a
+    Stripe ``AuthenticationError`` is caught.  This allows key rotation
+    via Railway/Kubernetes secret injection without a full restart.
     """
     global _stripe_initialized  # noqa: PLW0603
     if _stripe_initialized:
@@ -62,6 +62,20 @@ def ensure_stripe() -> bool:
         except Exception as exc:
             log.warning("Failed to initialize Stripe; will retry on next call: {}", exc)
             return False
+
+
+def reset_stripe_on_auth_error() -> None:
+    """Reset initialization flag so the next call to ``ensure_stripe()`` re-reads keys.
+
+    Call this when a ``stripe.AuthenticationError`` is caught to allow
+    rotated secrets to take effect without a process restart.
+    """
+    global _stripe_initialized  # noqa: PLW0603
+    with _stripe_lock:
+        _stripe_initialized = False
+    log.warning(
+        "Stripe initialization reset due to authentication error; will re-init on next call"
+    )
 
 
 def get_stripe_price_id() -> str:

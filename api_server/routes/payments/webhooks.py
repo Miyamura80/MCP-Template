@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
@@ -107,14 +108,23 @@ async def stripe_webhook(request: Request):
             status_code=500, detail="Customer not found, will retry"
         ) from None
 
-    # Probabilistic cleanup of old processed events (1% of requests)
-    if random.random() < 0.01:  # noqa: S311
+    # Probabilistic cleanup of old processed events (1% of requests),
+    # with a time-based fallback so low-traffic deployments don't let
+    # the table grow indefinitely.
+    if random.random() < 0.01 or _cleanup_overdue():  # noqa: S311
         await asyncio.to_thread(_cleanup_old_events)
 
     return {"received": True}
 
 
 _EVENT_RETENTION = timedelta(days=7)
+_last_cleanup = time.monotonic()
+_CLEANUP_INTERVAL = 3600  # force cleanup at least once per hour
+
+
+def _cleanup_overdue() -> bool:
+    """Return True if enough time has elapsed to force a cleanup."""
+    return (time.monotonic() - _last_cleanup) >= _CLEANUP_INTERVAL
 
 
 def _cleanup_old_events() -> None:
@@ -125,6 +135,7 @@ def _cleanup_old_events() -> None:
     metering callers since Stripe itself expires idempotency keys after
     24 hours.
     """
+    global _last_cleanup  # noqa: PLW0603
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
         with use_db_session() as session:
@@ -134,6 +145,7 @@ def _cleanup_old_events() -> None:
                 )
             )
             session.commit()
+            _last_cleanup = time.monotonic()
             if result.rowcount:
                 log.info("Cleaned up {} old processed stripe events", result.rowcount)
     except Exception:

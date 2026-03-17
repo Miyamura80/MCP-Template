@@ -6,6 +6,7 @@ import math
 import os
 import threading
 import time
+import uuid
 
 from fastapi import Request, Response
 from limits import (
@@ -125,8 +126,11 @@ async def _identity(request: Request) -> str:
     # it is client-controlled and can be spoofed to rotate rate-limit
     # buckets.  Fall back to the TCP-level client address which cannot
     # be spoofed without controlling the connection.
+    # Use a per-request UUID when no client info is available so that
+    # truly-anonymous traffic doesn't share a single rate-limit bucket
+    # (which would let one burst block all other unidentified clients).
     real_ip = request.headers.get("X-Real-IP", "").strip() or (
-        request.client.host if request.client else "unknown"
+        request.client.host if request.client else f"unknown-{uuid.uuid4().hex}"
     )
     return "ip:" + real_ip
 
