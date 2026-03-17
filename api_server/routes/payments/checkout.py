@@ -95,6 +95,7 @@ def _ensure_stripe_customer(
             try:
                 session.commit()
             except SQLAlchemyError:
+                session.rollback()
                 log.error(
                     "Failed to persist stripe_customer_id {} for user {}",
                     orphaned_customer_id,

@@ -220,9 +220,10 @@ def _is_stale_event(data: dict, sub: UserSubscription) -> bool:
     """
     event_created = data.get("created")
     if event_created and sub.stripe_state_updated_at:
-        return (
-            datetime.fromtimestamp(event_created, tz=UTC) < sub.stripe_state_updated_at
-        )
+        updated_at = sub.stripe_state_updated_at
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        return datetime.fromtimestamp(event_created, tz=UTC) < updated_at
     return False
 
 
