@@ -22,6 +22,10 @@ from db.models.user_subscriptions import UserSubscription
 
 WEBHOOK_PREFIX = "/api/v1/billing/webhook"
 
+# Environments where the test-secret webhook fallback is allowed.
+# Any value NOT in this set is treated as production (fail-closed).
+_NON_PROD_ENVS = frozenset({"dev", "development", "staging", "test", "local"})
+
 router = APIRouter(prefix=WEBHOOK_PREFIX, tags=["billing"])
 
 
@@ -63,7 +67,7 @@ def _try_construct_event(payload: bytes, sig_header: str):
         # security risk (test-mode dashboard access could inject events).
         from common import global_config
 
-        if global_config.DEV_ENV.lower() == "prod":
+        if global_config.DEV_ENV.lower() not in _NON_PROD_ENVS:
             raise
 
         fallback = (
@@ -218,7 +222,7 @@ def _resolve_tier(data: dict) -> str:
     items = data.get("items", {}).get("data", [])
     price_id = items[0].get("price", {}).get("id") if items else None
     expected_plus_id = get_stripe_price_id()
-    if price_id == expected_plus_id:
+    if price_id is not None and price_id == expected_plus_id:
         return SubscriptionTier.PLUS.value
 
     log.error(

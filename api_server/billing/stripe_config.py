@@ -43,12 +43,23 @@ def ensure_stripe() -> bool:
                 key = global_config.STRIPE_SECRET_KEY
             else:
                 key = global_config.STRIPE_TEST_SECRET_KEY
-                if not key and global_config.STRIPE_SECRET_KEY:
-                    log.warning(
-                        "STRIPE_TEST_SECRET_KEY not set in non-prod environment; "
-                        "falling back to live STRIPE_SECRET_KEY - real charges may occur"
-                    )
-                    key = global_config.STRIPE_SECRET_KEY
+                if not key:
+                    if getattr(global_config, "STRIPE_ALLOW_LIVE_KEY_IN_DEV", False):
+                        log.warning(
+                            "STRIPE_TEST_SECRET_KEY not set in non-prod (DEV_ENV={}); "
+                            "using live key because STRIPE_ALLOW_LIVE_KEY_IN_DEV is set",
+                            global_config.DEV_ENV,
+                        )
+                        key = global_config.STRIPE_SECRET_KEY
+                    elif global_config.STRIPE_SECRET_KEY:
+                        log.error(
+                            "STRIPE_TEST_SECRET_KEY not set in non-prod (DEV_ENV={}); "
+                            "refusing to fall back to live STRIPE_SECRET_KEY to prevent "
+                            "real charges. Set STRIPE_TEST_SECRET_KEY or "
+                            "STRIPE_ALLOW_LIVE_KEY_IN_DEV=true to override",
+                            global_config.DEV_ENV,
+                        )
+                        return False
 
             if not key:
                 log.debug("Stripe not configured - billing features disabled")

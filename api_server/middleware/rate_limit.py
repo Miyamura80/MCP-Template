@@ -80,6 +80,13 @@ def _get_tier_limits(tier: str) -> dict:
     return {"rps": 5, "rpm": 60, "rph": 1000, "rpd": 5000}
 
 
+def _client_ip(request: Request) -> str:
+    """Return the best-effort client IP from the request."""
+    return request.headers.get("X-Real-IP", "").strip() or (
+        request.client.host if request.client else f"unknown-{uuid.uuid4().hex}"
+    )
+
+
 async def _identity(request: Request) -> str:
     """Resolve a stable identity for rate limiting.
 
@@ -116,10 +123,7 @@ async def _identity(request: Request) -> str:
         request.state._rl_user_id_resolved = True
         # Fall back to IP -- do NOT key on token hash, as rotating invalid
         # tokens would give each request a fresh bucket, bypassing rate limiting.
-        real_ip = request.headers.get("X-Real-IP", "").strip() or (
-            request.client.host if request.client else f"unknown-{uuid.uuid4().hex}"
-        )
-        return "ip:" + real_ip
+        return "ip:" + _client_ip(request)
     # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
     # DEPLOYMENT ASSUMPTION: This header is only trustworthy when the
     # server sits behind a reverse proxy (Railway, nginx, etc.) that
@@ -133,10 +137,7 @@ async def _identity(request: Request) -> str:
     # Use a per-request UUID when no client info is available so that
     # truly-anonymous traffic doesn't share a single rate-limit bucket
     # (which would let one burst block all other unidentified clients).
-    real_ip = request.headers.get("X-Real-IP", "").strip() or (
-        request.client.host if request.client else f"unknown-{uuid.uuid4().hex}"
-    )
-    return "ip:" + real_ip
+    return "ip:" + _client_ip(request)
 
 
 def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
