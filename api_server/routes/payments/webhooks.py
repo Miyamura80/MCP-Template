@@ -2,12 +2,13 @@
 
 import asyncio
 import random
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger as log
-from sqlalchemy import delete, update
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
 from api_server.billing.stripe_config import (
@@ -125,6 +126,7 @@ async def stripe_webhook(request: Request):
 _EVENT_RETENTION = timedelta(days=7)
 _last_cleanup = time.monotonic()
 _CLEANUP_INTERVAL = 3600  # force cleanup at least once per hour
+_cleanup_lock = threading.Lock()
 
 
 def _cleanup_overdue() -> bool:
@@ -141,6 +143,10 @@ def _cleanup_old_events() -> None:
     24 hours.
     """
     global _last_cleanup  # noqa: PLW0603
+    with _cleanup_lock:
+        if not _cleanup_overdue() and random.random() >= 0.01:  # noqa: S311
+            return  # another thread already handled it
+        _last_cleanup = time.monotonic()
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
         with use_db_session() as session:
@@ -150,7 +156,6 @@ def _cleanup_old_events() -> None:
                 )
             )
             session.commit()
-            _last_cleanup = time.monotonic()
             if result.rowcount:
                 log.info("Cleaned up {} old processed stripe events", result.rowcount)
     except Exception:
@@ -454,23 +459,29 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
 
-        result = session.execute(
-            update(UserSubscription)
-            .where(UserSubscription.stripe_customer_id == customer_id)
-            .values(
-                payment_status=PaymentStatus.FAILED.value,
-                payment_failure_count=UserSubscription.payment_failure_count + 1,
-                last_payment_error=error_msg,
-                updated_at=datetime.now(UTC),
-            )
-        )
-        if result.rowcount == 0:
+        sub = _find_subscription_by_customer(session, customer_id)
+        if not sub:
             log.warning(
                 "Received {} for unknown customer {}; will retry",
                 event_type,
                 customer_id,
             )
             raise _CustomerNotFoundError(customer_id)
+
+        if _is_stale_event(data, sub):
+            log.debug(
+                "Skipping stale payment_failed event {} for customer {}",
+                event_id,
+                customer_id,
+            )
+            session.commit()
+            return
+
+        sub.payment_status = PaymentStatus.FAILED.value
+        sub.payment_failure_count = (sub.payment_failure_count or 0) + 1
+        sub.last_payment_error = error_msg
+        sub.updated_at = datetime.now(UTC)
+        sub.stripe_state_updated_at = _event_timestamp(data)
         session.commit()
         log.warning("Payment failed for customer {}", customer_id)
 
@@ -514,5 +525,6 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
         period_end = line_period.get("end") or data.get("period_end")
         if period_end:
             sub.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+        sub.stripe_state_updated_at = _event_timestamp(data)
         session.commit()
         log.info("Payment succeeded for customer {}", customer_id)

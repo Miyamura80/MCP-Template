@@ -272,6 +272,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._limiter: MovingWindowRateLimiter | None = None
         self._storage_is_memory = False
         self._last_storage_attempt = 0.0
+        self._build_lock = threading.Lock()
         self._testing = os.getenv("TESTING") == "1"
         if self._testing:
             log.warning("Rate limiting disabled via TESTING=1 env var")
@@ -294,13 +295,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             and now - self._last_storage_attempt < self._REDIS_RETRY_INTERVAL
         ):
             return self._limiter
-        self._last_storage_attempt = now
-        storage = _build_storage()
-        is_memory = isinstance(storage, MemoryStorage)
-        self._storage = storage
-        self._limiter = MovingWindowRateLimiter(storage)
-        self._storage_is_memory = is_memory
-        return self._limiter
+        with self._build_lock:
+            # Double-check after acquiring lock
+            if self._limiter is not None and not self._storage_is_memory:
+                return self._limiter
+            now = time.time()
+            if (
+                self._limiter is not None
+                and self._storage_is_memory
+                and now - self._last_storage_attempt < self._REDIS_RETRY_INTERVAL
+            ):
+                return self._limiter
+            self._last_storage_attempt = now
+            storage = _build_storage()
+            is_memory = isinstance(storage, MemoryStorage)
+            self._storage = storage
+            self._limiter = MovingWindowRateLimiter(storage)
+            self._storage_is_memory = is_memory
+            return self._limiter
 
     def _check_and_hit(
         self, windows: list, identity: str
