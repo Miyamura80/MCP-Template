@@ -85,11 +85,21 @@ def _ensure_stripe_customer(
                 status_code=409,
                 detail="Active Plus subscription already exists",
             ) from None
-        # Only overwrite customer_id if the recovered row actually has one;
-        # otherwise keep the Stripe customer we just created.
         if sub and sub.stripe_customer_id:
             customer_id = sub.stripe_customer_id
             _delete_orphaned_customer(orphaned_customer_id, user.user_id, customer_id)
+        elif sub:
+            # Recovered row has no stripe_customer_id yet -- persist ours
+            # so webhooks can find this customer later.
+            sub.stripe_customer_id = orphaned_customer_id
+            try:
+                session.commit()
+            except SQLAlchemyError:
+                log.error(
+                    "Failed to persist stripe_customer_id {} for user {}",
+                    orphaned_customer_id,
+                    user.user_id,
+                )
     except SQLAlchemyError:
         session.rollback()
         log.error(

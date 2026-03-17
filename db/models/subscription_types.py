@@ -21,8 +21,3 @@ class PaymentStatus(enum.StrEnum):
     CURRENT = "current"
     FAILED = "failed"
     PENDING = "pending"
-
-
-class UsageAction(enum.StrEnum):
-    API_REQUEST = "api_request"
-    SERVICE_CALL = "service_call"
