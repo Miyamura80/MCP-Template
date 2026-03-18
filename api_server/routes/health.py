@@ -21,21 +21,33 @@ router = APIRouter(tags=["health"])
 # TTL cache for component health checks (avoids DB/Redis hit on every poll)
 _HEALTH_TTL = 15  # seconds
 _health_cache: dict[str, tuple[dict, float]] = {}
-_health_lock = threading.Lock()
+_health_locks: dict[str, threading.Lock] = {}
+_health_locks_meta = threading.Lock()
+
+
+def _get_component_lock(name: str) -> threading.Lock:
+    """Return a per-component lock, creating one lazily if needed."""
+    lock = _health_locks.get(name)
+    if lock is not None:
+        return lock
+    with _health_locks_meta:
+        if name not in _health_locks:
+            _health_locks[name] = threading.Lock()
+        return _health_locks[name]
 
 
 def _cached_check(name: str, check_fn: collections.abc.Callable[[], dict]) -> dict:
     """Return cached result if fresh, otherwise call check_fn under lock.
 
-    The check runs under the lock so only one thread probes at a time,
-    preventing a thundering-herd of DB/Redis connections on cache miss.
-    With a 15 s TTL the serialisation is negligible for health endpoints.
+    Each component has its own lock so a slow DB probe doesn't block
+    Redis or Stripe checks.  With a 15 s TTL the serialisation is
+    negligible for health endpoints.
     """
     cached = _health_cache.get(name)
     now = time.monotonic()
     if cached and cached[1] > now:
         return cached[0]
-    with _health_lock:
+    with _get_component_lock(name):
         # Double-check after acquiring lock
         cached = _health_cache.get(name)
         now = time.monotonic()

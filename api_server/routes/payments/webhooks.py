@@ -118,7 +118,8 @@ async def stripe_webhook(request: Request):
     # with a time-based fallback so low-traffic deployments don't let
     # the table grow indefinitely.
     if random.random() < 0.01 or _cleanup_overdue():  # noqa: S311
-        asyncio.create_task(asyncio.to_thread(_cleanup_old_events))
+        task = asyncio.create_task(asyncio.to_thread(_cleanup_old_events))
+        task.add_done_callback(_log_cleanup_failure)
 
     return {"received": True}
 
@@ -132,6 +133,12 @@ _cleanup_lock = threading.Lock()
 def _cleanup_overdue() -> bool:
     """Return True if enough time has elapsed to force a cleanup."""
     return (time.monotonic() - _last_cleanup) >= _CLEANUP_INTERVAL
+
+
+def _log_cleanup_failure(task: asyncio.Task) -> None:
+    """Log unexpected cleanup task failures instead of silently dropping them."""
+    if not task.cancelled() and task.exception() is not None:
+        log.warning("Cleanup task failed: {}", task.exception())
 
 
 def _cleanup_old_events() -> None:
@@ -413,7 +420,9 @@ def _handle_subscription_deleted(data: dict, event_id: str, event_type: str) -> 
         # Reset usage so the user is not immediately quota-blocked
         # on the lower free tier daily limit.
         sub.current_period_usage = 0
-        sub.daily_quota_reset_at = datetime.now(UTC)
+        sub.daily_quota_reset_at = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         session.commit()
         log.info("Subscription canceled for customer {}", customer_id)
 
@@ -526,7 +535,9 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
         # Also reset daily_quota_reset_at so ensure_daily_limit re-triggers
         # the day-boundary reset on the next request (prevents quota bypass).
         sub.current_period_usage = 0
-        sub.daily_quota_reset_at = datetime.now(UTC)
+        sub.daily_quota_reset_at = datetime.now(UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         # Prefer subscription line-item period over invoice top-level
         # period_start/period_end, which may not match the subscription
         # billing cycle when invoices have multiple line items.
