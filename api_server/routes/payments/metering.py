@@ -146,8 +146,11 @@ def report_usage(
         return {"usage": sub.current_period_usage}
 
     # Report to Stripe (identifier deduplicates on Stripe's side).
-    # If Stripe failed, rollback the dedup record via savepoint so the
-    # caller can retry with the same idempotency key.
+    # If Stripe fails, roll back the entire transaction so the dedup
+    # INSERT is undone and the caller can retry with the same key.
+    # NOTE: this is a full session.rollback(), not a savepoint rollback —
+    # any other uncommitted writes since the last commit are also discarded.
+    # Currently safe because validate_api_key() commits before the route runs.
     if not _report_to_stripe(sub, user.user_id, stripe_identifier):
         session.rollback()
         raise HTTPException(

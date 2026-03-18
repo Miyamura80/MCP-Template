@@ -232,6 +232,15 @@ def _resolve_tier(data: dict) -> str:
     items = data.get("items", {}).get("data", [])
     price_id = items[0].get("price", {}).get("id") if items else None
     expected_plus_id = get_stripe_price_id()
+
+    if not expected_plus_id:
+        log.error(
+            "Stripe PLUS price ID is not configured; cannot resolve tier for price {}. "
+            "Set subscription_config.stripe.price_ids correctly.",
+            price_id,
+        )
+        raise _CustomerNotFoundError("price_id_not_configured")
+
     if price_id is not None and price_id == expected_plus_id:
         return SubscriptionTier.PLUS.value
 
