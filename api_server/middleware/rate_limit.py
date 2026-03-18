@@ -309,9 +309,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._last_storage_attempt = now
             storage = _build_storage()
             is_memory = isinstance(storage, MemoryStorage)
-            self._storage = storage
-            self._limiter = MovingWindowRateLimiter(storage)
-            self._storage_is_memory = is_memory
+            # Only replace the limiter when Redis became available; keep the
+            # existing MemoryStorage limiter so counters survive retries.
+            if not is_memory or self._limiter is None:
+                self._storage = storage
+                self._limiter = MovingWindowRateLimiter(storage)
+                self._storage_is_memory = is_memory
             return self._limiter
 
     def _check_and_hit(

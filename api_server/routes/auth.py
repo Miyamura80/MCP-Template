@@ -55,7 +55,7 @@ def create_key(
     # An unscoped (legacy) key grants unrestricted access, so a scoped
     # caller must not be able to create one.
     caller_scopes = user.scopes if user.scopes is not None else ["*"]
-    if scopes is None and caller_scopes != ["*"]:
+    if scopes is None and "*" not in caller_scopes:
         raise HTTPException(
             status_code=403,
             detail="Cannot create an unrestricted key from a scoped key.",
