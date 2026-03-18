@@ -81,11 +81,30 @@ def _get_tier_limits(tier: str) -> dict:
     return {"rps": 5, "rpm": 60, "rph": 1000, "rpd": 5000}
 
 
+def _trust_proxy_headers() -> bool:
+    """Return True when the deployment sits behind a trusted reverse proxy."""
+    try:
+        from common import global_config
+
+        rate_limit_cfg = getattr(global_config, "rate_limit", None)
+        if rate_limit_cfg and hasattr(rate_limit_cfg, "trust_proxy_headers"):
+            return bool(rate_limit_cfg.trust_proxy_headers)
+    except Exception:
+        pass
+    return False
+
+
 def _client_ip(request: Request) -> str:
-    """Return the best-effort client IP from the request."""
-    ip = request.headers.get("X-Real-IP", "").strip()
-    if ip:
-        return ip
+    """Return the best-effort client IP from the request.
+
+    Only trusts ``X-Real-IP`` when ``rate_limit.trust_proxy_headers`` is
+    enabled in config, preventing header spoofing when the server is
+    directly exposed without a reverse proxy.
+    """
+    if _trust_proxy_headers():
+        ip = request.headers.get("X-Real-IP", "").strip()
+        if ip:
+            return ip
     if request.client:
         return request.client.host
     return "unknown_" + uuid.uuid4().hex

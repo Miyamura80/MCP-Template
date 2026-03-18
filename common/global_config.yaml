@@ -76,6 +76,7 @@ logging:
 ########################################################
 rate_limit:
   enabled: true
+  trust_proxy_headers: false
   tiers:
     free_tier:
       rps: 2
