@@ -40,16 +40,16 @@ except ImportError:
 
 def _is_stripe_error(exc: Exception) -> bool:
     """Check if an exception originates from Stripe."""
-    if _StripeError is None:
-        return False
-    return isinstance(exc, _StripeError)
+    if _StripeError is not None and isinstance(exc, _StripeError):
+        return True
+    return type(exc).__module__.startswith("stripe")
 
 
 def _is_stripe_auth_error(exc: Exception) -> bool:
     """Check if an exception is a Stripe AuthenticationError."""
-    if _StripeAuthError is None:
-        return False
-    return isinstance(exc, _StripeAuthError)
+    if _StripeAuthError is not None and isinstance(exc, _StripeAuthError):
+        return True
+    return _is_stripe_error(exc) and type(exc).__name__ == "AuthenticationError"
 
 
 def _build_error_response(
