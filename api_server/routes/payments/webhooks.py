@@ -146,6 +146,7 @@ def _cleanup_old_events() -> None:
     with _cleanup_lock:
         if not _cleanup_overdue() and random.random() >= 0.01:  # noqa: S311
             return  # not due yet or lost the 1% lottery
+        prev_cleanup = _last_cleanup
         _last_cleanup = time.monotonic()
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
@@ -159,6 +160,7 @@ def _cleanup_old_events() -> None:
             if result.rowcount:
                 log.info("Cleaned up {} old processed stripe events", result.rowcount)
     except Exception:
+        _last_cleanup = prev_cleanup
         log.warning("Failed to clean up old processed stripe events")
 
 

@@ -76,9 +76,9 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         _stripe_in_flight.add(stripe_sub_id)
 
     # Network I/O outside the lock.
-    try:
-        import stripe
+    import stripe
 
+    try:
         stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
         if stripe_sub.status == "active" and stripe_sub.cancel_at_period_end:
             status = SubscriptionStatus.CANCELING.value
@@ -94,7 +94,7 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
             )
         return status
     except Exception as exc:
-        if type(exc).__name__ == "AuthenticationError":
+        if isinstance(exc, stripe.AuthenticationError):
             from api_server.billing.stripe_config import reset_stripe_on_auth_error
 
             reset_stripe_on_auth_error()

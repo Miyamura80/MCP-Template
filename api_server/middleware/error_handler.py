@@ -30,14 +30,26 @@ def _error_code(status: int) -> str:
     return _STATUS_CODE_MAP.get(status, "error")
 
 
+try:
+    from stripe import AuthenticationError as _StripeAuthError
+    from stripe import StripeError as _StripeError
+except ImportError:
+    _StripeError = None  # type: ignore[assignment,misc]
+    _StripeAuthError = None  # type: ignore[assignment,misc]
+
+
 def _is_stripe_error(exc: Exception) -> bool:
     """Check if an exception originates from Stripe."""
-    return type(exc).__module__.startswith("stripe")
+    if _StripeError is None:
+        return False
+    return isinstance(exc, _StripeError)
 
 
 def _is_stripe_auth_error(exc: Exception) -> bool:
     """Check if an exception is a Stripe AuthenticationError."""
-    return _is_stripe_error(exc) and type(exc).__name__ == "AuthenticationError"
+    if _StripeAuthError is None:
+        return False
+    return isinstance(exc, _StripeAuthError)
 
 
 def _build_error_response(

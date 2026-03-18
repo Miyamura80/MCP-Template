@@ -192,6 +192,9 @@ def cancel_subscription(
     if sub.subscription_status == SubscriptionStatus.CANCELING.value:
         return {"status": "cancel_scheduled"}
 
+    if sub.subscription_status == SubscriptionStatus.CANCELED.value:
+        raise HTTPException(status_code=409, detail="Subscription already canceled")
+
     try:
         stripe.Subscription.modify(
             sub.stripe_subscription_id,
