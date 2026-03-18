@@ -34,6 +34,57 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
         log.warning("Failed to delete orphaned Stripe customer {}", orphaned_id)
 
 
+_ACTIVE_PLUS_STATUSES = frozenset({
+    SubscriptionStatus.ACTIVE.value,
+    SubscriptionStatus.CANCELING.value,
+    SubscriptionStatus.PAST_DUE.value,
+    SubscriptionStatus.INCOMPLETE.value,
+})
+
+
+def _recover_concurrent_customer(
+    session: Session, user: AuthenticatedUser, orphaned_customer_id: str
+) -> tuple[str, UserSubscription | None]:
+    """Handle IntegrityError from concurrent customer creation.
+
+    Returns ``(customer_id, sub)`` after reconciling with the winner's row.
+    Raises HTTP 409 if the winner already has an active Plus subscription.
+    """
+    sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
+    if (
+        sub
+        and sub.subscription_tier == SubscriptionTier.PLUS.value
+        and sub.subscription_status in _ACTIVE_PLUS_STATUSES
+    ):
+        if sub.stripe_customer_id and orphaned_customer_id != sub.stripe_customer_id:
+            _delete_orphaned_customer(orphaned_customer_id, user.user_id, sub.stripe_customer_id)
+        raise HTTPException(
+            status_code=409,
+            detail="Active Plus subscription already exists",
+        ) from None
+    if sub and sub.stripe_customer_id:
+        customer_id = sub.stripe_customer_id
+        _delete_orphaned_customer(orphaned_customer_id, user.user_id, customer_id)
+        return customer_id, sub
+    if sub:
+        sub.stripe_customer_id = orphaned_customer_id
+        try:
+            session.commit()
+        except SQLAlchemyError:
+            session.rollback()
+            log.error(
+                "Failed to persist stripe_customer_id {} for user {} "
+                "- customer may be orphaned in Stripe",
+                orphaned_customer_id,
+                user.user_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Database error during checkout",
+            ) from None
+    return orphaned_customer_id, sub
+
+
 def _ensure_stripe_customer(
     user: AuthenticatedUser, session: Session, sub: UserSubscription | None
 ) -> tuple[str, UserSubscription | None]:
@@ -70,46 +121,9 @@ def _ensure_stripe_customer(
         session.commit()
     except IntegrityError:
         session.rollback()
-        orphaned_customer_id = customer_id
-        sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
-        if (
-            sub
-            and sub.subscription_tier == SubscriptionTier.PLUS.value
-            and sub.subscription_status
-            in (
-                SubscriptionStatus.ACTIVE.value,
-                SubscriptionStatus.CANCELING.value,
-                SubscriptionStatus.PAST_DUE.value,
-                SubscriptionStatus.INCOMPLETE.value,
-            )
-        ):
-            if sub.stripe_customer_id and orphaned_customer_id != sub.stripe_customer_id:
-                _delete_orphaned_customer(orphaned_customer_id, user.user_id, sub.stripe_customer_id)
-            raise HTTPException(
-                status_code=409,
-                detail="Active Plus subscription already exists",
-            ) from None
-        if sub and sub.stripe_customer_id:
-            customer_id = sub.stripe_customer_id
-            _delete_orphaned_customer(orphaned_customer_id, user.user_id, customer_id)
-        elif sub:
-            # Recovered row has no stripe_customer_id yet -- persist ours
-            # so webhooks can find this customer later.
-            sub.stripe_customer_id = orphaned_customer_id
-            try:
-                session.commit()
-            except SQLAlchemyError:
-                session.rollback()
-                log.error(
-                    "Failed to persist stripe_customer_id {} for user {} "
-                    "- customer may be orphaned in Stripe",
-                    orphaned_customer_id,
-                    user.user_id,
-                )
-                raise HTTPException(
-                    status_code=503,
-                    detail="Database error during checkout",
-                ) from None
+        customer_id, sub = _recover_concurrent_customer(
+            session, user, customer_id
+        )
     except SQLAlchemyError:
         session.rollback()
         log.error(
@@ -140,13 +154,7 @@ def create_checkout(
     if (
         sub
         and sub.subscription_tier == SubscriptionTier.PLUS.value
-        and sub.subscription_status
-        in (
-            SubscriptionStatus.ACTIVE.value,
-            SubscriptionStatus.CANCELING.value,
-            SubscriptionStatus.PAST_DUE.value,
-            SubscriptionStatus.INCOMPLETE.value,
-        )
+        and sub.subscription_status in _ACTIVE_PLUS_STATUSES
     ):
         raise HTTPException(
             status_code=409, detail="Active Plus subscription already exists"
