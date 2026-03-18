@@ -150,7 +150,6 @@ def report_usage(
     # caller can retry with the same idempotency key.
     if not _report_to_stripe(sub, user.user_id, stripe_identifier):
         session.rollback()
-        session.refresh(sub)
         raise HTTPException(
             status_code=502,
             detail="Stripe meter event failed; retry with the same Idempotency-Key",
