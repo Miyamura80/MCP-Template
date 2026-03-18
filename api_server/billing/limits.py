@@ -120,6 +120,8 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 f"daily_quota_reset_at unexpectedly None for user {user_id}"
             )
         now = datetime.now(UTC)
+        if reset_at.tzinfo is None:
+            reset_at = reset_at.replace(tzinfo=UTC)
         if now.date() > reset_at.date():
             day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             # Zero-quota tiers: reset the clock without claiming a slot
