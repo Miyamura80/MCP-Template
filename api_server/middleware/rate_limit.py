@@ -113,7 +113,9 @@ def _client_ip(request: Request) -> str:
 async def _identity(request: Request) -> str:
     """Resolve a stable identity for rate limiting.
 
-    Priority: API key hash > JWT user ID > client IP.
+    Priority: JWT user ID > API key hash > client IP.
+    Matches the credential priority in unified_auth.get_authenticated_user
+    so that rate-limit identity aligns with the authenticated principal.
     JWT users are keyed on their stable user ID (not the ephemeral token
     hash) so that token rotation does not reset rate-limit counters.
 
@@ -124,24 +126,6 @@ async def _identity(request: Request) -> str:
     ``_resolve_tier`` can reuse it without calling ``verify_workos_token``
     a second time.
     """
-    api_key = request.headers.get("X-API-KEY", "")
-    if api_key:
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-        # Validate the key before using it as a rate-limit bucket.
-        # Without this, rotating fake keys creates unlimited fresh buckets
-        # (same vulnerability the JWT path already guards against).
-        tier = await asyncio.to_thread(_lookup_tier_sync, key_hash)
-        if tier == _INVALID_KEY_TIER:
-            return "ip:" + _client_ip(request)
-        # NOTE: Each API key gets its own rate-limit bucket.  A user with
-        # N keys effectively has N × the tier limit.  This is intentional:
-        # it allows distinct integrations (dev/prod/CI) to each consume
-        # their own quota.  Consolidating to per-user would require an
-        # extra DB round-trip on every request to resolve key → user_id
-        # before _resolve_tier runs.  If per-user enforcement is needed,
-        # the billing-layer daily quota (ensure_daily_limit) already
-        # enforces a hard per-user cap regardless of key count.
-        return "key:" + key_hash
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
@@ -159,22 +143,23 @@ async def _identity(request: Request) -> str:
         # Mark that JWT resolution was attempted (even if it failed) so
         # _resolve_tier doesn't call verify_workos_token a second time.
         request.state._rl_user_id_resolved = True
-        # Fall back to IP -- do NOT key on token hash, as rotating invalid
-        # tokens would give each request a fresh bucket, bypassing rate limiting.
-        return "ip:" + _client_ip(request)
-    # Prefer X-Real-IP (set by nginx/Railway to the actual client IP).
-    # DEPLOYMENT ASSUMPTION: This header is only trustworthy when the
-    # server sits behind a reverse proxy (Railway, nginx, etc.) that
-    # overwrites X-Real-IP with the true client address.  If the server
-    # is directly reachable, clients can spoof this header to rotate
-    # rate-limit buckets.  Do NOT expose the server without a proxy.
-    # Skip X-Forwarded-For entirely for unauthenticated requests since
-    # it is client-controlled and can be spoofed to rotate rate-limit
-    # buckets.  Fall back to the TCP-level client address which cannot
-    # be spoofed without controlling the connection.
-    # Use a per-request UUID when no client info is available so that
-    # truly-anonymous traffic doesn't share a single rate-limit bucket
-    # (which would let one burst block all other unidentified clients).
+        # Fall through to API key -- a valid key may still be present.
+
+    api_key = request.headers.get("X-API-KEY", "")
+    if api_key:
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        # Validate the key before using it as a rate-limit bucket.
+        # Without this, rotating fake keys creates unlimited fresh buckets.
+        tier = await asyncio.to_thread(_lookup_tier_sync, key_hash)
+        if tier == _INVALID_KEY_TIER:
+            return "ip:" + _client_ip(request)
+        # NOTE: Each API key gets its own rate-limit bucket.  A user with
+        # N keys effectively has N x the tier limit.  This is intentional:
+        # it allows distinct integrations (dev/prod/CI) to each consume
+        # their own quota.  The billing-layer daily quota (ensure_daily_limit)
+        # enforces a hard per-user cap regardless of key count.
+        return "key:" + key_hash
+
     return "ip:" + _client_ip(request)
 
 
@@ -245,14 +230,9 @@ async def _resolve_tier(request: Request) -> str:
     the auth dependency (which runs later, inside call_next).
     Supports both API key and JWT Bearer token authentication.
     """
-    api_key = request.headers.get("X-API-KEY", "")
-    if api_key:
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-        tier = await asyncio.to_thread(_lookup_tier_sync, key_hash)
-        return "default" if tier == _INVALID_KEY_TIER else tier
-
-    # For JWT Bearer tokens, reuse the user_id resolved by _identity()
-    # (cached on request.state) to avoid calling verify_workos_token twice.
+    # Match credential priority from unified_auth: Bearer JWT first, then API key.
+    # Reuse the user_id resolved by _identity() (cached on request.state)
+    # to avoid calling verify_workos_token twice.
     cached_user_id = getattr(request.state, "_rl_user_id", None)
     if cached_user_id:
         cache_key = f"jwt:{cached_user_id}"
@@ -260,23 +240,28 @@ async def _resolve_tier(request: Request) -> str:
             _lookup_tier_sync, cache_key, user_id=cached_user_id
         )
     # If _identity already attempted JWT verification and it failed, don't
-    # call verify_workos_token a second time; fall through to default.
-    if getattr(request.state, "_rl_user_id_resolved", False):
-        return "default"
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        try:
-            from api_server.auth.workos_auth import verify_workos_token
+    # call verify_workos_token a second time; fall through to API key.
+    if not getattr(request.state, "_rl_user_id_resolved", False):
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            try:
+                from api_server.auth.workos_auth import verify_workos_token
 
-            token = auth_header.removeprefix("Bearer ").strip()
-            workos_user = await asyncio.to_thread(verify_workos_token, token)
-            if workos_user:
-                cache_key = f"jwt:{workos_user.user_id}"
-                return await asyncio.to_thread(
-                    _lookup_tier_sync, cache_key, user_id=workos_user.user_id
-                )
-        except Exception:
-            pass
+                token = auth_header.removeprefix("Bearer ").strip()
+                workos_user = await asyncio.to_thread(verify_workos_token, token)
+                if workos_user:
+                    cache_key = f"jwt:{workos_user.user_id}"
+                    return await asyncio.to_thread(
+                        _lookup_tier_sync, cache_key, user_id=workos_user.user_id
+                    )
+            except Exception:
+                pass
+
+    api_key = request.headers.get("X-API-KEY", "")
+    if api_key:
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        tier = await asyncio.to_thread(_lookup_tier_sync, key_hash)
+        return "default" if tier == _INVALID_KEY_TIER else tier
 
     return "default"
 
