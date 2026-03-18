@@ -79,6 +79,8 @@ def _ensure_stripe_customer(
             in (
                 SubscriptionStatus.ACTIVE.value,
                 SubscriptionStatus.CANCELING.value,
+                SubscriptionStatus.PAST_DUE.value,
+                SubscriptionStatus.INCOMPLETE.value,
             )
         ):
             raise HTTPException(
@@ -137,7 +139,12 @@ def create_checkout(
         sub
         and sub.subscription_tier == SubscriptionTier.PLUS.value
         and sub.subscription_status
-        in (SubscriptionStatus.ACTIVE.value, SubscriptionStatus.CANCELING.value)
+        in (
+            SubscriptionStatus.ACTIVE.value,
+            SubscriptionStatus.CANCELING.value,
+            SubscriptionStatus.PAST_DUE.value,
+            SubscriptionStatus.INCOMPLETE.value,
+        )
     ):
         raise HTTPException(
             status_code=409, detail="Active Plus subscription already exists"
