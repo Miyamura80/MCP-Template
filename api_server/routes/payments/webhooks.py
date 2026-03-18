@@ -99,9 +99,13 @@ async def stripe_webhook(request: Request):
         log.warning("Webhook signature verification failed: {}", exc)
         raise HTTPException(status_code=400, detail="Invalid signature") from exc
 
-    event_id = event["id"]
-    event_type = event["type"]
-    data = event["data"]["object"]
+    try:
+        event_id = event["id"]
+        event_type = event["type"]
+        data = event["data"]["object"]
+    except (KeyError, TypeError) as exc:
+        log.warning("Malformed webhook event structure: {}", exc)
+        raise HTTPException(status_code=400, detail="Malformed event") from exc
 
     # Dispatch to sync handlers via asyncio.to_thread to avoid blocking
     # the event loop during synchronous SQLAlchemy DB operations.

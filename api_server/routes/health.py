@@ -128,7 +128,8 @@ def _check_redis() -> dict:
         return {"status": "ok"}
     except Exception as exc:
         # Reset so the next health probe re-creates the client
-        _redis_health_client = None
+        with _redis_health_client_lock:
+            _redis_health_client = None
         return {"status": "error", "message": type(exc).__name__}
 
 
