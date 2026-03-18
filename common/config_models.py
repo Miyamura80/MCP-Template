@@ -125,6 +125,7 @@ class RateLimitConfig(BaseModel):
     """Rate limiting configuration."""
 
     enabled: bool = True
+    trust_proxy_headers: bool = False
     tiers: dict[str, dict[str, int]] = Field(
         default_factory=lambda: {
             "free_tier": {"rps": 2, "rpm": 30, "rph": 200, "rpd": 100},
