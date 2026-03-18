@@ -6,7 +6,6 @@ import math
 import os
 import threading
 import time
-import uuid
 
 from fastapi import Request, Response
 from limits import (
@@ -83,9 +82,12 @@ def _get_tier_limits(tier: str) -> dict:
 
 def _client_ip(request: Request) -> str:
     """Return the best-effort client IP from the request."""
-    return request.headers.get("X-Real-IP", "").strip() or (
-        request.client.host if request.client else f"unknown-{uuid.uuid4().hex}"
-    )
+    ip = request.headers.get("X-Real-IP", "").strip()
+    if ip:
+        return ip
+    if request.client:
+        return request.client.host
+    return "unknown"
 
 
 async def _identity(request: Request) -> str:

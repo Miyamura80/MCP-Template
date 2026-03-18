@@ -160,7 +160,12 @@ def _cleanup_old_events() -> None:
             if result.rowcount:
                 log.info("Cleaned up {} old processed stripe events", result.rowcount)
     except Exception:
-        _last_cleanup = prev_cleanup
+        with _cleanup_lock:
+            if _last_cleanup != prev_cleanup:
+                # Another thread advanced the clock; don't roll it back.
+                pass
+            else:
+                _last_cleanup = prev_cleanup
         log.warning("Failed to clean up old processed stripe events")
 
 

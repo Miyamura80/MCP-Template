@@ -72,9 +72,11 @@ _REDIS_NOT_CONFIGURED = object()  # sentinel: REDIS_URL was absent
 def _get_redis_health_client():
     """Return a reusable Redis client for health checks.
 
-    Returns ``None`` to signal "please create one", the
-    ``_REDIS_NOT_CONFIGURED`` sentinel when no URL is set, or an
-    existing client instance.
+    Returns ``None`` when no ``REDIS_URL`` is configured (the
+    ``_REDIS_NOT_CONFIGURED`` sentinel is used internally to
+    distinguish "not configured" from "not yet created").
+    Creates and caches a new client on first call, then returns
+    the cached instance on subsequent calls.
     """
     global _redis_health_client  # noqa: PLW0603
     val = _redis_health_client
