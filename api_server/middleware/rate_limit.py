@@ -337,8 +337,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             ):
                 return self._limiter
             self._last_storage_attempt = now
-            storage = _build_storage()
-            is_memory = isinstance(storage, MemoryStorage)
+
+        # Build storage outside the lock so a slow Redis connection
+        # attempt doesn't serialise all concurrent rate-limit checks.
+        storage = _build_storage()
+        is_memory = isinstance(storage, MemoryStorage)
+
+        with self._build_lock:
             # Only replace the limiter when Redis became available; keep the
             # existing MemoryStorage limiter so counters survive retries.
             if not is_memory or self._limiter is None:

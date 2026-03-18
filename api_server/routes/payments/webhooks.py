@@ -117,6 +117,10 @@ async def stripe_webhook(request: Request):
         raise HTTPException(
             status_code=500, detail="Customer not found, will retry"
         ) from None
+    except _ConfigurationError:
+        raise HTTPException(
+            status_code=500, detail="Billing configuration error, will retry"
+        ) from None
 
     # Probabilistic cleanup of old processed events (1% of requests),
     # with a time-based fallback so low-traffic deployments don't let
@@ -239,7 +243,7 @@ def _resolve_tier(data: dict) -> str:
             "Set subscription_config.stripe.price_ids correctly.",
             price_id,
         )
-        raise _CustomerNotFoundError("price_id_not_configured")
+        raise _ConfigurationError("price_id_not_configured")
 
     if price_id is not None and price_id == expected_plus_id:
         return SubscriptionTier.PLUS.value
@@ -255,6 +259,10 @@ def _resolve_tier(data: dict) -> str:
 
 class _CustomerNotFoundError(Exception):
     """Raised when a webhook references an unknown customer (triggers retry)."""
+
+
+class _ConfigurationError(Exception):
+    """Raised when a required billing config value is absent (triggers retry)."""
 
 
 def _event_timestamp(data: dict) -> datetime:
