@@ -6,6 +6,7 @@ import math
 import os
 import threading
 import time
+import uuid
 
 from fastapi import Request, Response
 from limits import (
@@ -87,7 +88,7 @@ def _client_ip(request: Request) -> str:
         return ip
     if request.client:
         return request.client.host
-    return "unknown"
+    return "unknown_" + uuid.uuid4().hex
 
 
 async def _identity(request: Request) -> str:

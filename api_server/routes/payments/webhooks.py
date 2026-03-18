@@ -118,7 +118,7 @@ async def stripe_webhook(request: Request):
     # with a time-based fallback so low-traffic deployments don't let
     # the table grow indefinitely.
     if random.random() < 0.01 or _cleanup_overdue():  # noqa: S311
-        await asyncio.to_thread(_cleanup_old_events)
+        asyncio.create_task(asyncio.to_thread(_cleanup_old_events))
 
     return {"received": True}
 
@@ -144,8 +144,8 @@ def _cleanup_old_events() -> None:
     """
     global _last_cleanup  # noqa: PLW0603
     with _cleanup_lock:
-        if not _cleanup_overdue() and random.random() >= 0.01:  # noqa: S311
-            return  # not due yet or lost the 1% lottery
+        if not _cleanup_overdue():
+            return  # another thread already ran cleanup
         prev_cleanup = _last_cleanup
         _last_cleanup = time.monotonic()
     try:
