@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 from fastapi import APIRouter
+from loguru import logger as log
 
 try:
     _APP_VERSION = _pkg_version("miyamura80-cli-template")
@@ -200,6 +201,11 @@ def _get_git_commit() -> str | None:
             )
         except Exception:
             _git_commit_value = None
+        if _git_commit_value is None:
+            log.warning(
+                "Could not determine git commit (GIT_SHA not set and git unavailable); "
+                "set GIT_SHA at build time for production deployments"
+            )
         _git_commit_resolved = True
         return _git_commit_value
 

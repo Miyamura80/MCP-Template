@@ -373,17 +373,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         hit_item,
         identity: str,
         limits_cfg: dict,
+        precomputed_reset: float | None = None,
     ) -> JSONResponse:
         """Build a 429 Too Many Requests response."""
         cfg_key = self._WINDOW_CFG_KEY.get(hit_window, "rpm")
         exceeded_limit = limits_cfg.get(cfg_key, 60)
-        try:
-            hit_stats = self._get_limiter().get_window_stats(hit_item, identity)
-            retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
-            reset_ts = int(hit_stats.reset_time)
-        except Exception:
-            retry_after = 60
-            reset_ts = int(time.time()) + 60
+        if precomputed_reset is not None:
+            reset_ts = int(precomputed_reset)
+            retry_after = max(1, math.ceil(precomputed_reset - time.time()))
+        else:
+            try:
+                hit_stats = self._get_limiter().get_window_stats(hit_item, identity)
+                retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
+                reset_ts = int(hit_stats.reset_time)
+            except Exception:
+                retry_after = 60
+                reset_ts = int(time.time()) + 60
         headers = {
             "X-RateLimit-Limit": str(exceeded_limit),
             "X-RateLimit-Remaining": "0",
@@ -479,7 +484,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if hit_window is not None and hit_item is not None:
-            return self._build_429(request, hit_window, hit_item, identity, limits_cfg)
+            _, rst = window_stats.get(hit_window, (0, time.time() + 60))
+            return self._build_429(
+                request, hit_window, hit_item, identity, limits_cfg, precomputed_reset=rst
+            )
 
         # Use stats collected during _check_and_hit to find the most
         # constrained window (lowest remaining) without extra Redis calls.
@@ -489,12 +497,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
 
-        # Attach rate limit headers
+        # Attach rate limit headers (remaining is pre-hit: subtract 1)
+        post_hit_remaining = max(0, remaining - 1)
         response.headers["X-RateLimit-Limit"] = str(limit_val)
-        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Remaining"] = str(post_hit_remaining)
         response.headers["X-RateLimit-Reset"] = str(int(reset_time))
         response.headers["RateLimit"] = (
-            f"limit={limit_val}, remaining={remaining}, reset={int(reset_time)}"
+            f"limit={limit_val}, remaining={post_hit_remaining}, reset={int(reset_time)}"
         )
         response.headers["RateLimit-Policy"] = (
             f"{limits_cfg.get('rps', 5)};w=1, {limits_cfg.get('rpm', 60)};w=60, {limits_cfg.get('rph', 1000)};w=3600, {limits_cfg.get('rpd', 5000)};w=86400"
