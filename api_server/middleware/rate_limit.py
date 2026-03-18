@@ -344,9 +344,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         is_memory = isinstance(storage, MemoryStorage)
 
         with self._build_lock:
-            # Only replace the limiter when Redis became available; keep the
-            # existing MemoryStorage limiter so counters survive retries.
-            if not is_memory or self._limiter is None:
+            # Another thread may have built the limiter while we were
+            # connecting to Redis.  Only install if upgrading to Redis,
+            # or on first init.
+            if self._limiter is not None and not self._storage_is_memory:
+                return self._limiter
+            if self._limiter is None or (not is_memory and self._storage_is_memory):
                 self._storage = storage
                 self._limiter = MovingWindowRateLimiter(storage)
                 self._storage_is_memory = is_memory

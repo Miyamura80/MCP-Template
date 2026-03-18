@@ -488,8 +488,6 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
 
-        error_msg = _resolve_payment_error(data)
-
         sub = _find_subscription_by_customer(session, customer_id)
         if not sub:
             log.warning(
@@ -507,6 +505,10 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
             )
             session.commit()
             return
+
+        # Resolve error details only after confirming the customer exists
+        # and the event is not stale, to avoid wasted Stripe API calls.
+        error_msg = _resolve_payment_error(data)
 
         sub.payment_status = PaymentStatus.FAILED.value
         sub.payment_failure_count = (sub.payment_failure_count or 0) + 1

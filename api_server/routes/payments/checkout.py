@@ -83,6 +83,8 @@ def _ensure_stripe_customer(
                 SubscriptionStatus.INCOMPLETE.value,
             )
         ):
+            if sub.stripe_customer_id and orphaned_customer_id != sub.stripe_customer_id:
+                _delete_orphaned_customer(orphaned_customer_id, user.user_id, sub.stripe_customer_id)
             raise HTTPException(
                 status_code=409,
                 detail="Active Plus subscription already exists",
