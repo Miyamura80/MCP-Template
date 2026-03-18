@@ -52,7 +52,14 @@ def create_key(
     # Prevent privilege escalation: new key's scopes must be a subset of
     # the caller's own scopes. Treat legacy keys (scopes=None) as ["*"]
     # so they can create any scoped key within their implicit full access.
+    # An unscoped (legacy) key grants unrestricted access, so a scoped
+    # caller must not be able to create one.
     caller_scopes = user.scopes if user.scopes is not None else ["*"]
+    if scopes is None and caller_scopes != ["*"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot create an unrestricted key from a scoped key.",
+        )
     if scopes is not None and not check_scopes(scopes, caller_scopes):
         raise HTTPException(
             status_code=403,

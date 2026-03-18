@@ -505,6 +505,15 @@ def _handle_payment_succeeded(data: dict, event_id: str, event_type: str) -> Non
             )
             raise _CustomerNotFoundError(customer_id)
 
+        if _is_stale_event(data, sub):
+            log.debug(
+                "Skipping stale payment_succeeded event {} for customer {}",
+                event_id,
+                customer_id,
+            )
+            session.commit()
+            return
+
         sub.payment_status = PaymentStatus.CURRENT.value
         sub.payment_failure_count = 0
         sub.last_payment_error = None
