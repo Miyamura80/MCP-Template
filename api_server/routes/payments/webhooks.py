@@ -361,6 +361,8 @@ def _handle_subscription_updated(data: dict, event_id: str, event_type: str) -> 
         # downgrade occurs only on customer.subscription.deleted.
         if is_active:
             sub.subscription_tier = _resolve_tier(data)
+            sub.payment_failure_count = 0
+            sub.last_payment_error = None
         elif local_status == SubscriptionStatus.CANCELED.value:
             sub.subscription_tier = SubscriptionTier.FREE.value
             # Clear to prevent stale Stripe polling from the status endpoint
