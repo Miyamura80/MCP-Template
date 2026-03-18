@@ -129,24 +129,25 @@ def report_usage(
 
     # Re-use the processed_stripe_events table for PK-based dedup so
     # retries skip both the Stripe call and the local counter increment,
-    # keeping the two in sync.
+    # keeping the two in sync.  Use a savepoint so that an IntegrityError
+    # only rolls back the INSERT, not the entire shared session (which may
+    # contain auth-side writes from get_authenticated_user).
     try:
-        session.add(
-            ProcessedStripeEvent(
-                event_id=db_dedup_key,
-                event_type="metering.report_usage",
+        with session.begin_nested():
+            session.add(
+                ProcessedStripeEvent(
+                    event_id=db_dedup_key,
+                    event_type="metering.report_usage",
+                )
             )
-        )
-        session.flush()
     except IntegrityError:
-        session.rollback()
         session.refresh(sub)
         log.debug("Duplicate metering request with key {}", idempotency_key)
         return {"usage": sub.current_period_usage}
 
     # Report to Stripe (identifier deduplicates on Stripe's side).
-    # If Stripe failed, rollback the dedup record so the caller can retry
-    # with the same idempotency key.  Do not increment the local counter.
+    # If Stripe failed, rollback the dedup record via savepoint so the
+    # caller can retry with the same idempotency key.
     if not _report_to_stripe(sub, user.user_id, stripe_identifier):
         session.rollback()
         session.refresh(sub)
