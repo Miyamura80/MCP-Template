@@ -147,7 +147,8 @@ def _cleanup_old_events() -> None:
         if not _cleanup_overdue():
             return  # another thread already ran cleanup
         prev_cleanup = _last_cleanup
-        _last_cleanup = time.monotonic()
+        new_cleanup = time.monotonic()
+        _last_cleanup = new_cleanup
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
         with use_db_session() as session:
@@ -161,10 +162,7 @@ def _cleanup_old_events() -> None:
                 log.info("Cleaned up {} old processed stripe events", result.rowcount)
     except Exception:
         with _cleanup_lock:
-            if _last_cleanup != prev_cleanup:
-                # Another thread advanced the clock; don't roll it back.
-                pass
-            else:
+            if _last_cleanup == new_cleanup:
                 _last_cleanup = prev_cleanup
         log.warning("Failed to clean up old processed stripe events")
 
