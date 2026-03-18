@@ -133,6 +133,14 @@ async def _identity(request: Request) -> str:
         tier = await asyncio.to_thread(_lookup_tier_sync, key_hash)
         if tier == _INVALID_KEY_TIER:
             return "ip:" + _client_ip(request)
+        # NOTE: Each API key gets its own rate-limit bucket.  A user with
+        # N keys effectively has N × the tier limit.  This is intentional:
+        # it allows distinct integrations (dev/prod/CI) to each consume
+        # their own quota.  Consolidating to per-user would require an
+        # extra DB round-trip on every request to resolve key → user_id
+        # before _resolve_tier runs.  If per-user enforcement is needed,
+        # the billing-layer daily quota (ensure_daily_limit) already
+        # enforces a hard per-user cap regardless of key count.
         return "key:" + key_hash
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):

@@ -462,22 +462,16 @@ def _handle_payment_failed(data: dict, event_id: str, event_type: str) -> None:
     if not customer_id:
         return
 
-    # Fast-path dedup: skip the Stripe API call for already-processed events.
-    with use_db_session() as pre_session:
-        if pre_session.get(ProcessedStripeEvent, event_id) is not None:
-            log.debug("Duplicate event {} for customer {}", event_id, customer_id)
-            return
-
-    # Resolve outside the DB session to avoid holding a pooled connection
-    # during a potentially slow Stripe network call.
-    error_msg = _resolve_payment_error(data)
-
     # Single session for dedup + update so a rollback on customer-not-found
     # also undoes the dedup record, allowing Stripe to retry the event.
+    # _resolve_payment_error is called after dedup succeeds so that
+    # concurrent duplicate events don't make redundant Stripe API calls.
     with use_db_session() as session:
         if not _mark_event_processed(session, event_id, event_type):
             log.debug("Duplicate event {} for customer {}", event_id, customer_id)
             return
+
+        error_msg = _resolve_payment_error(data)
 
         sub = _find_subscription_by_customer(session, customer_id)
         if not sub:
