@@ -127,9 +127,12 @@ def report_usage(
     db_dedup_key = f"meter:{user.user_id}:{idempotency_key}"
     stripe_identifier = f"{stripe_cid}:{idempotency_key}"
 
-    # Use a dedicated session for dedup + Stripe so a rollback on Stripe
-    # failure doesn't affect the shared route session (which may hold
-    # auth-side writes from get_authenticated_user).
+    # Use a dedicated session for dedup + Stripe + counter increment so
+    # all three are committed atomically.  A failure at any stage rolls
+    # back the entire transaction, keeping the dedup record and counter
+    # in sync.  The Stripe call runs between flush (dedup) and commit
+    # so that on Stripe failure the dedup record is also rolled back,
+    # allowing the caller to retry with the same idempotency key.
     from db.engine import use_db_session
 
     with use_db_session() as dedup_session:
@@ -149,26 +152,27 @@ def report_usage(
 
         # Report to Stripe (identifier deduplicates on Stripe's side).
         # If Stripe fails, the dedup_session rollback (on context exit)
-        # undoes only the dedup INSERT, leaving the main session clean.
+        # undoes only the dedup INSERT, leaving the caller free to retry.
         if not _report_to_stripe(sub, user.user_id, stripe_identifier):
             raise HTTPException(
                 status_code=502,
                 detail="Stripe meter event failed; retry with the same Idempotency-Key",
             )
+
+        # Atomic increment in the same session/transaction as the dedup
+        # record so both commit together.  If this commit fails, neither
+        # the dedup record nor the counter increment persists.
+        dedup_session.execute(
+            update(UserSubscription)
+            .where(UserSubscription.user_id == user.user_id)
+            .values(
+                current_period_usage=UserSubscription.current_period_usage + 1,
+                updated_at=datetime.now(UTC),
+            )
+        )
         dedup_session.commit()
 
-    # Atomic increment to prevent lost updates under concurrent load
-    session.execute(
-        update(UserSubscription)
-        .where(UserSubscription.user_id == user.user_id)
-        .values(
-            current_period_usage=UserSubscription.current_period_usage + 1,
-            updated_at=datetime.now(UTC),
-        )
-    )
-    session.commit()
     session.refresh(sub)
-
     return {"usage": sub.current_period_usage}
 
 

@@ -98,10 +98,24 @@ def _ensure_stripe_customer(
     if customer_id:
         return customer_id, sub
 
-    # Lock the row (if it exists) before creating a Stripe customer to
-    # prevent the concurrent-update race: two threads both reading
-    # stripe_customer_id=NULL, both creating customers, and the second
-    # silently overwriting the first (orphaning it in Stripe).
+    if not user.email:
+        raise HTTPException(
+            status_code=422,
+            detail="An email address is required to create a billing account.",
+        )
+
+    # Create the Stripe customer first (outside any DB lock) so a slow
+    # Stripe round-trip doesn't hold a row lock and block other requests.
+    # The idempotency key ensures concurrent calls return the same customer.
+    customer = stripe.Customer.create(
+        metadata={"user_id": user.user_id},
+        email=user.email,
+        idempotency_key=f"create-customer-{user.user_id}",
+    )
+    customer_id = customer.id
+
+    # Now lock the row briefly to serialize the DB write.  Re-check after
+    # acquiring the lock in case another thread already set the customer ID.
     if sub:
         sub = (
             session.query(UserSubscription)
@@ -109,22 +123,11 @@ def _ensure_stripe_customer(
             .with_for_update()
             .first()
         )
-        # Re-check after acquiring lock -- another thread may have set it
         if sub and sub.stripe_customer_id:
+            # Another thread won the race -- clean up our orphan
+            if customer_id != sub.stripe_customer_id:
+                _delete_orphaned_customer(customer_id, user.user_id, sub.stripe_customer_id)
             return sub.stripe_customer_id, sub
-
-    if not user.email:
-        raise HTTPException(
-            status_code=422,
-            detail="An email address is required to create a billing account.",
-        )
-    customer = stripe.Customer.create(
-        metadata={"user_id": user.user_id},
-        email=user.email,
-        idempotency_key=f"create-customer-{user.user_id}",
-    )
-    customer_id = customer.id
-    if sub:
         sub.stripe_customer_id = customer_id
     else:
         sub = UserSubscription(

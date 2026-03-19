@@ -176,6 +176,9 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
             # Refresh sub so it reflects the winner's reset values
             # (current_period_usage, daily_quota_reset_at) before the
             # atomic increment below reads it for the 402 response.
+            # Note: the local `reset_at` variable is stale after this
+            # point but is not used again -- only `sub` attributes are
+            # read from here on.
             session.refresh(sub)
             log.debug(
                 "Day-reset race for user {}: another request won; falling through",
@@ -183,6 +186,8 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
             )
 
         # Atomic increment: only succeeds if usage is still under the limit.
+        # Both the happy path (day-reset winner) and the fall-through
+        # (day-reset loser) converge here with a fresh `sub` object.
         result = session.execute(
             update(UserSubscription)
             .where(

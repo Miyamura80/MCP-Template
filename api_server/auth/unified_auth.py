@@ -34,7 +34,13 @@ def get_authenticated_user(
                 user_id=workos_user.user_id,
                 email=workos_user.email,
                 auth_method="jwt",
-                scopes=["*"],  # JWT users get full access explicitly
+                # JWT users get full access -- require_scopes() is a
+                # no-op for them.  This is intentional: JWT auth is for
+                # first-party users via the dashboard, while API keys
+                # serve third-party integrations with granular scopes.
+                # If JWT auth is extended to less-trusted users, this
+                # should be replaced with role-based scope assignment.
+                scopes=["*"],
             )
         # Only fail fast if WorkOS is actually configured; otherwise
         # the Bearer header may be irrelevant and API key should be tried.
