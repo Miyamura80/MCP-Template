@@ -121,6 +121,64 @@ class ServerConfig(BaseModel):
     allowed_origins: list[str] = ["http://localhost:3000"]
 
 
+class RateLimitConfig(BaseModel):
+    """Rate limiting configuration."""
+
+    enabled: bool = True
+    trust_proxy_headers: bool = False
+    tiers: dict[str, dict[str, int]] = Field(
+        default_factory=lambda: {
+            "free_tier": {"rps": 2, "rpm": 30, "rph": 200, "rpd": 100},
+            "plus_tier": {"rps": 10, "rpm": 120, "rph": 5000, "rpd": 10000},
+            "default": {"rps": 5, "rpm": 60, "rph": 1000, "rpd": 5000},
+        }
+    )
+
+
+class StripeConfig(BaseModel):
+    """Stripe billing configuration."""
+
+    price_ids: dict[str, str] = Field(default_factory=lambda: {"test": "", "prod": ""})
+    meter_event_name: str = "api_requests"
+    api_version: str = "2025-03-31.basil"
+
+
+class MeteredConfig(BaseModel):
+    """Metered billing configuration."""
+
+    included_units: int = 100
+    overage_unit_amount: int = 1
+    unit_label: str = "API calls"
+
+
+class PaymentRetryConfig(BaseModel):
+    """Payment retry configuration."""
+
+    max_attempts: int = 3
+
+
+class TierLimitsConfig(BaseModel):
+    """Tier limit configuration."""
+
+    daily_requests: int = 100
+
+
+class SubscriptionConfig(BaseModel):
+    """Subscription/billing configuration."""
+
+    tier_limits: dict[str, TierLimitsConfig] = Field(
+        default_factory=lambda: {
+            "free_tier": TierLimitsConfig(daily_requests=100),
+            "plus_tier": TierLimitsConfig(daily_requests=10000),
+        }
+    )
+    default_tier: str = "free_tier"
+    stripe: StripeConfig = Field(default_factory=StripeConfig)
+    metered: MeteredConfig = Field(default_factory=MeteredConfig)
+    trial_period_days: int = 7
+    payment_retry: PaymentRetryConfig = Field(default_factory=PaymentRetryConfig)
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 

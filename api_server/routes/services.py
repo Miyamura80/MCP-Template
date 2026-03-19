@@ -2,7 +2,9 @@
 
 from fastapi import APIRouter, Depends
 
-from api_server.auth import AuthenticatedUser, get_authenticated_user
+from api_server.auth import AuthenticatedUser
+from api_server.auth.scopes import SERVICES_EXECUTE, require_scopes
+from api_server.billing.limits import ensure_daily_limit
 from services import ServiceEntry
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
@@ -38,8 +40,11 @@ def _make_route(entry: ServiceEntry) -> None:
     )
     def _handler(
         body: input_model,  # type: ignore[valid-type]
-        _user: AuthenticatedUser = Depends(get_authenticated_user),
+        _user: AuthenticatedUser = Depends(require_scopes(SERVICES_EXECUTE)),
     ):
+        # Quota is consumed before execution (charges for attempts, not
+        # results) to prevent abuse via intentional error-triggering.
+        ensure_daily_limit(_user.user_id)
         return func(body)
 
 

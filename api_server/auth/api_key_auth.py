@@ -27,6 +27,7 @@ def create_api_key(
     name: str = "Default",
     expires_in_days: int | None = None,
     email: str | None = None,
+    scopes: list[str] | None = None,
 ) -> tuple[str, APIKey]:
     """Create a new API key and return ``(raw_key, db_row)``."""
     ensure_profile_exists(session, user_id=user_id, email=email)
@@ -44,6 +45,7 @@ def create_api_key(
         key_hash=key_hash,
         key_prefix=key_prefix,
         name=name,
+        scopes=scopes,
         expires_at=expires_at,
     )
     session.add(row)
@@ -74,6 +76,29 @@ def validate_api_key(session: Session, raw_key: str) -> APIKey | None:
     row.last_used_at = datetime.now(UTC)
     session.commit()
     return row
+
+
+def get_user_id_for_key_hash(session: Session, key_hash: str) -> str | None:
+    """Return the user_id for a valid (non-revoked, non-expired) API key hash.
+
+    Shared by auth validation and rate-limit tier lookup to keep validity
+    checks in a single place.
+    """
+    from sqlalchemy import or_
+
+    row = (
+        session.query(APIKey.user_id)
+        .filter(
+            APIKey.key_hash == key_hash,
+            APIKey.revoked.is_(False),
+            or_(
+                APIKey.expires_at.is_(None),
+                APIKey.expires_at > datetime.now(UTC),
+            ),
+        )
+        .first()
+    )
+    return row.user_id if row else None
 
 
 def revoke_api_key(session: Session, *, key_id: int, user_id: str) -> bool:

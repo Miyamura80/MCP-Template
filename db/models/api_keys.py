@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -16,6 +16,7 @@ class APIKey(Base):
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False, default="Default")
+    scopes: Mapped[list[str] | None] = mapped_column(JSON, nullable=True, default=None)
     revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

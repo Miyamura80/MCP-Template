@@ -72,6 +72,29 @@ logging:
         placeholder: "[REDACTED_KEY]"
 
 ########################################################
+# Rate Limiting
+########################################################
+rate_limit:
+  enabled: true
+  trust_proxy_headers: false
+  tiers:
+    free_tier:
+      rps: 2
+      rpm: 30
+      rph: 200
+      rpd: 100
+    plus_tier:
+      rps: 10
+      rpm: 120
+      rph: 5000
+      rpd: 10000
+    default:
+      rps: 5
+      rpm: 60
+      rph: 1000
+      rpd: 5000
+
+########################################################
 # API Server
 ########################################################
 server:

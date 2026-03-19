@@ -31,6 +31,23 @@ class TestAPIKeyAuth(TestTemplate):
         assert validated is not None
         assert validated.user_id == "user-1"
 
+    def test_create_with_scopes(self):
+        session = _make_session()
+        scopes = ["services:read", "services:execute"]
+        raw_key, row = create_api_key(
+            session, user_id="scoped-user", name="scoped-key", scopes=scopes
+        )
+        assert row.scopes == scopes
+
+        validated = validate_api_key(session, raw_key)
+        assert validated is not None
+        assert validated.scopes == scopes
+
+    def test_create_without_scopes_is_none(self):
+        session = _make_session()
+        raw_key, row = create_api_key(session, user_id="legacy-user")
+        assert row.scopes is None
+
     def test_invalid_key_returns_none(self):
         session = _make_session()
         assert validate_api_key(session, "sk_bogus") is None

@@ -70,6 +70,27 @@ class TestUnifiedAuth(TestTemplate):
         assert resp.json()["user_id"] == "key-user"
         assert resp.json()["method"] == "api_key"
 
+    @patch("api_server.auth.workos_auth.global_config")
+    def test_scopes_propagate_through_api_key(self, mock_config):
+        """Scopes set on an API key should be available in AuthenticatedUser."""
+        mock_config.WORKOS_CLIENT_ID = None
+        app, sl = _setup_app()
+
+        @app.get("/test-scopes")
+        def scoped(user: AuthenticatedUser = Depends(get_authenticated_user)):
+            return {"scopes": user.scopes}
+
+        session = sl()
+        raw_key, _row = create_api_key(
+            session, user_id="scoped-user", scopes=["services:read"]
+        )
+        session.close()
+
+        client = TestClient(app)
+        resp = client.get("/test-scopes", headers={"X-API-KEY": raw_key})
+        assert resp.status_code == 200
+        assert resp.json()["scopes"] == ["services:read"]
+
     @patch("api_server.auth.unified_auth.global_config")
     @patch("api_server.auth.workos_auth.global_config")
     def test_invalid_bearer_fails_fast(self, mock_workos_config, mock_unified_config):
