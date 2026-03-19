@@ -1,37 +1,295 @@
 ---
-title: API Reference
-description: API overview and placeholders for future endpoints
+title: REST API
+description: FastAPI server with authentication, billing, and auto-registered service endpoints
 ---
 
 ## Overview
 
-This template does not ship with a public API by default. Use this page as a
-starting point for documenting any endpoints you add.
+The REST API server exposes all [services](/docs/services) as authenticated HTTP endpoints, along with health checks, API key management, and Stripe-based billing. It runs on FastAPI with Uvicorn.
 
-## Base URL
+import { Callout } from 'fumadocs-ui/components/callout';
 
-Set this once your service is deployed, for example:
+<Callout type="info">
+The API server is available on the `saas` branch. The `main` branch includes the CLI and MCP server only.
+</Callout>
 
+## Quick Start
+
+```bash
+uv run mycli-api
 ```
-https://api.example.com
+
+Or via Make:
+
+```bash
+make api
 ```
+
+The server starts on `http://localhost:8000` by default (configurable in `common/global_config.yaml`).
 
 ## Authentication
 
-Describe required headers or tokens here (for example, bearer tokens or API
-keys).
+The API supports two authentication methods:
 
-## Error Format
+### API Key Authentication
 
-Document the error envelope your API returns. Example shape:
+Include your API key in the `Authorization` header:
 
+```bash
+curl -H "Authorization: Bearer sk_live_..." \
+  http://localhost:8000/api/v1/auth/me
 ```
-{
-  "error": "string",
-  "message": "string"
-}
-```
+
+### WorkOS SSO
+
+Enterprise SSO via WorkOS OAuth 2.0. Configure `WORKOS_CLIENT_ID` and `WORKOS_API_KEY` in your `.env`.
 
 ## Endpoints
 
-Add your endpoints here as they are implemented.
+### Health Check
+
+No authentication required.
+
+```
+GET /health
+```
+
+```json
+{
+  "status": "ok",
+  "version": "0.1.1",
+  "commit": "f7be131",
+  "timestamp": "2025-01-15T10:30:00+00:00",
+  "components": {
+    "api": { "status": "ok" },
+    "database": { "status": "ok" },
+    "redis": { "status": "not_configured" },
+    "stripe": { "status": "ok" }
+  }
+}
+```
+
+Status is `"ok"` when all components are healthy or not configured, and `"degraded"` if any have errors.
+
+### Service Endpoints
+
+All registered services are auto-exposed as POST endpoints. Requires the `services:execute` scope.
+
+```
+POST /api/v1/services/{service_name}
+```
+
+**Example — call the `greet` service:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/services/greet \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Alice", "shout": true, "times": 1}'
+```
+
+```json
+{
+  "message": "HELLO, ALICE!",
+  "times": 1
+}
+```
+
+Available service endpoints match the [built-in services](/docs/services#built-in-services):
+
+| Endpoint | Body | Response |
+|----------|------|----------|
+| `POST /api/v1/services/greet` | `{"name": "...", "shout": false, "times": 1}` | `{"message": "...", "times": 1}` |
+| `POST /api/v1/services/config_show` | `{}` | `{"config": {...}}` |
+| `POST /api/v1/services/config_get` | `{"key": "..."}` | `{"key": "...", "value": ...}` |
+| `POST /api/v1/services/config_set` | `{"key": "...", "value": "..."}` | `{"key": "...", "coerced_value": ...}` |
+| `POST /api/v1/services/doctor` | `{"fix": false}` | `{"checks": [...], "has_failures": false}` |
+
+### Authentication Endpoints
+
+#### Get Current User
+
+```
+GET /api/v1/auth/me
+```
+
+```json
+{
+  "user_id": "user_01abc",
+  "email": "user@example.com",
+  "auth_method": "api_key"
+}
+```
+
+#### Create API Key
+
+```
+POST /api/v1/auth/api-keys
+```
+
+```json
+{
+  "name": "my-integration",
+  "scope_template": "standard",
+  "expires_in_days": 90
+}
+```
+
+**Scope templates:**
+
+| Template | Scopes |
+|----------|--------|
+| `read_only` | `services:read`, `billing:read` |
+| `standard` | `services:read`, `services:execute`, `billing:read`, `billing:write` |
+| `admin` | `*` (all scopes) |
+
+Or provide explicit scopes instead of a template:
+
+```json
+{
+  "name": "read-only-key",
+  "scopes": ["services:read", "billing:read"]
+}
+```
+
+#### List API Keys
+
+```
+GET /api/v1/auth/api-keys
+```
+
+#### Revoke API Key
+
+```
+DELETE /api/v1/auth/api-keys/{key_id}
+```
+
+### Billing Endpoints
+
+Stripe-based usage metering and subscription management.
+
+#### Create Checkout Session
+
+```
+POST /api/v1/billing/checkout
+```
+
+Creates a Stripe checkout session for upgrading to a paid plan.
+
+#### Report Usage
+
+```
+POST /api/v1/billing/usage/report
+Headers: Idempotency-Key: unique-request-id
+```
+
+Reports one unit of usage. The `Idempotency-Key` header prevents duplicate charges.
+
+#### Get Current Usage
+
+```
+GET /api/v1/billing/usage/current
+```
+
+Returns usage stats for the current billing period.
+
+#### Get Subscription Status
+
+```
+GET /api/v1/billing/subscriptions/{subscription_id}
+```
+
+#### Stripe Webhooks
+
+```
+POST /api/v1/billing/webhooks
+```
+
+Receives Stripe webhook events (subscription updates, deletions, etc.). Requires the `STRIPE_WEBHOOK_SECRET` environment variable.
+
+## Scopes
+
+API keys use fine-grained scopes to control access:
+
+| Scope | Description |
+|-------|-------------|
+| `services:read` | Read service metadata |
+| `services:execute` | Execute service endpoints |
+| `billing:read` | View usage and subscription info |
+| `billing:write` | Report usage |
+| `admin:read` | Read admin data |
+| `admin:write` | Admin operations |
+
+Wildcard scopes are supported: `*` grants all scopes, `services:*` grants all service scopes.
+
+## Rate Limiting & Quotas
+
+- **Rate limiting** is applied via middleware (configurable in `global_config.yaml`)
+- **Daily quotas** are enforced per subscription tier before service execution
+- Quota is consumed on each attempt (not on success), to prevent abuse via intentional errors
+
+## Middleware Stack
+
+Requests pass through these middleware layers (outermost first):
+
+1. **CORS** — Allows configured origins
+2. **Session** — Session management
+3. **Request ID** — Adds unique ID to each request
+4. **Rate Limit** — Throttles excessive requests
+5. **Error Handler** — Normalizes error responses
+
+## Error Format
+
+All errors follow a consistent format:
+
+```json
+{
+  "detail": "Error message describing what went wrong"
+}
+```
+
+Common status codes:
+
+| Code | Meaning |
+|------|---------|
+| `400` | Bad request (invalid input, malformed scopes) |
+| `401` | Missing or invalid authentication |
+| `402` | Quota exceeded (daily limit reached) |
+| `403` | Insufficient scopes for the requested operation |
+| `404` | Resource not found |
+| `429` | Rate limited |
+
+## Configuration
+
+Server settings in `common/global_config.yaml`:
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8000
+  allowed_origins: ["http://localhost:3000"]
+
+rate_limit:
+  enabled: true
+```
+
+Required environment variables in `.env`:
+
+```
+BACKEND_DB_URI=postgresql://user:pass@localhost:5432/mydb
+SESSION_SECRET_KEY=your-secret-key
+WORKOS_CLIENT_ID=client_...        # for SSO
+WORKOS_API_KEY=sk_...              # for SSO
+STRIPE_SECRET_KEY=sk_test_...      # for billing
+STRIPE_WEBHOOK_SECRET=whsec_...    # for webhooks
+REDIS_URL=redis://localhost:6379   # optional, for rate limiting
+```
+
+## Database Setup
+
+The API server requires PostgreSQL. Run migrations with Alembic:
+
+```bash
+make db_migrate                          # apply pending migrations
+make db_revision ARGS="add users table"  # create new migration
+```

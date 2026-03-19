@@ -2,8 +2,10 @@
   "title": "Documentation",
   "pages": [
     "index",
+    "services",
     "cli",
     "commands",
+    "mcp",
     "api"
   ]
 }

@@ -1,0 +1,181 @@
+---
+title: MCP Server
+description: Model Context Protocol server for AI assistant integration
+---
+
+## Overview
+
+The MCP (Model Context Protocol) server exposes all [services](/docs/services) as tools that AI assistants like Claude can call directly. It runs on **stdio transport** — no HTTP server needed.
+
+```
+┌──────────────┐     stdio      ┌──────────────┐
+│ Claude / AI  │ ◄────────────► │  MCP Server  │
+│   Client     │                │  (FastMCP)   │
+└──────────────┘                └──────┬───────┘
+                                       │
+                                ┌──────┴───────┐
+                                │   Services   │
+                                │  (Registry)  │
+                                └──────────────┘
+```
+
+Every registered service becomes an MCP tool automatically. The tool's parameters come from the service's Pydantic input model, and the response comes from the output model.
+
+## Quick Start
+
+Run the MCP server:
+
+```bash
+uv run mycli-mcp
+```
+
+Or via Make:
+
+```bash
+make mcp
+```
+
+## Configuring Claude Desktop
+
+Copy `.mcp.json.example` to your Claude Desktop config directory:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uvx",
+      "args": ["mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+For local development with a cloned repo, point to `uv` directly:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+## Configuring Claude Code
+
+Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+## Available Tools
+
+All services are automatically exposed as MCP tools. See the [built-in services](/docs/services#built-in-services) for the full list.
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `greet` | Greet a user by name | `name` (str), `shout` (bool), `times` (int) |
+| `config_show` | Show full configuration | _(none)_ |
+| `config_get` | Get a config value | `key` (str) |
+| `config_set` | Set a config override | `key` (str), `value` (str) |
+| `doctor` | Run health checks | `fix` (bool) |
+
+### Example Tool Call
+
+When Claude calls the `greet` tool:
+
+```json
+// Tool input
+{ "name": "Alice", "shout": true, "times": 1 }
+
+// Tool result
+{ "message": "HELLO, ALICE!", "times": 1 }
+```
+
+## How It Works
+
+The MCP server (`mcp_server/server.py`) uses [FastMCP](https://github.com/modelcontextprotocol/python-sdk) to:
+
+1. Import all service modules to populate the registry
+2. Iterate over registered services
+3. For each service, create an MCP tool where:
+   - The tool name and description come from the `@service` decorator
+   - Parameters are derived from the Pydantic input model's fields
+   - The handler validates input, calls the service function, and returns the output model as a dict
+
+```python
+# Simplified registration flow
+for entry in get_registry():
+    @mcp.tool(name=entry.name, description=entry.description)
+    def tool_fn(**kwargs):
+        input_obj = entry.input_model(**kwargs)
+        result = entry.func(input_obj)
+        return result.model_dump()
+```
+
+## Adding Tools
+
+To expose a new tool via MCP, create a [service](/docs/services#adding-a-new-service). Then add its import to `mcp_server/server.py`:
+
+```python
+def _register_tools() -> None:
+    import services.config_svc   # noqa: F401
+    import services.doctor_svc   # noqa: F401
+    import services.greet        # noqa: F401
+    import services.my_feature   # noqa: F401  # ← add this
+    from services import get_registry
+
+    for entry in get_registry():
+        _make_tool(entry)
+```
+
+## Error Handling
+
+If a service raises an exception, the MCP tool returns an error object instead of crashing:
+
+```json
+{ "error": "Key not found: nonexistent.key" }
+```
+
+The AI client sees this error and can adjust its approach or report it to the user.
+
+## Transport
+
+The server runs on **stdio** (standard input/output), which is the default for local MCP integrations. This means:
+
+- No port configuration needed
+- No network exposure
+- The AI client spawns the server as a subprocess
+- Communication happens over stdin/stdout pipes
+
+## Testing MCP Tools
+
+You can test MCP tools by calling the underlying services directly:
+
+```python
+from models.greet import GreetInput
+from services.greet import greet
+
+def test_greet_service():
+    result = greet(GreetInput(name="Alice", shout=True))
+    assert result.message == "HELLO, ALICE!"
+```
+
+Or use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) for interactive testing:
+
+```bash
+npx @modelcontextprotocol/inspector uv run mycli-mcp
+```
