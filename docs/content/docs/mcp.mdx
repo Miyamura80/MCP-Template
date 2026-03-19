@@ -15,21 +15,6 @@ Add to your Claude Desktop config file:
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
-If installed via pip:
-
-```json
-{
-  "mcpServers": {
-    "mycli": {
-      "command": "mycli-mcp",
-      "env": {}
-    }
-  }
-}
-```
-
-If running from a cloned repo:
-
 ```json
 {
   "mcpServers": {
@@ -109,7 +94,7 @@ If a tool call fails, the AI client receives an error message and can adjust:
 Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to test tools interactively without an AI client:
 
 ```bash
-npx @modelcontextprotocol/inspector mycli-mcp
+npx @modelcontextprotocol/inspector uv --directory /path/to/MCP-Template run mycli-mcp
 ```
 
 This opens a web UI where you can call each tool, inspect parameters, and see responses.
