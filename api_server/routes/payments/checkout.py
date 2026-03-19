@@ -98,6 +98,21 @@ def _ensure_stripe_customer(
     if customer_id:
         return customer_id, sub
 
+    # Lock the row (if it exists) before creating a Stripe customer to
+    # prevent the concurrent-update race: two threads both reading
+    # stripe_customer_id=NULL, both creating customers, and the second
+    # silently overwriting the first (orphaning it in Stripe).
+    if sub:
+        sub = (
+            session.query(UserSubscription)
+            .filter_by(user_id=user.user_id)
+            .with_for_update()
+            .first()
+        )
+        # Re-check after acquiring lock -- another thread may have set it
+        if sub and sub.stripe_customer_id:
+            return sub.stripe_customer_id, sub
+
     if not user.email:
         raise HTTPException(
             status_code=422,
