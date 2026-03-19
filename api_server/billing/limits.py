@@ -140,16 +140,18 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 )
                 session.commit()
                 next_reset = day_start + timedelta(days=1)
+                retry_after = max(1, int((next_reset - now).total_seconds()))
                 raise HTTPException(
                     status_code=402,
                     detail={
                         "code": "quota_exceeded",
-                        "message": f"Daily request limit (0) exceeded for {tier_key} tier.",
+                        "message": f"No daily request quota for {tier_key} tier.",
                         "current_usage": 0,
                         "daily_limit": 0,
                         "tier": tier_key,
                         "quota_reset_at": next_reset.isoformat(),
                     },
+                    headers={"Retry-After": str(retry_after)},
                 )
             result = session.execute(
                 update(UserSubscription)
@@ -204,9 +206,12 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
         if result.rowcount == 0:
             session.refresh(sub)
             reset_ts = sub.daily_quota_reset_at or datetime.now(UTC)
+            if reset_ts.tzinfo is None:
+                reset_ts = reset_ts.replace(tzinfo=UTC)
             next_reset = reset_ts.replace(
                 hour=0, minute=0, second=0, microsecond=0
             ) + timedelta(days=1)
+            retry_after = max(1, int((next_reset - datetime.now(UTC)).total_seconds()))
             raise HTTPException(
                 status_code=402,
                 detail={
@@ -217,6 +222,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     "tier": tier_key,
                     "quota_reset_at": next_reset.isoformat(),
                 },
+                headers={"Retry-After": str(retry_after)},
             )
 
         session.refresh(sub)

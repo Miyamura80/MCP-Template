@@ -85,7 +85,7 @@ def report_usage(
     key deduplicates both the Stripe MeterEvent and the local DB counter
     increment.
     """
-    idempotency_key = request.headers.get("Idempotency-Key")
+    idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()
     if not idempotency_key:
         raise HTTPException(
             status_code=422,

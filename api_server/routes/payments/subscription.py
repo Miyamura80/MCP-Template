@@ -70,6 +70,11 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         if cached and cached[1] > time.time():
             return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
         if stripe_sub_id in _stripe_in_flight:
+            # Deliberate stale-on-race: concurrent callers return the
+            # DB-cached status rather than waiting for the in-flight
+            # Stripe call.  This prevents thundering herd on Stripe's
+            # API.  The webhook path keeps the DB up to date, so the
+            # stale window is bounded by the webhook delivery latency.
             if cached:
                 return None if cached[0] == _STRIPE_ERROR_SENTINEL else cached[0]
             return None
