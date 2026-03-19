@@ -1,26 +1,29 @@
 ---
-title: CLI Usage
-description: Installation, global flags, built-in commands, and output formats
+title: CLI
+description: Run commands directly from your terminal
 ---
 
 ## Installation
 
-After running `make onboard` and `uv sync`, the `mycli` command is available in your virtual environment:
+After installing the package, the `mycli` command is available:
 
 ```bash
-uv sync            # install deps + register CLI entry point
-mycli --help       # see all commands
+mycli --help
 ```
 
-Or run it via `make`:
+If you installed from source, prefix with `uv run`:
 
 ```bash
-make cli ARGS="--help"
+uv run mycli --help
 ```
 
 ## Global Flags
 
-Every command inherits these flags:
+Flags go **before** the subcommand:
+
+```bash
+mycli [flags] <command> [args]
+```
 
 | Flag | Short | Description |
 |---|---|---|
@@ -31,40 +34,54 @@ Every command inherits these flags:
 | `--dry-run` | | Preview actions without executing |
 | `--version` | `-V` | Print version and exit |
 
-Global flags go **before** the subcommand:
+## Commands
+
+### greet
+
+Greet someone by name.
 
 ```bash
-mycli --format json config show
-mycli --dry-run greet Alice
-mycli --debug update
-```
+mycli greet Alice
+# Hello, Alice!
 
-## Built-in Commands
+mycli greet Alice --shout
+# HELLO, ALICE!
+
+mycli greet Bob --shout --times 3
+```
 
 ### config
 
-Manage project configuration from `common/global_config.yaml`:
+Inspect and modify configuration.
 
 ```bash
-mycli config show                           # full config
-mycli config get llm_config.cache_enabled   # single value
-mycli config set logging.verbose false      # write override to .global_config.yaml
+mycli config show                           # view full config
+mycli config get llm_config.cache_enabled   # get a single value
+mycli config set logging.verbose false      # set an override
+```
+
+### doctor
+
+Run health checks on the project environment.
+
+```bash
+mycli doctor          # check everything
+mycli doctor --fix    # auto-fix what it can
 ```
 
 ### completions
 
-Install shell completions:
+Install shell tab-completions for faster usage.
 
 ```bash
-mycli completions install bash    # append to ~/.bashrc
-mycli completions install zsh     # append to ~/.zshrc
-mycli completions install fish    # append to config.fish
-mycli completions show bash       # print script to stdout
+mycli completions install bash
+mycli completions install zsh
+mycli completions install fish
 ```
 
 ### update
 
-Check PyPI for a newer version and upgrade:
+Check for a newer version and upgrade.
 
 ```bash
 mycli update
@@ -72,49 +89,45 @@ mycli update
 
 ### telemetry
 
-Manage anonymous usage telemetry:
+Manage anonymous usage telemetry.
 
 ```bash
-mycli telemetry status    # show enabled/disabled
-mycli telemetry disable   # opt out
-mycli telemetry enable    # opt back in
+mycli telemetry status     # show enabled/disabled
+mycli telemetry disable    # opt out
+mycli telemetry enable     # opt back in
 ```
 
-You can also set the environment variable `CLI_TELEMETRY_DISABLED=1` to disable.
-
-### init
-
-Scaffold a new command from the built-in template:
-
-```bash
-mycli init my_command --desc "Does something useful"
-```
-
-This creates `commands/my_command.py` with the standard boilerplate.
+You can also set `CLI_TELEMETRY_DISABLED=1` to disable.
 
 ## Output Formats
 
 The `--format` flag controls how data is rendered:
 
-**Table** (default) - Rich formatted tables:
 ```bash
-mycli config show
+mycli config show                    # table (default)
+mycli --format json config show      # machine-readable JSON
+mycli --format plain config show     # simple key: value lines
 ```
 
-**JSON** - Machine-readable output:
-```bash
-mycli --format json config show
-```
+JSON output is useful for piping into other tools:
 
-**Plain** - Simple `key: value` lines:
 ```bash
-mycli --format plain config show
+mycli --format json config show | jq '.llm_config'
 ```
 
 ## Error Handling
 
-By default, errors show a concise Rich panel. Use `--debug` for full tracebacks with local variables:
+By default, errors show a concise message. Use `--debug` for full tracebacks:
 
 ```bash
 mycli --debug config get nonexistent.key
+```
+
+## Dry Run
+
+Preview what a command would do without executing it:
+
+```bash
+mycli --dry-run greet Alice
+# [DRY RUN] Would greet Alice
 ```

@@ -1,96 +1,64 @@
 ---
 title: Quick Start
-description: Get started with MCP Template
+description: Install and start using MCP Template
 ---
 
-Welcome to the docs! Follow these steps to get started with MCP Template.
+MCP Template gives you three ways to interact with the same set of tools:
 
-## Quick Start
+- **CLI** - Run commands in your terminal
+- **MCP** - Connect AI assistants like Claude directly
+- **REST API** - Call endpoints over HTTP with authentication
+
+Pick the interface that fits your workflow, or use all three.
+
+## Installation
 
 import { Step, Steps } from 'fumadocs-ui/components/steps';
 
 <Steps>
 <Step>
 
-### Setup Environment
-
-Create and activate your virtual environment using `uv`:
+### Install the package
 
 ```bash
-make setup
+pip install mycli
 ```
 
-This will create a `.venv` directory and sync all dependencies from `pyproject.toml`.
-
-</Step>
-
-<Step>
-
-### Configure Settings
-
-Copy the example environment file and add your API keys:
+Or install from source:
 
 ```bash
-cp .env.example .env
-```
-
-Edit `common/global_config.yaml` to customize configuration values for your project.
-
-</Step>
-
-<Step>
-
-### Run the Application
-
-Execute the main application:
-
-```bash
-make all
-```
-
-Or run specific Python files directly:
-
-```bash
-uv run python src/main.py
+git clone https://github.com/Miyamura80/MCP-Template.git
+cd MCP-Template
+uv sync
 ```
 
 </Step>
-
 <Step>
 
-### Run Tests
-
-Verify everything is working by running the test suite:
+### Verify the installation
 
 ```bash
-make test
+mycli --version
+mycli --help
 ```
 
-Run code quality checks:
+</Step>
+<Step>
+
+### Try a command
 
 ```bash
-make ci
+mycli greet Alice
+# Hello, Alice!
 ```
 
 </Step>
 </Steps>
 
-## Using the CLI
-
-Once dependencies are installed, the `mycli` command is available:
-
-```bash
-mycli --help          # see all commands
-mycli greet Alice     # run a command
-mycli init my_tool    # scaffold a new command
-```
-
-## Next Steps
+## Choose Your Interface
 
 <Cards>
-  <Card title="Services" href="/docs/services" />
-  <Card title="CLI Usage Guide" href="/docs/cli" />
-  <Card title="Writing Commands" href="/docs/commands" />
+  <Card title="CLI" href="/docs/cli" />
   <Card title="MCP Server" href="/docs/mcp" />
   <Card title="REST API" href="/docs/api" />
 </Cards>
