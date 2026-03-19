@@ -79,7 +79,7 @@ All registered services are auto-exposed as POST endpoints. Requires the `servic
 POST /api/v1/services/{service_name}
 ```
 
-**Example — call the `greet` service:**
+**Example - call the `greet` service:**
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/services/greet \
@@ -232,11 +232,11 @@ Wildcard scopes are supported: `*` grants all scopes, `services:*` grants all se
 
 Requests pass through these middleware layers (outermost first):
 
-1. **CORS** — Allows configured origins
-2. **Session** — Session management
-3. **Request ID** — Adds unique ID to each request
-4. **Rate Limit** — Throttles excessive requests
-5. **Error Handler** — Normalizes error responses
+1. **CORS** - Allows configured origins
+2. **Session** - Session management
+3. **Request ID** - Adds unique ID to each request
+4. **Rate Limit** - Throttles excessive requests
+5. **Error Handler** - Normalizes error responses
 
 ## Error Format
 

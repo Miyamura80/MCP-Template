@@ -88,7 +88,7 @@ def main(name: str, shout: bool = False, times: int = 1) -> None:
     typer.echo(result.message)
 ```
 
-The MCP and API interfaces register services automatically — no extra wiring needed.
+The MCP and API interfaces register services automatically - no extra wiring needed.
 
 ## How Each Interface Exposes Services
 
@@ -138,7 +138,7 @@ Create `models/my_feature.py` with Pydantic `Input` and `Result` classes.
 
 ### Implement Logic
 
-Create `services/my_feature_svc.py` with the `@service` decorator. Keep it pure — no HTTP, no CLI, no transport awareness.
+Create `services/my_feature_svc.py` with the `@service` decorator. Keep it pure - no HTTP, no CLI, no transport awareness.
 
 </Step>
 <Step>
