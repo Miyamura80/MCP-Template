@@ -69,6 +69,14 @@ def check_scopes(required: list[str], granted: list[str] | None) -> bool:
 
     ``None`` means legacy key with no scope restrictions (allow all).
     Supports wildcards: ``*`` (everything) and ``resource:*`` (all in resource).
+
+    Note: wildcard matching is one-directional. A *granted* wildcard
+    (e.g. ``services:*``) satisfies any concrete required scope in
+    that resource. However, a *required* wildcard (e.g. ``services:*``)
+    is only satisfied by an exact ``services:*`` or ``*`` in the
+    granted list -- not by having all concrete ``services:`` scopes
+    individually granted. This is intentional: ``require_scopes``
+    always uses concrete scope names, never wildcards.
     """
     if granted is None:
         return True  # Legacy key - no restrictions

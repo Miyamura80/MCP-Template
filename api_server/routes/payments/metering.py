@@ -127,36 +127,34 @@ def report_usage(
     db_dedup_key = f"meter:{user.user_id}:{idempotency_key}"
     stripe_identifier = f"{stripe_cid}:{idempotency_key}"
 
-    # Re-use the processed_stripe_events table for PK-based dedup so
-    # retries skip both the Stripe call and the local counter increment,
-    # keeping the two in sync.  Use a savepoint so that an IntegrityError
-    # only rolls back the INSERT, not the entire shared session (which may
-    # contain auth-side writes from get_authenticated_user).
-    try:
-        with session.begin_nested():
-            session.add(
+    # Use a dedicated session for dedup + Stripe so a rollback on Stripe
+    # failure doesn't affect the shared route session (which may hold
+    # auth-side writes from get_authenticated_user).
+    from db.engine import use_db_session
+
+    with use_db_session() as dedup_session:
+        try:
+            dedup_session.add(
                 ProcessedStripeEvent(
                     event_id=db_dedup_key,
                     event_type="metering.report_usage",
                 )
             )
-    except IntegrityError:
-        session.refresh(sub)
-        log.debug("Duplicate metering request with key {}", idempotency_key)
-        return {"usage": sub.current_period_usage}
+            dedup_session.flush()
+        except IntegrityError:
+            session.refresh(sub)
+            log.debug("Duplicate metering request with key {}", idempotency_key)
+            return {"usage": sub.current_period_usage}
 
-    # Report to Stripe (identifier deduplicates on Stripe's side).
-    # If Stripe fails, roll back the entire transaction so the dedup
-    # INSERT is undone and the caller can retry with the same key.
-    # NOTE: this is a full session.rollback(), not a savepoint rollback --
-    # any other uncommitted writes since the last commit are also discarded.
-    # Currently safe because validate_api_key() commits before the route runs.
-    if not _report_to_stripe(sub, user.user_id, stripe_identifier):
-        session.rollback()
-        raise HTTPException(
-            status_code=502,
-            detail="Stripe meter event failed; retry with the same Idempotency-Key",
-        )
+        # Report to Stripe (identifier deduplicates on Stripe's side).
+        # If Stripe fails, the dedup_session rollback (on context exit)
+        # undoes only the dedup INSERT, leaving the main session clean.
+        if not _report_to_stripe(sub, user.user_id, stripe_identifier):
+            raise HTTPException(
+                status_code=502,
+                detail="Stripe meter event failed; retry with the same Idempotency-Key",
+            )
+        dedup_session.commit()
 
     # Atomic increment to prevent lost updates under concurrent load
     session.execute(
