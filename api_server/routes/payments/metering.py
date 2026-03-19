@@ -142,6 +142,7 @@ def report_usage(
             )
             dedup_session.flush()
         except IntegrityError:
+            dedup_session.rollback()
             session.refresh(sub)
             log.debug("Duplicate metering request with key {}", idempotency_key)
             return {"usage": sub.current_period_usage}
