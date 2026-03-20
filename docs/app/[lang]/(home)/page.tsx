@@ -3,10 +3,10 @@ import path from "node:path";
 import { DynamicLink } from "fumadocs-core/dynamic-link";
 import { marked } from "marked";
 
-const GITHUB_RAW_BASE =
-  "https://raw.githubusercontent.com/Miyamura80/MCP-Template/main";
-const GITHUB_BLOB_BASE =
-  "https://github.com/Miyamura80/MCP-Template/blob/main";
+const REPO_SLUG =
+  process.env.GITHUB_REPOSITORY ?? "Miyamura80/MCP-Template";
+const GITHUB_RAW_BASE = `https://raw.githubusercontent.com/${REPO_SLUG}/main`;
+const GITHUB_BLOB_BASE = `https://github.com/${REPO_SLUG}/blob/main`;
 
 function getReadmeContent(): string {
   const readmePath = path.resolve(process.cwd(), "..", "README.md");
