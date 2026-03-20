@@ -25,11 +25,13 @@ Greet a user by name, optionally shouting.
 
 **Example:**
 
+**Input:**
 ```json
-// Input
 { "name": "Alice", "shout": true, "times": 1 }
+```
 
-// Result
+**Result:**
+```json
 { "message": "HELLO, ALICE!", "times": 1 }
 ```
 
@@ -39,11 +41,13 @@ Show the full project configuration. No parameters.
 
 **Example:**
 
+**Input:**
 ```json
-// Input
 {}
+```
 
-// Result
+**Result:**
+```json
 {
   "config": {
     "llm_config": { "cache_enabled": true },
@@ -62,11 +66,13 @@ Get a single configuration value by dot-separated key.
 
 **Example:**
 
+**Input:**
 ```json
-// Input
 { "key": "llm_config.cache_enabled" }
+```
 
-// Result
+**Result:**
+```json
 { "key": "llm_config.cache_enabled", "value": true }
 ```
 
@@ -81,11 +87,13 @@ Set a configuration override. The value is auto-coerced to the appropriate type.
 
 **Example:**
 
+**Input:**
 ```json
-// Input
 { "key": "logging.verbose", "value": "true" }
+```
 
-// Result
+**Result:**
+```json
 { "key": "logging.verbose", "coerced_value": true }
 ```
 
@@ -99,11 +107,13 @@ Run project health checks. Optionally auto-fix fixable issues.
 
 **Example:**
 
+**Input:**
 ```json
-// Input
 { "fix": false }
+```
 
-// Result
+**Result:**
+```json
 {
   "checks": [
     { "name": "Python version", "status": "pass", "message": "3.12.0" },
