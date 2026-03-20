@@ -123,8 +123,12 @@
 
 .dark [role="tabpanel"] li,
 .dark [role="tabpanel"] p,
-.dark [role="tabpanel"] strong,
-.dark [role="tabpanel"] code {
+.dark [role="tabpanel"] strong {
+  color: #F9F9F9 !important;
+}
+
+/* Inline code in tabs (not syntax-highlighted code blocks) */
+.dark [role="tabpanel"] :not(pre) > code {
   color: #F9F9F9 !important;
 }
 
