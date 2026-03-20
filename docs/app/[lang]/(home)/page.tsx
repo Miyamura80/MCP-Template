@@ -57,14 +57,15 @@ export default async function HomePage({
   const readmeHtml = marked.parse(readmeContent) as string;
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-12">
+    <div className="max-w-4xl mx-auto px-6 py-12 text-fd-foreground">
       <div
-        className="readme-content max-w-none
+        className="readme-content max-w-none text-fd-foreground
+          [&_*]:text-fd-foreground
           [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mt-8 [&_h1]:mb-4
           [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mt-10 [&_h2]:mb-4
           [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:mt-8 [&_h3]:mb-3
           [&_p]:my-2
-          [&_a]:text-fd-accent-foreground [&_a]:underline
+          [&_a]:!text-fd-accent-foreground [&_a]:underline
           [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-4
           [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:bg-fd-secondary [&_pre]:overflow-x-auto [&_pre]:my-4
           [&_code]:text-sm
@@ -76,7 +77,7 @@ export default async function HomePage({
           [&_ol]:ml-4 [&_ol]:list-decimal [&_ol]:my-2
           [&_li]:my-1
           [&_hr]:my-8 [&_hr]:border-fd-border
-          [&_blockquote]:border-l-4 [&_blockquote]:border-fd-border [&_blockquote]:pl-4 [&_blockquote]:my-4 [&_blockquote]:text-fd-muted-foreground"
+          [&_blockquote]:border-l-4 [&_blockquote]:border-fd-border [&_blockquote]:pl-4 [&_blockquote]:my-4 [&_blockquote]:!text-fd-muted-foreground"
         dangerouslySetInnerHTML={{ __html: readmeHtml }}
       />
       <div className="mt-12 text-center">
