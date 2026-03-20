@@ -1,0 +1,20 @@
+---
+title: Overview
+description: Connect AI assistants to use your tools via MCP
+---
+
+The MCP server lets AI assistants call your tools directly. Set it up once and any MCP-compatible client can use all available tools without manual copy-pasting.
+
+The server uses **stdio transport** (stdin/stdout) - no HTTP server or port configuration needed. The AI client spawns the server as a subprocess and communicates over stdin/stdout pipes.
+
+## Quick Start
+
+1. [Set up your client](/docs/mcp/setup) (Claude Desktop, Claude Code, Cursor, or VS Code)
+2. Browse the [available tools](/docs/mcp/tools)
+3. Ask your AI assistant to use them
+
+<Cards>
+  <Card title="Setup" href="/docs/mcp/setup" />
+  <Card title="Tools" href="/docs/mcp/tools" />
+  <Card title="Debugging" href="/docs/mcp/debugging" />
+</Cards>

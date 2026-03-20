@@ -1,0 +1,9 @@
+{
+  "title": "MCP Server",
+  "pages": [
+    "index",
+    "setup",
+    "tools",
+    "debugging"
+  ]
+}
