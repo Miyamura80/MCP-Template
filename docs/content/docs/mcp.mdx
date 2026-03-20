@@ -7,7 +7,10 @@ The MCP server lets AI assistants call your tools directly. Set it up once and C
 
 ## Setup
 
-### Claude Desktop
+Replace `/path/to/MCP-Template` with the actual path to your cloned repo.
+
+<Tabs items={['Claude Desktop', 'Claude Code', 'Cursor', 'VS Code']} groupId="mcp-client">
+<Tab value="Claude Desktop">
 
 Add to your Claude Desktop config file:
 
@@ -29,7 +32,8 @@ Add to your Claude Desktop config file:
 
 Restart Claude Desktop after saving the config.
 
-### Claude Code
+</Tab>
+<Tab value="Claude Code">
 
 Add to your project's `.mcp.json`:
 
@@ -44,6 +48,65 @@ Add to your project's `.mcp.json`:
   }
 }
 ```
+
+</Tab>
+<Tab value="Cursor">
+
+Open **Cursor Settings > MCP** and add a new server with:
+
+- **Name**: `mycli`
+- **Type**: `command`
+- **Command**: `uv --directory /path/to/MCP-Template run mycli-mcp`
+
+Or add to `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="VS Code">
+
+Add to your VS Code settings (`settings.json`) or workspace settings:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "mycli": {
+        "command": "uv",
+        "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+Or add to `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+</Tabs>
 
 ### Other MCP Clients
 
