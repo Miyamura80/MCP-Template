@@ -1,0 +1,182 @@
+---
+title: Setup
+description: Configure your MCP client to connect to the server
+---
+
+Replace `/path/to/MCP-Template` with the actual path to your cloned repo.
+
+<Tabs items={['Claude Cowork/Desktop', 'Claude Code', 'Cursor', 'VS Code', 'Codex', 'Gemini CLI', 'OpenCode', 'OpenClaw']} groupId="mcp-client">
+<Tab value="Claude Cowork/Desktop">
+
+Add to your Claude Desktop config file:
+
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving the config.
+
+</Tab>
+<Tab value="Claude Code">
+
+Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="Cursor">
+
+Open **Cursor Settings > MCP** and add a new server with:
+
+- **Name**: `mycli`
+- **Type**: `command`
+- **Command**: `uv --directory /path/to/MCP-Template run mycli-mcp`
+
+Or add to `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="VS Code">
+
+Add to your VS Code settings (`settings.json`) or workspace settings:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "mycli": {
+        "command": "uv",
+        "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+Or add to `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="Codex">
+
+Add to your project's `codex.json` or pass via CLI:
+
+```bash
+codex --mcp-config '{"mycli": {"command": "uv", "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"]}}'
+```
+
+Or create a `mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="Gemini CLI">
+
+Add to your Gemini CLI settings file (`~/.gemini/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="OpenCode">
+
+Add to your OpenCode config (`opencode.json` in your project root):
+
+```json
+{
+  "mcp": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="OpenClaw">
+
+Add to your OpenClaw MCP config:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+</Tab>
+</Tabs>
+
+### Other MCP Clients
+
+Any MCP-compatible client can connect by spawning `uv --directory /path/to/MCP-Template run mycli-mcp` as a subprocess using stdio transport.

@@ -1,0 +1,79 @@
+---
+title: Authentication
+description: API keys, scopes, and access control
+---
+
+## API Key Authentication
+
+Include your API key in the `Authorization` header:
+
+```bash
+curl -H "Authorization: Bearer sk_live_..." \
+  http://localhost:8000/api/v1/auth/me
+```
+
+```json
+{
+  "user_id": "user_01abc",
+  "email": "user@example.com",
+  "auth_method": "api_key"
+}
+```
+
+Enterprise SSO via WorkOS is also supported.
+
+## Managing API Keys
+
+### Create a key
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/api-keys \
+  -H "Authorization: Bearer sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-integration", "scope_template": "standard", "expires_in_days": 90}'
+```
+
+Use a scope template for common permission sets:
+
+| Template | What it allows |
+|----------|---------------|
+| `read_only` | Read config and billing info |
+| `standard` | Read + execute tools + manage billing |
+| `admin` | Everything |
+
+Or provide explicit scopes:
+
+```json
+{ "name": "limited-key", "scopes": ["services:read", "services:execute"] }
+```
+
+### List your keys
+
+```bash
+curl -H "Authorization: Bearer sk_live_..." \
+  http://localhost:8000/api/v1/auth/api-keys
+```
+
+### Revoke a key
+
+```bash
+curl -X DELETE -H "Authorization: Bearer sk_live_..." \
+  http://localhost:8000/api/v1/auth/api-keys/{key_id}
+```
+
+## Scopes
+
+Each API key has scopes that control what it can do:
+
+| Scope | Description |
+|-------|-------------|
+| `services:read` | Read tool metadata |
+| `services:execute` | Call tool endpoints |
+| `billing:read` | View usage and subscription info |
+| `billing:write` | Report usage |
+| `admin:read` | Read admin data |
+| `admin:write` | Admin operations |
+
+Wildcards: `*` grants all scopes, `services:*` grants all service scopes.
+
+A new key's scopes cannot exceed the creating key's scopes (no privilege escalation).

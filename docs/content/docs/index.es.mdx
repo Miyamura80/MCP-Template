@@ -1,84 +1,58 @@
 ---
 title: Inicio Rapido
-description: Comienza con esta plantilla de Python
+description: Comienza con MCP Template
 ---
 
-Bienvenido a la documentacion! Sigue estos pasos para comenzar con esta plantilla de Python.
+MCP Template te ofrece tres formas de interactuar con el mismo conjunto de herramientas:
 
-## Inicio Rapido
+- **CLI** - Ejecuta comandos en tu terminal
+- **MCP** - Conecta asistentes de IA como Claude directamente
+- **REST API** - Llama a endpoints por HTTP con autenticacion
+
+Elige la interfaz que mejor se adapte a tu flujo de trabajo, o usa las tres.
+
+## Instalacion
 
 import { Step, Steps } from 'fumadocs-ui/components/steps';
 
 <Steps>
 <Step>
 
-### Configurar Entorno
-
-Crea y activa tu entorno virtual usando `uv`:
+### Instalar desde el codigo fuente
 
 ```bash
-make setup
-```
-
-Esto creara un directorio `.venv` y sincronizara todas las dependencias de `pyproject.toml`.
-
-</Step>
-
-<Step>
-
-### Configurar Ajustes
-
-Copia el archivo de entorno de ejemplo y agrega tus claves API:
-
-```bash
-cp .env.example .env
-```
-
-Edita `common/global_config.yaml` para personalizar los valores de configuracion de tu proyecto.
-
-</Step>
-
-<Step>
-
-### Ejecutar la Aplicacion
-
-Ejecuta la aplicacion principal:
-
-```bash
-make all
-```
-
-O ejecuta archivos Python especificos directamente:
-
-```bash
-uv run python src/main.py
+git clone https://github.com/Miyamura80/MCP-Template.git
+cd MCP-Template
+uv sync
 ```
 
 </Step>
-
 <Step>
 
-### Ejecutar Pruebas
-
-Verifica que todo funcione ejecutando el conjunto de pruebas:
+### Verificar la instalacion
 
 ```bash
-make test
+uv run mycli --version
+uv run mycli --help
 ```
 
-Ejecuta verificaciones de calidad de codigo:
+</Step>
+<Step>
+
+### Probar un comando
 
 ```bash
-make ci
+uv run mycli greet Alice
+# Hello, Alice!
 ```
 
 </Step>
 </Steps>
 
-## Proximos Pasos
+## Elige tu interfaz
 
 <Cards>
-  <Card title="Aprende mas sobre Configuracion" href="/docs/test" />
-  <Card title="Referencia API" href="/docs/api" />
-  <Card title="Aprende mas sobre Fumadocs" href="https://fumadocs.dev" />
+  <Card title="CLI" href="/docs/cli" />
+  <Card title="MCP Server" href="/docs/mcp" />
+  <Card title="REST API" href="/docs/api" />
 </Cards>

@@ -17,7 +17,7 @@ export async function GET(
     <DefaultImage
       title={page.data.title}
       description={page.data.description}
-      site="Python Template"
+      site="MCP Template"
     />,
     {
       width: 1200,

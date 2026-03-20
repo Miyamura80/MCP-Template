@@ -1,0 +1,58 @@
+---
+title: Output & Errors
+description: Output formats, error handling, and dry run mode
+---
+
+## Output Formats
+
+The `--format` flag controls how data is rendered:
+
+```bash
+mycli config show                    # table (default)
+mycli --format json config show      # machine-readable JSON
+mycli --format plain config show     # simple key: value lines
+```
+
+### Table (default)
+
+Rich formatted tables with colors and borders. Best for interactive use.
+
+### JSON
+
+Machine-readable output, useful for piping into other tools:
+
+```bash
+mycli --format json config show | jq '.llm_config'
+```
+
+### Plain
+
+Simple `key: value` lines with no formatting. Good for scripting.
+
+## Error Handling
+
+By default, errors show a concise message. Use `--debug` for full tracebacks with local variables:
+
+```bash
+mycli --debug config get nonexistent.key
+```
+
+## Dry Run
+
+Preview what a command would do without executing it:
+
+```bash
+mycli --dry-run greet Alice
+# [DRY RUN] Would greet Alice
+```
+
+Useful for verifying destructive operations before running them for real.
+
+## Verbosity
+
+Control how much output you see:
+
+```bash
+mycli --verbose greet Alice    # extra details
+mycli --quiet greet Alice      # minimal output
+```

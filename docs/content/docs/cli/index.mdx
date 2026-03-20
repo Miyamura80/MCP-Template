@@ -1,0 +1,48 @@
+---
+title: Overview
+description: Install and run CLI commands from your terminal
+---
+
+## Installation
+
+After installing the package, the `mycli` command is available:
+
+```bash
+mycli --help
+```
+
+If you installed from source, prefix with `uv run`:
+
+```bash
+uv run mycli --help
+```
+
+## Global Flags
+
+Flags go **before** the subcommand:
+
+```bash
+mycli [flags] <command> [args]
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--verbose` | `-v` | Increase output verbosity |
+| `--quiet` | `-q` | Suppress non-essential output |
+| `--debug` | | Show full tracebacks on error |
+| `--format` | `-f` | Output format: `table` (default), `json`, `plain` |
+| `--dry-run` | | Preview actions without executing |
+| `--version` | `-V` | Print version and exit |
+
+**Examples:**
+
+```bash
+mycli --format json config show      # JSON output
+mycli --dry-run greet Alice          # preview without executing
+mycli --debug config get bad.key     # full tracebacks on error
+```
+
+<Cards>
+  <Card title="Commands" href="/docs/cli/commands" />
+  <Card title="Output & Errors" href="/docs/cli/output" />
+</Cards>

@@ -9,7 +9,7 @@ Keep the following in English (untranslated) in every locale.
 
 ### Product & brand names
 
-- Python Template
+- MCP Template
 - MCP (Model Context Protocol)
 - Fumadocs
 
