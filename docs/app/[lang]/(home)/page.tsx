@@ -57,27 +57,64 @@ export default async function HomePage({
   const readmeHtml = marked.parse(readmeContent) as string;
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-12 text-fd-foreground">
+    <div className="max-w-4xl mx-auto px-6 py-12">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            .readme-content, .readme-content * {
+              color: var(--color-fd-foreground) !important;
+            }
+            .readme-content a, .readme-content a * {
+              color: var(--color-fd-accent-foreground) !important;
+              text-decoration: underline;
+            }
+            .readme-content h1 { font-size: 1.875rem; font-weight: 700; margin-top: 2rem; margin-bottom: 1rem; }
+            .readme-content h2 { font-size: 1.5rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 1rem; }
+            .readme-content h3 { font-size: 1.25rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.75rem; }
+            .readme-content p { margin: 0.5rem 0; }
+            .readme-content img { max-width: 100%; border-radius: 0.5rem; margin: 1rem 0; }
+            .readme-content pre {
+              padding: 1rem;
+              border-radius: 0.5rem;
+              background-color: var(--color-fd-secondary) !important;
+              overflow-x: auto;
+              margin: 1rem 0;
+            }
+            .readme-content pre code, .readme-content pre * {
+              color: var(--color-fd-foreground) !important;
+              font-size: 0.875rem;
+            }
+            .readme-content :not(pre) > code {
+              padding: 0.125rem 0.375rem;
+              border-radius: 0.25rem;
+              background-color: var(--color-fd-secondary);
+              font-size: 0.875rem;
+            }
+            .readme-content table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+            .readme-content th, .readme-content td {
+              border: 1px solid var(--color-fd-border);
+              padding: 0.5rem 0.75rem;
+              text-align: left;
+            }
+            .readme-content th { font-weight: 500; }
+            .readme-content ul { margin-left: 1rem; list-style-type: disc; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+            .readme-content ol { margin-left: 1rem; list-style-type: decimal; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+            .readme-content li { margin: 0.25rem 0; }
+            .readme-content hr { margin: 2rem 0; border-color: var(--color-fd-border); }
+            .readme-content blockquote {
+              border-left: 4px solid var(--color-fd-border);
+              padding-left: 1rem;
+              margin: 1rem 0;
+              color: var(--color-fd-muted-foreground) !important;
+            }
+            .readme-content blockquote * {
+              color: var(--color-fd-muted-foreground) !important;
+            }
+          `,
+        }}
+      />
       <div
-        className="readme-content max-w-none text-fd-foreground
-          [&_*]:text-fd-foreground
-          [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mt-8 [&_h1]:mb-4
-          [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mt-10 [&_h2]:mb-4
-          [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:mt-8 [&_h3]:mb-3
-          [&_p]:my-2
-          [&_a]:!text-fd-accent-foreground [&_a]:underline
-          [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-4
-          [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:bg-fd-secondary [&_pre]:overflow-x-auto [&_pre]:my-4
-          [&_code]:text-sm
-          [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-fd-secondary
-          [&_table]:w-full [&_table]:border-collapse [&_table]:my-4
-          [&_th]:border [&_th]:border-fd-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-medium
-          [&_td]:border [&_td]:border-fd-border [&_td]:px-3 [&_td]:py-2
-          [&_ul]:ml-4 [&_ul]:list-disc [&_ul]:my-2
-          [&_ol]:ml-4 [&_ol]:list-decimal [&_ol]:my-2
-          [&_li]:my-1
-          [&_hr]:my-8 [&_hr]:border-fd-border
-          [&_blockquote]:border-l-4 [&_blockquote]:border-fd-border [&_blockquote]:pl-4 [&_blockquote]:my-4 [&_blockquote]:!text-fd-muted-foreground"
+        className="readme-content max-w-none"
         dangerouslySetInnerHTML={{ __html: readmeHtml }}
       />
       <div className="mt-12 text-center">
