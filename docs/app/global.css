@@ -115,6 +115,18 @@
   background-color: #252629 !important;
 }
 
+/* Tabs dark mode - ensure content panels inherit dark colors */
+.dark .bg-fd-secondary .bg-fd-background {
+  background-color: #000000 !important;
+  color: #F9F9F9 !important;
+}
+
+.dark .bg-fd-secondary .bg-fd-background li,
+.dark .bg-fd-secondary .bg-fd-background p,
+.dark .bg-fd-secondary .bg-fd-background strong {
+  color: #F9F9F9 !important;
+}
+
 /* Cards dark mode styling */
 .dark [data-card] {
   background-color: #1a1b1f;
