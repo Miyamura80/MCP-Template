@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DynamicLink } from "fumadocs-core/dynamic-link";
-import defaultMdxComponents from "fumadocs-ui/mdx";
 
-// Read README.md from the repo root at build time
+const GITHUB_RAW_BASE =
+  "https://raw.githubusercontent.com/Miyamura80/MCP-Template/main";
+
 function getReadmeContent(): string {
   const readmePath = path.resolve(process.cwd(), "..", "README.md");
   try {
@@ -13,18 +14,31 @@ function getReadmeContent(): string {
   }
 }
 
-// Simple markdown-to-HTML converter for the README
-// Handles: headings, code blocks, tables, links, images, bold, inline code, lists, horizontal rules
 function renderMarkdown(md: string): string {
   let html = md;
 
-  // Remove HTML tags (badges, centered paragraphs, etc.) - render as-is
-  // Actually keep them, browsers handle raw HTML fine
+  // Fix relative image paths in markdown syntax
+  html = html.replace(
+    /!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g,
+    `![$1](${GITHUB_RAW_BASE}/$2)`
+  );
 
-  // Fenced code blocks (```lang\n...\n```)
+  // Fix relative image paths in HTML <img> tags
+  html = html.replace(
+    /src="(?!https?:\/\/)([^"]+)"/g,
+    `src="${GITHUB_RAW_BASE}/$1"`
+  );
+
+  // Fix relative link paths in HTML <a> tags
+  html = html.replace(
+    /href="(?!https?:\/\/|#)([^"]+)"/g,
+    `href="https://github.com/Miyamura80/MCP-Template/blob/main/$1"`
+  );
+
+  // Fenced code blocks
   html = html.replace(
     /```(\w*)\n([\s\S]*?)```/g,
-    (_match, lang, code) =>
+    (_match, _lang, code) =>
       `<pre class="p-4 rounded-lg bg-fd-secondary overflow-x-auto my-4"><code class="text-sm">${code
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -50,10 +64,7 @@ function renderMarkdown(md: string): string {
   );
 
   // Horizontal rules
-  html = html.replace(
-    /^---$/gm,
-    '<hr class="my-8 border-fd-border" />'
-  );
+  html = html.replace(/^---$/gm, '<hr class="my-8 border-fd-border" />');
 
   // Tables
   html = html.replace(
@@ -96,13 +107,22 @@ function renderMarkdown(md: string): string {
   // Bold
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
-  // Inline code (but not inside <pre> blocks)
-  html = html.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-fd-secondary text-sm">$1</code>');
+  // Inline code
+  html = html.replace(
+    /`([^`]+)`/g,
+    '<code class="px-1.5 py-0.5 rounded bg-fd-secondary text-sm">$1</code>'
+  );
 
-  // Links [text](url)
+  // Markdown links [text](url)
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" class="text-fd-primary underline">$1</a>'
+    '<a href="$2" class="text-fd-accent-foreground underline hover:opacity-80">$1</a>'
+  );
+
+  // Images ![alt](src)
+  html = html.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)/g,
+    '<img src="$2" alt="$1" class="max-w-full rounded-lg my-4" />'
   );
 
   // Unordered lists
@@ -111,14 +131,11 @@ function renderMarkdown(md: string): string {
     '<li class="ml-4 list-disc">$1</li>'
   );
 
-  // Paragraphs (lines that aren't already HTML)
-  html = html.replace(
-    /^(?!<[a-z/]|$)(.+)$/gm,
-    (_match, content) => {
-      if (content.startsWith("<li")) return content;
-      return `<p class="my-2">${content}</p>`;
-    }
-  );
+  // Paragraphs
+  html = html.replace(/^(?!<[a-z/]|$)(.+)$/gm, (_match, content) => {
+    if (content.startsWith("<li")) return content;
+    return `<p class="my-2">${content}</p>`;
+  });
 
   return html;
 }
@@ -134,8 +151,17 @@ export default async function HomePage({
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-12">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            .readme-content a { color: var(--color-fd-accent-foreground); text-decoration: underline; }
+            .readme-content a:hover { opacity: 0.8; }
+            .readme-content img { max-width: 100%; border-radius: 0.5rem; }
+          `,
+        }}
+      />
       <div
-        className="prose prose-neutral dark:prose-invert max-w-none"
+        className="readme-content max-w-none"
         dangerouslySetInnerHTML={{ __html: readmeHtml }}
       />
       <div className="mt-12 text-center">
