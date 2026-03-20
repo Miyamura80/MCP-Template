@@ -124,15 +124,15 @@ Once connected, the AI assistant has access to these tools:
 | `config_set` | Set a config override | `key` (str), `value` (str) |
 | `doctor` | Run project health checks | `fix` (bool, optional) |
 
-## Example Conversations
+## Example Usage
 
-After setup, you can ask Claude things like:
+After setup, you can ask your AI assistant things like:
 
-- "Greet Alice with a shout" - Claude calls the `greet` tool with `{"name": "Alice", "shout": true}`
-- "What's the current LLM config?" - Claude calls `config_get` with `{"key": "llm_config"}`
-- "Run a health check and fix any issues" - Claude calls `doctor` with `{"fix": true}`
+- "Greet Alice with a shout" - calls the `greet` tool with `{"name": "Alice", "shout": true}`
+- "What's the current LLM config?" - calls `config_get` with `{"key": "llm_config"}`
+- "Run a health check and fix any issues" - calls `doctor` with `{"fix": true}`
 
-### What Claude Sees
+### Tool Call Example
 
 **Input:**
 ```json
