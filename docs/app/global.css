@@ -115,16 +115,30 @@
   background-color: #252629 !important;
 }
 
-/* Tabs dark mode - ensure content panels inherit dark colors */
-.dark .bg-fd-secondary .bg-fd-background {
+/* Tabs dark mode - fix content panels showing light background */
+.dark [role="tabpanel"] {
   background-color: #000000 !important;
   color: #F9F9F9 !important;
 }
 
-.dark .bg-fd-secondary .bg-fd-background li,
-.dark .bg-fd-secondary .bg-fd-background p,
-.dark .bg-fd-secondary .bg-fd-background strong {
+.dark [role="tabpanel"] li,
+.dark [role="tabpanel"] p,
+.dark [role="tabpanel"] strong,
+.dark [role="tabpanel"] code {
   color: #F9F9F9 !important;
+}
+
+.dark [role="tablist"] {
+  background-color: #1a1b1f !important;
+}
+
+.dark [role="tab"] {
+  color: #9BA4A6 !important;
+}
+
+.dark [role="tab"][data-state="active"] {
+  color: #C3FFFD !important;
+  border-color: #C3FFFD !important;
 }
 
 /* Cards dark mode styling */
