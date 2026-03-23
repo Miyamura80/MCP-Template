@@ -290,7 +290,9 @@ bump_version: ## Bump version (BUMP=patch|minor|major), commit, and tag
 	@git diff --cached --quiet || { echo "$(RED)Staging area is not clean. Commit or unstage changes first.$(RESET)"; exit 1; }; \
 	git diff --quiet || { echo "$(RED)Working tree is not clean. Commit or stash changes first.$(RESET)"; exit 1; }; \
 	current=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
-	IFS='.' read -r major minor patch_v <<< "$$current"; \
+	major=$$(echo "$$current" | cut -d. -f1); \
+	minor=$$(echo "$$current" | cut -d. -f2); \
+	patch_v=$$(echo "$$current" | cut -d. -f3); \
 	case "$(BUMP)" in \
 		major) major=$$((major + 1)); minor=0; patch_v=0 ;; \
 		minor) minor=$$((minor + 1)); patch_v=0 ;; \
