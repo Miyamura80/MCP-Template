@@ -287,7 +287,9 @@ db_revision: check_uv ## Create a new Alembic migration revision (ARGS="message"
 BUMP ?= patch
 
 bump_version: ## Bump version (BUMP=patch|minor|major), commit, and tag
-	@current=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	@git diff --cached --quiet || { echo "$(RED)Staging area is not clean. Commit or unstage changes first.$(RESET)"; exit 1; }; \
+	git diff --quiet || { echo "$(RED)Working tree is not clean. Commit or stash changes first.$(RESET)"; exit 1; }; \
+	current=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	IFS='.' read -r major minor patch_v <<< "$$current"; \
 	case "$(BUMP)" in \
 		major) major=$$((major + 1)); minor=0; patch_v=0 ;; \
