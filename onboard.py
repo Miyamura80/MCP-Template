@@ -400,7 +400,8 @@ def _build_rename_replacements(
         safe_description = description.replace('"', '\\"')
         pairs.append(("Add your description here", safe_description))
 
-    pairs.append(("# cli-template", f"# {name}"))
+    if "cli-template" not in name:
+        pairs.append(("# cli-template", f"# {name}"))
     return pairs
 
 
