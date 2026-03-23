@@ -28,6 +28,19 @@
 
 ---
 
+## Agent Prompt
+
+> Copy and paste this into your AI coding agent (Claude Code, Cursor, Copilot, etc.) to install:
+
+```text
+Install the CLI and download the agent skills:
+
+pip install miyamura80-cli-template
+curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh | bash
+```
+
+---
+
 <p align="center">
   <img src="media/cli_demo.gif" alt="CLI Demo" width="600">
 </p>

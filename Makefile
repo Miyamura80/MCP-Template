@@ -280,6 +280,30 @@ db_revision: check_uv ## Create a new Alembic migration revision (ARGS="message"
 	@echo "$(GREEN)✅ Revision created.$(RESET)"
 
 ########################################################
+# Release
+########################################################
+
+### Release
+BUMP ?= patch
+
+bump_version: ## Bump version (BUMP=patch|minor|major), commit, and tag
+	@current=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	IFS='.' read -r major minor patch_v <<< "$$current"; \
+	case "$(BUMP)" in \
+		major) major=$$((major + 1)); minor=0; patch_v=0 ;; \
+		minor) minor=$$((minor + 1)); patch_v=0 ;; \
+		patch) patch_v=$$((patch_v + 1)) ;; \
+		*) echo "$(RED)Invalid BUMP value: $(BUMP). Use patch, minor, or major.$(RESET)"; exit 1 ;; \
+	esac; \
+	new="$$major.$$minor.$$patch_v"; \
+	echo "$(YELLOW)Bumping version: $$current -> $$new$(RESET)"; \
+	sed -i '' "s/^version = \".*\"/version = \"$$new\"/" pyproject.toml; \
+	git add pyproject.toml; \
+	git commit -m "Release v$$new"; \
+	git tag -a "v$$new" -m "Release v$$new"; \
+	echo "$(GREEN)Tagged v$$new. Push with: git push origin main --follow-tags$(RESET)"
+
+########################################################
 # Dependencies
 ########################################################
 
