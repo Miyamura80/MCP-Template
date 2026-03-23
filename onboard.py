@@ -551,6 +551,7 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
     # Files where we use regex word-boundary replacement instead of literal
     regex_replacements: list[tuple[Path, str, str]] = [
         (PROJECT_ROOT / "README.md", rf"\b{re.escape(old_name)}\b", new_name),
+        (PROJECT_ROOT / "release.md", rf"\b{re.escape(old_name)}\b", new_name),
     ]
 
     changes: list[str] = []
