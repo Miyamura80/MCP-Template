@@ -51,7 +51,7 @@ When a `v*` tag is pushed, two GitHub Actions workflows run:
    ```bash
    make bump_version BUMP=patch   # or minor/major
    ```
-   This updates `pyproject.toml`, commits the change, and creates a signed tag.
+   This updates `pyproject.toml`, commits the change, and creates an annotated tag.
 
 3. **Push with tags**
    ```bash

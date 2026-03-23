@@ -407,17 +407,26 @@ def _prompt_github_info() -> tuple[str, str]:
     """Prompt for GitHub owner and repo, auto-detecting from git remote."""
     github_owner, github_repo = _read_github_owner_repo()
 
+    def _nonempty(v: str) -> bool | str:
+        return True if v.strip() else "Cannot be empty."
+
     if github_owner == "OWNER":
-        entered = questionary.text("GitHub owner/org (e.g. my-github-username):").ask()
+        entered = questionary.text(
+            "GitHub owner/org (e.g. my-github-username):",
+            validate=_nonempty,
+        ).ask()
         if entered is None:
             raise typer.Abort()
-        github_owner = entered
+        github_owner = entered.strip()
 
     if github_repo in ("REPO", *_TEMPLATE_REPO_NAMES):
-        entered = questionary.text("GitHub repository name:").ask()
+        entered = questionary.text(
+            "GitHub repository name:",
+            validate=_nonempty,
+        ).ask()
         if entered is None:
             raise typer.Abort()
-        github_repo = entered
+        github_repo = entered.strip()
 
     return github_owner, github_repo
 
