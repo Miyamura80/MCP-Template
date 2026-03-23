@@ -91,5 +91,10 @@ For urgent fixes on top of a release:
 
 1. Create a branch from the release tag: `git checkout -b hotfix/description v0.1.1`
 2. Apply the fix and run `make ci && make test`
-3. Bump the patch version: `make bump_version BUMP=patch`
-4. Open a PR to `main`, squash-merge, then push the tag from `main`
+3. Open a PR to `main` and squash-merge it
+4. After merge, tag the new commit on `main` and push:
+   ```bash
+   git checkout main && git pull
+   make bump_version BUMP=patch
+   git push origin main --follow-tags
+   ```

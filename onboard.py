@@ -378,9 +378,10 @@ def _build_rename_replacements(
     """Build replacement pairs for the rename step (order matters, most specific first)."""
     pairs: list[tuple[str, str]] = []
 
-    # Package name (PyPI)
+    # Package name (PyPI) - broader match first to avoid double-substitution
     pairs.append((_TEMPLATE_PACKAGE_NAME, name))
-    pairs.append(("python-template", name))
+    if "python-template" not in name:
+        pairs.append(("python-template", name))
 
     # GitHub owner/repo URLs (handle both old and current repo names)
     for old_repo in _TEMPLATE_REPO_NAMES:
