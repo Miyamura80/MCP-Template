@@ -375,7 +375,7 @@ def _build_rename_replacements(
     github_owner: str,
     github_repo: str,
 ) -> list[tuple[str, str]]:
-    """Build replacement pairs for the rename step (order matters — most specific first)."""
+    """Build replacement pairs for the rename step (order matters, most specific first)."""
     pairs: list[tuple[str, str]] = []
 
     # Package name (PyPI)
