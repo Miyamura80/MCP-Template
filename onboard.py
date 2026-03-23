@@ -411,7 +411,7 @@ def _prompt_github_info() -> tuple[str, str]:
     def _nonempty(v: str) -> bool | str:
         return True if v.strip() else "Cannot be empty."
 
-    if github_owner == "OWNER":
+    if github_owner in ("OWNER", _TEMPLATE_OWNER):
         entered = questionary.text(
             "GitHub owner/org (e.g. my-github-username):",
             validate=_nonempty,
