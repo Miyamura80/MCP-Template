@@ -77,8 +77,8 @@ The release workflow uses [PyPI trusted publishing](https://docs.pypi.org/truste
 
 1. Create the package on [pypi.org](https://pypi.org/manage/projects/)
 2. Add a trusted publisher under the package settings:
-   - Owner: `Miyamura80`
-   - Repository: `MCP-Template`
+   - Owner: your GitHub username or org
+   - Repository: your GitHub repository name
    - Workflow: `release.yml`
    - Environment: `release`
 3. Create a `release` environment in GitHub repo settings (Settings > Environments)

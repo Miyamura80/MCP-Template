@@ -323,7 +323,7 @@ _RENAME_EXTENSIONS = {
     ".json", ".tsx", ".ts", ".sh", ".txt",
 }
 _RENAME_SKIP_DIRS = {".venv", ".venv-test", ".git", "node_modules", "__pycache__", ".uv_cache"}
-_RENAME_SKIP_FILES = {"uv.lock"}
+_RENAME_SKIP_FILES = {"uv.lock", "onboard.py", "install-skills.sh"}
 
 
 def _should_process(path: Path) -> bool:
@@ -396,7 +396,8 @@ def _build_rename_replacements(
     pairs.append((f'name = "{_TEMPLATE_OWNER}"', f'name = "{github_owner}"'))
 
     if description:
-        pairs.append(("Add your description here", description))
+        safe_description = description.replace('"', '\\"')
+        pairs.append(("Add your description here", safe_description))
 
     pairs.append(("# cli-template", f"# {name}"))
     return pairs

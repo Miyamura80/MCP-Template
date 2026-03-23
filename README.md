@@ -36,7 +36,9 @@
 Install the CLI and download the agent skills:
 
 pip install miyamura80-cli-template
-curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh | bash
+
+curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh -o install-skills.sh
+bash install-skills.sh && rm install-skills.sh
 ```
 
 ---
