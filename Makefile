@@ -280,6 +280,34 @@ db_revision: check_uv ## Create a new Alembic migration revision (ARGS="message"
 	@echo "$(GREEN)✅ Revision created.$(RESET)"
 
 ########################################################
+# Release
+########################################################
+
+### Release
+BUMP ?= patch
+
+bump_version: ## Bump version (BUMP=patch|minor|major), commit, and tag
+	@git diff --cached --quiet || { echo "$(RED)Staging area is not clean. Commit or unstage changes first.$(RESET)"; exit 1; }; \
+	git diff --quiet || { echo "$(RED)Working tree is not clean. Commit or stash changes first.$(RESET)"; exit 1; }; \
+	current=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
+	major=$$(echo "$$current" | cut -d. -f1); \
+	minor=$$(echo "$$current" | cut -d. -f2); \
+	patch_v=$$(echo "$$current" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) major=$$((major + 1)); minor=0; patch_v=0 ;; \
+		minor) minor=$$((minor + 1)); patch_v=0 ;; \
+		patch) patch_v=$$((patch_v + 1)) ;; \
+		*) echo "$(RED)Invalid BUMP value: $(BUMP). Use patch, minor, or major.$(RESET)"; exit 1 ;; \
+	esac; \
+	new="$$major.$$minor.$$patch_v"; \
+	echo "$(YELLOW)Bumping version: $$current -> $$new$(RESET)"; \
+	sed -i.bak "s/^version = \".*\"/version = \"$$new\"/" pyproject.toml && rm -f pyproject.toml.bak && \
+	git add pyproject.toml && \
+	git commit -m "Release v$$new" && \
+	git tag -a "v$$new" -m "Release v$$new" && \
+	echo "$(GREEN)Tagged v$$new. Push with: git push origin main --follow-tags$(RESET)"
+
+########################################################
 # Dependencies
 ########################################################
 
