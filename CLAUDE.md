@@ -141,7 +141,7 @@ Structure as: `init()` → `continue(id)` → `cleanup(id)`
 
 ## Security
 
-- **Do NOT use `litellm==1.82.8`** — this version contains a supply chain attack (malicious `.pth` file that steals credentials on Python startup). See [BerriAI/litellm#24512](https://github.com/BerriAI/litellm/issues/24512). The version is excluded in `pyproject.toml` via `!=1.82.8`.
+- **Do NOT use `litellm==1.82.*`** — version 1.82.8 contains a supply chain attack (malicious `.pth` file that steals credentials on Python startup). The entire `1.82.*` series is excluded in `pyproject.toml` via `!=1.82.*` as a defensive measure. See [BerriAI/litellm#24512](https://github.com/BerriAI/litellm/issues/24512).
 
 ## Deprecated
 
