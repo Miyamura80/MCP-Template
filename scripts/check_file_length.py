@@ -14,6 +14,8 @@ ROOT_SKIP_DIRS = {
     ".cache",
     "node_modules",
     ".next",
+    "__pycache__",
+    ".pytest_cache",
 }
 RECURSIVE_SKIP_DIRS = {"__pycache__", ".pytest_cache"}
 
@@ -41,7 +43,11 @@ def main() -> int:
             continue
         if rel.as_posix() in exclude:
             continue
-        line_count = len(path.read_text(encoding="utf-8", errors="ignore").splitlines())
+        try:
+            line_count = len(path.read_text(encoding="utf-8", errors="ignore").splitlines())
+        except OSError as e:
+            print(f"  Warning: could not read {rel}: {e}")
+            continue
         if line_count > max_lines:
             violations.append((rel, line_count))
 
