@@ -156,6 +156,14 @@ exclude = [
     "api_server/",
 ]
 
+[tool.file_length]
+max_lines = 500
+exclude = [
+    "onboard.py",
+    "api_server/routes/payments/webhooks.py",
+    "api_server/middleware/rate_limit.py",
+]
+
 [tool.coverage.run]
 branch = true
 source = ["src", "common", "utils", "commands", "services", "models", "db", "api_server"]
