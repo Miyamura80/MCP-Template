@@ -1,4 +1,4 @@
-# Agentic Payment Protocols — Research Report (March 2026)
+# Agentic Payment Protocols  - Research Report (March 2026)
 
 ## Overview
 
@@ -8,7 +8,7 @@ As AI agents evolve from conversational assistants into autonomous actors capabl
 
 ## Protocol Deep Dives
 
-### 1. Visa — Trusted Agent Protocol (TAP) / Visa Intelligent Commerce (VIC)
+### 1. Visa  - Trusted Agent Protocol (TAP) / Visa Intelligent Commerce (VIC)
 
 - **Launched:** October 2025
 - **Led by:** Visa
@@ -36,11 +36,11 @@ Uses agent-specific cryptographic signatures (built on HTTP Message Signatures +
 - Built on standards (HTTP Message Signatures, Web Bot Auth)
 - Geared toward large merchants and payment processors, not indie developers
 
-**HN Sentiment:** Low engagement (18 points, 1 comment). Minimal developer community discussion — tracks with Visa's enterprise B2B approach.
+**HN Sentiment:** Low engagement (18 points, 1 comment). Minimal developer community discussion  - tracks with Visa's enterprise B2B approach.
 
 ---
 
-### 2. Mastercard — Agent Pay
+### 2. Mastercard  - Agent Pay
 
 - **Launched:** April 2025
 - **Led by:** Mastercard
@@ -68,7 +68,7 @@ Leverages Cloudflare's Web Bot Auth for agent identity verification. Provides se
 
 ---
 
-### 3. OpenAI + Stripe — Agentic Commerce Protocol (ACP)
+### 3. OpenAI + Stripe  - Agentic Commerce Protocol (ACP)
 
 - **Launched:** September 2025 (live in ChatGPT with Etsy Instant Checkout)
 - **Led by:** OpenAI, Stripe
@@ -103,7 +103,7 @@ Key criticisms:
 - **"Enshittification" fears:** *"Five hundred gajillion dollars spent so we can end up in the same place."* Developers compare it to Google Search's trajectory, worrying ChatGPT will prioritize ACP merchants.
 - **Trust/hallucination concerns:** *"If ChatGPT gets things wrong, why would I trust it to shop for me?"*
 - **Vendor lock-in:** *"They're being incentivized to highlight products which they get a cut of."*
-- **Incentive misalignment:** *"The incentives are very strong to prefer instant checkout items"* — creating affiliate marketing dynamics.
+- **Incentive misalignment:** *"The incentives are very strong to prefer instant checkout items"*  - creating affiliate marketing dynamics.
 
 Key positives:
 - Open standard approach appreciated over proprietary lock-in
@@ -112,7 +112,7 @@ Key positives:
 
 ---
 
-### 4. Google — Universal Commerce Protocol (UCP) + Agent Payments Protocol (AP2)
+### 4. Google  - Universal Commerce Protocol (UCP) + Agent Payments Protocol (AP2)
 
 - **UCP announced:** January 2026 at NRF
 - **AP2 announced:** Alongside UCP as the payment layer
@@ -123,7 +123,7 @@ Key positives:
 - **UCP Docs:** https://developers.google.com/merchant/ucp
 
 **How it works:**
-UCP is the commerce layer (product discovery, catalog, checkout). AP2 is the payment layer — an open standard for secure agent-driven transactions with cryptographic proof of user consent.
+UCP is the commerce layer (product discovery, catalog, checkout). AP2 is the payment layer  - an open standard for secure agent-driven transactions with cryptographic proof of user consent.
 
 UCP uses a capability-based architecture where businesses publish supported features at `/.well-known/ucp`, and platforms negotiate capabilities automatically during request/response flows. The design is transport-agnostic: supports REST APIs, MCP for LLM integration, and A2A for agent-to-agent communication.
 
@@ -149,14 +149,14 @@ AP2 uses cryptographically-signed "mandates" to prove intent and create an audit
 **HN Sentiment: Cautiously positive**
 
 Key reactions:
-- Developers praised the `/.well-known/ucp` discovery pattern — *"Same discovery mechanism as security.txt"*
+- Developers praised the `/.well-known/ucp` discovery pattern  - *"Same discovery mechanism as security.txt"*
 - *"Nice to see an open standard for this instead of proprietary integrations."*
 - Community immediately started building tooling (validators, sandboxes, resource lists)
 - Less cynicism than ACP, likely because UCP/AP2 is infrastructure rather than consumer-facing checkout
 
 ---
 
-### 5. Coinbase — x402
+### 5. Coinbase  - x402
 
 - **Led by:** Coinbase
 - **Partners:** Cloudflare (co-founded x402 Foundation), Stripe (integration)
@@ -202,17 +202,17 @@ Revives the HTTP 402 "Payment Required" status code for native internet payments
 
 x402 generated the most Show HN projects of any protocol:
 - DeFi data API with 402 micropayments
-- X402drop — temporary file sharing paid in USDC
-- Agent Starter Kit — AI agents that pay for their own APIs
+- X402drop  - temporary file sharing paid in USDC
+- Agent Starter Kit  - AI agents that pay for their own APIs
 - Replacing API keys with payments
 
 Developers appreciate the simplicity: *"API keys and subscriptions don't work well for autonomous software: they require accounts, secrets, and prior trust before a single request can be made."*
 
-However, real-world adoption is thin — curiosity outpaces production use.
+However, real-world adoption is thin  - curiosity outpaces production use.
 
 ---
 
-### 6. Stripe + Tempo — Machine Payments Protocol (MPP)
+### 6. Stripe + Tempo  - Machine Payments Protocol (MPP)
 
 - **Launched:** March 2026 (mainnet)
 - **Led by:** Stripe, Tempo
@@ -220,7 +220,7 @@ However, real-world adoption is thin — curiosity outpaces production use.
 - **Open standard:** Yes
 
 **How it works:**
-Like x402, revives HTTP 402 for machine-to-machine payments, but built on Tempo's dedicated Layer-1 blockchain optimized for high-frequency stablecoin transactions at internet scale. Described as "OAuth for money" — agents discover payment requirements, authorize transactions using crypto wallets or shared payment tokens, and retry requests to access paid services.
+Like x402, revives HTTP 402 for machine-to-machine payments, but built on Tempo's dedicated Layer-1 blockchain optimized for high-frequency stablecoin transactions at internet scale. Described as "OAuth for money"  - agents discover payment requirements, authorize transactions using crypto wallets or shared payment tokens, and retry requests to access paid services.
 
 **Key features:**
 - Authorize once, then allow payments to execute programmatically within defined limits
@@ -241,9 +241,9 @@ Like x402, revives HTTP 402 for machine-to-machine payments, but built on Tempo'
 **HN Sentiment: Highly skeptical**
 
 Key criticisms:
-- **"Protocol" label questioned:** *"You are just describing an API"* — developers don't see fundamental innovation.
-- **Authorization gap:** *"MPP handles 'how do agents pay', but not 'did anyone authorize this'"* — missing human approval before spending.
-- **Documentation criticized:** *"Flimsy and AI generated"* — developers found provisions for denied access without refund mechanisms.
+- **"Protocol" label questioned:** *"You are just describing an API"*  - developers don't see fundamental innovation.
+- **Authorization gap:** *"MPP handles 'how do agents pay', but not 'did anyone authorize this'"*  - missing human approval before spending.
+- **Documentation criticized:** *"Flimsy and AI generated"*  - developers found provisions for denied access without refund mechanisms.
 - **Prompt injection fears:** Concerns about compromised agent intent leading to uncontrolled spending.
 - **Blockchain skepticism:** *"Stablecoin is not a technology. It's an excuse to do what banks do while not being regulated like a bank."*
 
@@ -251,7 +251,7 @@ Minority positive: Some acknowledge practical utility for research agents access
 
 ---
 
-### 7. PayPal — Agentic Commerce Services
+### 7. PayPal  - Agentic Commerce Services
 
 - **Launched:** October 2025
 - **Led by:** PayPal
@@ -276,13 +276,13 @@ Suite of services (Store Sync, Agent Ready, catalog/order management) that conne
 **Developer maturity:** MEDIUM
 - PayPal Agent Toolkit and MCP Server available
 - Practical for merchants already on PayPal
-- Not a standalone protocol to build on — more of an integration layer
+- Not a standalone protocol to build on  - more of an integration layer
 
 **HN Sentiment:** No dedicated discussion threads found. PayPal's approach is integration-focused rather than protocol-driven, generating less developer community buzz.
 
 ---
 
-### 8. Cloudflare — Web Bot Auth (Infrastructure Layer)
+### 8. Cloudflare  - Web Bot Auth (Infrastructure Layer)
 
 - **Role:** The identity/authentication layer underpinning multiple protocols
 - **Used by:** Visa (TAP), Mastercard (Agent Pay), American Express, x402
@@ -306,7 +306,7 @@ Uses Ed25519 cryptographic signatures on HTTP requests so agents can prove their
 One of the most telling data points comes from ["An AI agent bought from our WooCommerce store"](https://news.ycombinator.com/item?id=47140608):
 
 - **Schema quality > model capability:** *"A clean store schema makes even weaker models succeed. A messy schema makes even Claude and GPT fail."*
-- **Variant resolution is critical:** Successful agents *"call get_product_details to resolve variant IDs before carting"* — agents that skip lookups and guess tend to fail with type errors.
+- **Variant resolution is critical:** Successful agents *"call get_product_details to resolve variant IDs before carting"*  - agents that skip lookups and guess tend to fail with type errors.
 - **Technical resilience matters:** MCP connections dropping on unbounded catalog queries required agents to silently switch to REST fallbacks for production viability.
 - **Attribution is broken:** Most revenue appeared as "Unknown Agent" because delegated checkout flows break identity continuity.
 - **Merchant awareness gap:** Most WooCommerce/Shopify owners don't understand how their systems interact with AI agents yet.
@@ -345,9 +345,9 @@ One of the most telling data points comes from ["An AI agent bought from our Woo
 
 1. **Cloudflare Web Bot Auth** is becoming the de facto identity layer across most protocols (Visa, Mastercard, AmEx, x402)
 2. **Adobe** supports both ACP and UCP, signaling both will coexist
-3. **Stripe** is the most protocol-agnostic player — supporting ACP, Visa TAP, Mastercard Agent Pay, MPP, BNPL tokens, and x402
+3. **Stripe** is the most protocol-agnostic player  - supporting ACP, Visa TAP, Mastercard Agent Pay, MPP, BNPL tokens, and x402
 4. **Crypto vs. Card rails** remains the key divide: x402/MPP are crypto-native; ACP/UCP/TAP/Agent Pay are card-network-native
-5. **Real-world volume** is still extremely low across all protocols — the tooling exists but mainstream merchant and consumer adoption has not materialized yet
+5. **Real-world volume** is still extremely low across all protocols  - the tooling exists but mainstream merchant and consumer adoption has not materialized yet
 6. **Schema quality** and merchant readiness are the actual bottlenecks, not protocol design
 
 ---

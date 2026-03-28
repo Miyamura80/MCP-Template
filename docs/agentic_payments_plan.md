@@ -6,7 +6,7 @@ This document describes the architecture for integrating multiple agentic paymen
 
 ## Protocols
 
-### 1. x402 (Coinbase) — Priority: First
+### 1. x402 (Coinbase)  - Priority: First
 
 - **Type:** HTTP 402-based stablecoin micropayments
 - **Status:** Fully open, no gating, Python SDK on PyPI (`x402` v2.5.0)
@@ -14,14 +14,14 @@ This document describes the architecture for integrating multiple agentic paymen
 - **MCP integrations exist:** MetaMask/mcp-x402, Vercel x402-mcp, @civic/x402-mcp, official guide
 - **New dep:** `x402[httpx,fastapi]>=2.5.0`
 
-### 2. MPP (Stripe/Tempo Machine Payments Protocol) — Priority: Second
+### 2. MPP (Stripe/Tempo Machine Payments Protocol)  - Priority: Second
 
 - **Type:** HTTP 402-based, stablecoins + card rails + Bitcoin Lightning
 - **Status:** Developer preview (`2026-03-04.preview`), gated access request required
-- **SDK:** TypeScript only (`mppx`). No Python SDK — we build a custom `httpx` client.
+- **SDK:** TypeScript only (`mppx`). No Python SDK  - we build a custom `httpx` client.
 - **New dep:** None (httpx already transitive)
 
-### 3. ACP (OpenAI/Stripe Agentic Commerce Protocol) — Priority: Third
+### 3. ACP (OpenAI/Stripe Agentic Commerce Protocol)  - Priority: Third
 
 - **Type:** Merchant-side REST endpoints per OpenAPI spec
 - **Status:** Spec is Apache 2.0 open. Distribution through ChatGPT is gated.
@@ -207,15 +207,15 @@ payments: PaymentsConfig = Field(default_factory=lambda: PaymentsConfig())
 
 ## Design Decisions
 
-1. **Secrets via env var indirection** — Config stores the env var *name* (e.g., `wallet_private_key_env: "X402_WALLET_PRIVATE_KEY"`), never the key itself in YAML.
+1. **Secrets via env var indirection**  - Config stores the env var *name* (e.g., `wallet_private_key_env: "X402_WALLET_PRIVATE_KEY"`), never the key itself in YAML.
 
-2. **Registry pattern** — `ProtocolRegistry` reads `global_config.payments` at startup, lazy-imports only enabled protocols, calls `initialize()` on each. Single entry point for the API server.
+2. **Registry pattern**  - `ProtocolRegistry` reads `global_config.payments` at startup, lazy-imports only enabled protocols, calls `initialize()` on each. Single entry point for the API server.
 
-3. **Base ABC does not unify checkout flows** — ACP's merchant-of-record model is fundamentally different from x402/MPP's pay-per-request model. The `create_payment_requirement` / `verify_payment` pair captures the common 402 loop. ACP additionally implements merchant endpoint handlers.
+3. **Base ABC does not unify checkout flows**  - ACP's merchant-of-record model is fundamentally different from x402/MPP's pay-per-request model. The `create_payment_requirement` / `verify_payment` pair captures the common 402 loop. ACP additionally implements merchant endpoint handlers.
 
-4. **MPP custom HTTP client** — No Python SDK exists. `mpp/client.py` is a thin `httpx.AsyncClient` wrapper implementing the MPP REST API per the spec.
+4. **MPP custom HTTP client**  - No Python SDK exists. `mpp/client.py` is a thin `httpx.AsyncClient` wrapper implementing the MPP REST API per the spec.
 
-5. **Extensibility** — Adding a new protocol (AP2, UCP, etc.) requires:
+5. **Extensibility**  - Adding a new protocol (AP2, UCP, etc.) requires:
    - Create `src/payments/<name>/` with `protocol.py` + `config.py`
    - Implement `BasePaymentProtocol`
    - Add config model to `PaymentsConfig`
