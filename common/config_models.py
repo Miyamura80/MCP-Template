@@ -179,6 +179,39 @@ class SubscriptionConfig(BaseModel):
     payment_retry: PaymentRetryConfig = Field(default_factory=PaymentRetryConfig)
 
 
+class X402ProtocolConfig(BaseModel):
+    """x402 (Coinbase) protocol configuration."""
+
+    enabled: bool = False
+    facilitator_url: str = "https://x402.org/facilitator"
+    network: str = "base-sepolia"
+    wallet_address_env: str = "X402_WALLET_ADDRESS"
+    private_key_env: str = "X402_PRIVATE_KEY"
+    default_amount: str = "0.001"
+    default_asset: str = "USDC"
+    testnet: bool = True
+
+
+class MppProtocolConfig(BaseModel):
+    """MPP (Stripe/Tempo) protocol configuration."""
+
+    enabled: bool = False
+
+
+class AcpProtocolConfig(BaseModel):
+    """ACP (OpenAI/Stripe) protocol configuration."""
+
+    enabled: bool = False
+
+
+class AgenticPaymentsConfig(BaseModel):
+    """Top-level agentic payments configuration."""
+
+    x402: X402ProtocolConfig = Field(default_factory=X402ProtocolConfig)
+    mpp: MppProtocolConfig = Field(default_factory=MppProtocolConfig)
+    acp: AcpProtocolConfig = Field(default_factory=AcpProtocolConfig)
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 

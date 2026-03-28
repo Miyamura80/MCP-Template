@@ -16,6 +16,7 @@ from pydantic_settings import (
 
 # Import configuration models
 from .config_models import (
+    AgenticPaymentsConfig,
     CliConfig,
     DefaultLlm,
     ExampleParent,
@@ -187,6 +188,9 @@ class Config(BaseSettings):
         default_factory=lambda: SubscriptionConfig()
     )
     rate_limit: RateLimitConfig = Field(default_factory=lambda: RateLimitConfig())
+    payments: AgenticPaymentsConfig = Field(
+        default_factory=lambda: AgenticPaymentsConfig()
+    )
 
     # Environment variables
     DEV_ENV: str
@@ -195,6 +199,10 @@ class Config(BaseSettings):
     GROQ_API_KEY: str | None = None
     PERPLEXITY_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
+
+    # Agentic payments
+    X402_WALLET_ADDRESS: str | None = None
+    X402_PRIVATE_KEY: str | None = None
 
     # Database & auth secrets
     BACKEND_DB_URI: str | None = None

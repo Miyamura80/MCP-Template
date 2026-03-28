@@ -12,6 +12,8 @@ BILLING_READ = "billing:read"
 BILLING_WRITE = "billing:write"
 ADMIN_READ = "admin:read"
 ADMIN_WRITE = "admin:write"
+PAYMENTS_READ = "payments:read"
+PAYMENTS_WRITE = "payments:write"
 
 ALL_SCOPES = frozenset(
     {
@@ -21,13 +23,22 @@ ALL_SCOPES = frozenset(
         BILLING_WRITE,
         ADMIN_READ,
         ADMIN_WRITE,
+        PAYMENTS_READ,
+        PAYMENTS_WRITE,
     }
 )
 
 # Scope templates
 SCOPE_TEMPLATES: dict[str, list[str]] = {
-    "read_only": [SERVICES_READ, BILLING_READ],
-    "standard": [SERVICES_READ, SERVICES_EXECUTE, BILLING_READ, BILLING_WRITE],
+    "read_only": [SERVICES_READ, BILLING_READ, PAYMENTS_READ],
+    "standard": [
+        SERVICES_READ,
+        SERVICES_EXECUTE,
+        BILLING_READ,
+        BILLING_WRITE,
+        PAYMENTS_READ,
+        PAYMENTS_WRITE,
+    ],
     "admin": ["*"],
 }
 
