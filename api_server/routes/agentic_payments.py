@@ -7,7 +7,12 @@ from pydantic import BaseModel
 from api_server.auth.scopes import PAYMENTS_READ, PAYMENTS_WRITE, require_scopes
 from api_server.auth.unified_auth import AuthenticatedUser
 from src.payments.registry import PaymentRegistry
-from src.payments.types import PaymentPayload, PaymentProtocolName, PaymentStatus
+from src.payments.types import (
+    PaymentPayload,
+    PaymentProtocolName,
+    PaymentRequirement,
+    PaymentStatus,
+)
 
 router = APIRouter(prefix="/api/v1/agentic-payments", tags=["agentic-payments"])
 
@@ -135,8 +140,6 @@ async def verify_payment(
         header_value=request.header_value,
     )
 
-    from src.payments.types import PaymentRequirement
-
     requirement = PaymentRequirement(
         protocol=PaymentProtocolName(request.protocol),
         network=request.requirement.get("network", ""),
@@ -147,7 +150,11 @@ async def verify_payment(
         description=request.requirement.get("description"),
     )
 
-    result = await proto.verify_payment(payload, requirement)
+    try:
+        result = await proto.verify_payment(payload, requirement)
+    except Exception as exc:
+        log.error("Payment verification failed unexpectedly: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if result.status == PaymentStatus.COMPLETED:
         log.info(

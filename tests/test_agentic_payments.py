@@ -98,7 +98,7 @@ class TestX402Protocol(TestTemplate):
         from src.payments.x402.protocol import X402Protocol
 
         proto = X402Protocol(X402ProtocolConfig())
-        result = asyncio.get_event_loop().run_until_complete(proto.initialize())
+        result = asyncio.run(proto.initialize())
         assert result is False
         assert proto.is_available is False
 
@@ -114,7 +114,7 @@ class TestX402Protocol(TestTemplate):
                 "X402_PRIVATE_KEY": "0xdeadbeef",
             },
         ):
-            result = asyncio.get_event_loop().run_until_complete(proto.initialize())
+            result = asyncio.run(proto.initialize())
             assert result is True
             assert proto.is_available is True
 
@@ -130,16 +130,17 @@ class TestX402Protocol(TestTemplate):
                 "X402_PRIVATE_KEY": "0xdeadbeef",
             },
         ):
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(proto.initialize())
-            req = loop.run_until_complete(
-                proto.build_payment_requirement(
+
+            async def _run():
+                await proto.initialize()
+                return await proto.build_payment_requirement(
                     amount="0.01",
                     asset="USDC",
                     recipient="0xrecipient",
                     description="test payment",
                 )
-            )
+
+            req = asyncio.run(_run())
             assert req.protocol == PaymentProtocolName.X402
             assert req.amount == "0.01"
             assert req.asset == "USDC"
@@ -158,7 +159,7 @@ class TestX402Protocol(TestTemplate):
                 "X402_PRIVATE_KEY": "0xdeadbeef",
             },
         ):
-            asyncio.get_event_loop().run_until_complete(proto.initialize())
+            asyncio.run(proto.initialize())
             assert proto.is_available is True
             proto.shutdown()
             assert proto.is_available is False

@@ -200,7 +200,9 @@ class Config(BaseSettings):
     PERPLEXITY_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
 
-    # Agentic payments
+    # Agentic payments (observability only - the protocol reads these
+    # via os.getenv() using the env var name from payments.yaml config,
+    # not from these fields directly)
     X402_WALLET_ADDRESS: str | None = None
     X402_PRIVATE_KEY: str | None = None
 
