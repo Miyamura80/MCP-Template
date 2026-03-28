@@ -36,29 +36,33 @@ class PaymentRegistry:
         if self._initialized:
             return
 
-        from common import global_config
+        with self._lock:
+            if self._initialized:
+                return
 
-        cfg = global_config.payments
+            from common import global_config
 
-        if cfg.x402.enabled:
-            from src.payments.x402.protocol import X402Protocol
+            cfg = global_config.payments
 
-            self._protocols[PaymentProtocolName.X402] = X402Protocol(cfg.x402)
-            log.info("x402 protocol registered")
+            if cfg.x402.enabled:
+                from src.payments.x402.protocol import X402Protocol
 
-        if cfg.mpp.enabled:
-            log.info("MPP protocol enabled but not yet implemented")
+                self._protocols[PaymentProtocolName.X402] = X402Protocol(cfg.x402)
+                log.info("x402 protocol registered")
 
-        if cfg.acp.enabled:
-            log.info("ACP protocol enabled but not yet implemented")
+            if cfg.mpp.enabled:
+                log.info("MPP protocol enabled but not yet implemented")
 
-        enabled = self.list_enabled()
-        if enabled:
-            log.info("Agentic payments initialized: {}", ", ".join(enabled))
-        else:
-            log.debug("No agentic payment protocols enabled")
+            if cfg.acp.enabled:
+                log.info("ACP protocol enabled but not yet implemented")
 
-        self._initialized = True
+            enabled = self.list_enabled()
+            if enabled:
+                log.info("Agentic payments initialized: {}", ", ".join(enabled))
+            else:
+                log.debug("No agentic payment protocols enabled")
+
+            self._initialized = True
 
     def get_protocol(self, name: str) -> PaymentProtocol | None:
         """Get a registered protocol by name. Returns None if not found."""

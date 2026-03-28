@@ -56,6 +56,12 @@ class X402Protocol(PaymentProtocol):
             try:
                 from x402 import x402ResourceServer
 
+                # Pre-flight: wallet address is used as the payment
+                # recipient in build_payment_requirement(). The private
+                # key is validated here to ensure the operator has
+                # configured credentials, but is not passed to the
+                # resource server - the SDK's facilitator handles
+                # on-chain settlement independently.
                 wallet = os.getenv(self._config.wallet_address_env)
                 private_key = os.getenv(self._config.private_key_env)
 
@@ -75,6 +81,7 @@ class X402Protocol(PaymentProtocol):
 
                 self._server = x402ResourceServer()
                 self._wallet_address = wallet
+                self._private_key = private_key
                 self._initialized = True
                 log.info(
                     "x402 protocol initialized (network={}, testnet={})",
