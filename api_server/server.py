@@ -10,7 +10,7 @@ from api_server.middleware.error_handler import (
     RequestIdMiddleware,
 )
 from api_server.middleware.rate_limit import RateLimitMiddleware
-from api_server.routes import auth, health, services
+from api_server.routes import agentic_payments, auth, health, services
 from api_server.routes.payments import checkout, metering, subscription, webhooks
 from common import global_config
 
@@ -44,6 +44,7 @@ app.include_router(checkout.router)
 app.include_router(metering.router)
 app.include_router(subscription.router)
 app.include_router(webhooks.router)
+app.include_router(agentic_payments.router)
 
 
 def main() -> None:
