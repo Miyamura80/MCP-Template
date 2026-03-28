@@ -29,6 +29,7 @@ class X402Protocol(PaymentProtocol):
         self._config = config
         self._server: Any = None
         self._wallet_address: str = ""
+        self._private_key: str = ""
         self._initialized = False
         self._lock = threading.Lock()
 
@@ -90,9 +91,6 @@ class X402Protocol(PaymentProtocol):
                 )
                 return True
 
-            except ImportError:
-                log.warning("x402 SDK not installed; protocol unavailable")
-                return False
             except Exception as exc:
                 log.warning("x402 init failed; will retry next call: {}", exc)
                 return False
@@ -196,7 +194,9 @@ class X402Protocol(PaymentProtocol):
         raise ValueError("Failed to build x402 payment requirements from config")
 
     def shutdown(self) -> None:
-        """Reset protocol state."""
+        """Reset protocol state and clear key material."""
         with self._lock:
             self._initialized = False
             self._server = None
+            self._wallet_address = ""
+            self._private_key = ""
