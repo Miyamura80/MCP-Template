@@ -11,8 +11,11 @@ from src.payments.types import PaymentProtocolName
 class PaymentRegistry:
     """Singleton registry of enabled payment protocols.
 
-    Lazy-imports only the protocol modules that are enabled in config
-    to avoid pulling in unused SDK dependencies.
+    Lazy-imports protocol modules only when enabled in config to avoid
+    importing SDK code at module load time. Note: x402 is currently a
+    hard dependency (always installed); the lazy-import pattern avoids
+    import-time side effects and keeps startup fast when the protocol
+    is disabled. Future protocols (MPP, ACP) may use optional deps.
     """
 
     _instance: "PaymentRegistry | None" = None

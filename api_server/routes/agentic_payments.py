@@ -156,6 +156,19 @@ async def verify_payment(
         log.error("Payment verification failed unexpectedly: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    if result.status == PaymentStatus.FAILED:
+        # Infrastructure/SDK error - surface as non-2xx so callers
+        # don't silently swallow server-side problems.
+        log.error(
+            "Payment verification failed: protocol={}, error={}",
+            request.protocol,
+            result.error,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=result.error or "Payment verification failed",
+        )
+
     if result.status == PaymentStatus.COMPLETED:
         log.info(
             "Payment verified: protocol={}, tx={}",
@@ -163,8 +176,10 @@ async def verify_payment(
             result.transaction_id,
         )
     else:
+        # REJECTED is a successful check with a negative outcome - 200 is
+        # correct since the verification itself worked, the payment didn't.
         log.warning(
-            "Payment verification failed: protocol={}, status={}, error={}",
+            "Payment rejected: protocol={}, status={}, error={}",
             request.protocol,
             result.status,
             result.error,

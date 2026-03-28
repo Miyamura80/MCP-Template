@@ -213,6 +213,29 @@ class TestAgenticPaymentsAPI(TestTemplate):
         assert data["status"] == "rejected"
         assert data["error"] == "ERR_INSUFFICIENT_BALANCE"
 
+    def test_verify_failed_payment_returns_502(self):
+        """FAILED status (infrastructure error) -> 502 not 200."""
+        mock_proto = MagicMock()
+        mock_proto.initialize = AsyncMock(return_value=True)
+        mock_proto.verify_payment = AsyncMock(
+            return_value=PaymentResult(
+                status=PaymentStatus.FAILED,
+                protocol=PaymentProtocolName.X402,
+                error="Facilitator timeout",
+            )
+        )
+        self._setup_registry_with_mock(mock_proto)
+
+        resp = self.client.post(
+            "/api/v1/agentic-payments/verify",
+            json={
+                "protocol": "x402",
+                "payload": {},
+                "requirement": {"network": "base-sepolia"},
+            },
+        )
+        assert resp.status_code == 502
+
     def test_verify_exception_returns_500(self):
         """Protocol raises unexpected exception -> 500."""
         mock_proto = MagicMock()
