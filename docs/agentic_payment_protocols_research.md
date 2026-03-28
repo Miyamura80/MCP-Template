@@ -177,7 +177,7 @@ Revives the HTTP 402 "Payment Required" status code for native internet payments
 **Key features:**
 - No accounts, sessions, or authentication needed
 - Designed for microtransactions and pay-per-use APIs
-- Supports Base, Polygon, Solana (all ERC-20 tokens)
+- Supports Base, Polygon (ERC-20 tokens), Solana (SPL tokens)
 - CAIP-2 Network Identifiers for chain identification
 - Machine-to-machine transactions without human intervention
 
@@ -317,7 +317,7 @@ One of the most telling data points comes from ["An AI agent bought from our Woo
 
 | Protocol | Can You Build Today? | Easiest Entry Point | Biggest Blocker |
 |---|---|---|---|
-| **x402** | Yes | `npm install x402` / GitHub | Requires crypto wallets |
+| **x402** | Yes | `npm install x402` (JS) / `uv add x402` (Python) | Requires crypto wallets |
 | **ACP** | Yes | OpenAI developer docs + Stripe | Need OpenAI partnership for ChatGPT distribution |
 | **UCP/AP2** | Yes | `uv pip install` from GitHub | US-only checkout on Google surfaces |
 | **MPP** | Partially | Tempo mainnet just launched | Thin docs, L1 chain dependency |
