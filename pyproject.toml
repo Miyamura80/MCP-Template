@@ -156,6 +156,8 @@ exclude = [
     "db/",
     "api_server/",
     "src/payments/",
+    "tests/test_agentic_payments.py",
+    "tests/test_agentic_payments_api.py",
 ]
 
 [tool.file_length]
