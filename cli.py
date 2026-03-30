@@ -1,6 +1,9 @@
 """Main CLI entry point."""
 
+import contextlib
 import importlib.metadata
+import sys
+import time
 from enum import StrEnum
 from typing import Annotated
 
@@ -111,6 +114,12 @@ def main(
 
         show_first_install_notice()
 
+    # One-time telemetry opt-out notice
+    if not quiet:
+        from src.cli.telemetry import show_first_run_notice
+
+        show_first_run_notice()
+
 
 _builtins_registered = False
 _user_commands_registered = False
@@ -148,6 +157,27 @@ def _register_user_commands() -> None:
     discover_commands(app)
 
 
+_FLAGS_WITH_VALUE = {"--format", "-f"}
+
+
+def _detect_command(argv: list[str]) -> str:
+    """Extract the subcommand name from CLI args (skip global flags)."""
+    skip_next = False
+    for arg in argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if "=" in arg and arg.split("=", 1)[0] in _FLAGS_WITH_VALUE:
+            continue
+        if arg in _FLAGS_WITH_VALUE:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        return arg
+    return "<root>"
+
+
 def main_cli() -> None:
     """Entry point called by the console script."""
     _register_builtin_commands()
@@ -161,4 +191,21 @@ def main_cli() -> None:
         f"[dim]v{version}[/dim] - a batteries-included Python CLI."
     )
 
-    app()
+    command = _detect_command(sys.argv)
+    start = time.monotonic()
+    success = True
+    try:
+        app()
+    except SystemExit as exc:
+        success = exc.code in (None, 0)
+        raise
+    except Exception:
+        success = False
+        raise
+    finally:
+        duration = time.monotonic() - start
+        from src.cli.telemetry import record_event
+
+        # Best-effort: never let telemetry mask the original error.
+        with contextlib.suppress(Exception):
+            record_event(command=command, duration=duration, success=success)
