@@ -47,8 +47,8 @@ span.end()
 ```
 
 **Key changes from v3:**
-1. `.generation()` and `.span()` removed — use `start_observation(as_type=...)`.
-2. `.end(**kwargs)` no longer accepts output/model/level — split into `.update()` + `.end()`.
+1. `.generation()` and `.span()` removed - use `start_observation(as_type=...)`.
+2. `.end(**kwargs)` no longer accepts output/model/level - split into `.update()` + `.end()`.
 3. Use `TraceContext` dict with `trace_id` and optional `parent_span_id` instead of positional args.
 4. New observation types available: `LangfuseTool`, `LangfuseAgent`, etc.
 
