@@ -52,6 +52,21 @@ class TestTelemetryNotice(TestTemplate):
             show_first_run_notice()
             mock_save.assert_not_called()
 
+    def test_notice_not_shown_when_disabled(self, tmp_path):
+        with (
+            patch("src.cli.telemetry._CONFIG_DIR", tmp_path),
+            patch("src.cli.telemetry.load_state", return_value={}),
+            patch("src.cli.telemetry.save_state") as mock_save,
+            patch("src.cli.telemetry.is_enabled", return_value=False),
+        ):
+            from src.cli.telemetry import show_first_run_notice
+
+            show_first_run_notice()
+            # State is still marked as shown so we don't re-check every run
+            mock_save.assert_called_once()
+            saved = mock_save.call_args[0][0]
+            assert saved["telemetry_notice_shown"] is True
+
 
 class TestRecordEvent(TestTemplate):
     """Events are recorded locally when telemetry is enabled."""
@@ -147,6 +162,17 @@ class TestPostEvent(TestTemplate):
             _post_event({"command": "test"})
 
     def test_post_failure_does_not_raise(self):
+        import threading
+
+        threads_started = []
+        _real_thread_cls = threading.Thread
+
+        class _SyncThread(_real_thread_cls):
+            def start(self):
+                super().start()
+                self.join(timeout=1)
+                threads_started.append(self)
+
         with (
             patch(
                 "src.cli.telemetry._get_endpoint",
@@ -156,11 +182,13 @@ class TestPostEvent(TestTemplate):
                 "urllib.request.urlopen",
                 side_effect=ConnectionRefusedError("refused"),
             ),
+            patch("threading.Thread", _SyncThread),
         ):
             from src.cli.telemetry import _post_event
 
-            # Best-effort: should not raise
+            # Best-effort: should not raise even when urlopen fails
             _post_event({"command": "test"})
+            assert len(threads_started) == 1
 
 
 class TestDetectCommand(TestTemplate):

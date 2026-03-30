@@ -39,10 +39,11 @@ def show_first_run_notice() -> None:
     state = load_state()
     if state.get("telemetry_notice_shown"):
         return
-    console.print(
-        "[dim]Anonymous usage telemetry is enabled. "
-        "Run 'mycli telemetry disable' or set CLI_TELEMETRY_DISABLED=1 to opt out.[/dim]"
-    )
+    if is_enabled():
+        console.print(
+            "[dim]Anonymous usage telemetry is enabled. "
+            "Run 'mycli telemetry disable' or set CLI_TELEMETRY_DISABLED=1 to opt out.[/dim]"
+        )
     state["telemetry_notice_shown"] = True
     save_state(state)
 

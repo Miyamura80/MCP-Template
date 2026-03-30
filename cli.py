@@ -205,4 +205,5 @@ def main_cli() -> None:
         duration = time.monotonic() - start
         from src.cli.telemetry import record_event
 
+        # record_event is a no-op when telemetry is disabled, so this is always safe.
         record_event(command=command, duration=duration, success=success)
