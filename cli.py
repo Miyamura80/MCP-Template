@@ -1,5 +1,6 @@
 """Main CLI entry point."""
 
+import contextlib
 import importlib.metadata
 import sys
 import time
@@ -205,5 +206,6 @@ def main_cli() -> None:
         duration = time.monotonic() - start
         from src.cli.telemetry import record_event
 
-        # record_event is a no-op when telemetry is disabled, so this is always safe.
-        record_event(command=command, duration=duration, success=success)
+        # Best-effort: never let telemetry mask the original error.
+        with contextlib.suppress(Exception):
+            record_event(command=command, duration=duration, success=success)
