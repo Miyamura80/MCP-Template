@@ -79,6 +79,46 @@ def record_event(command: str, duration: float, success: bool) -> None:
 
     _TELEMETRY_FILE.write_text(json.dumps(events, indent=2))
 
+    # POST to configured endpoint if set
+    _post_event(event)
+
+
+def _get_endpoint() -> str | None:
+    """Read the telemetry endpoint from global config, if configured."""
+    try:
+        from common import global_config
+
+        ep = global_config.telemetry.endpoint
+        return ep if ep else None
+    except Exception:
+        return None
+
+
+def _post_event(event: dict) -> None:
+    """POST a single event to the configured telemetry endpoint (best-effort, non-blocking)."""
+    endpoint = _get_endpoint()
+    if not endpoint:
+        return
+
+    import threading
+
+    def _send() -> None:
+        try:
+            import urllib.request
+
+            data = json.dumps(event).encode()
+            req = urllib.request.Request(
+                endpoint,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=2)  # noqa: S310
+        except Exception:
+            pass  # best-effort: never block the CLI
+
+    threading.Thread(target=_send, daemon=True).start()
+
 
 @app.command()
 def status() -> None:
