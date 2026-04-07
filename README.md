@@ -47,6 +47,14 @@ bash install-skills.sh && rm install-skills.sh
   <img src="media/cli_demo.gif" alt="CLI Demo" width="600">
 </p>
 
+## App Distribution
+
+- MCP server with OAuth
+- Claude and ChatGPT connectors
+- APIs and SDKs
+- Chat interfaces like iMessage and WhatsApp
+- A dashboard that uses the same MCP layer
+- Open source
 
 ## Key Features
 
