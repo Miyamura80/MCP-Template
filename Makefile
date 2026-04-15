@@ -269,6 +269,10 @@ file_len_check: check_uv ## Check Python files don't exceed max line count
 ci: ruff vulture import_lint ty docs_lint lint_links check_deps file_len_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, lint_links, file_len_check)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
+.PHONY: sync-agent-config
+sync-agent-config: check_uv ## Sync Claude <-> Codex skills & subagents (regenerates symlinks and .codex/agents/*.toml)
+	@uv run scripts/sync_agent_config.py
+
 ########################################################
 # Database
 ########################################################

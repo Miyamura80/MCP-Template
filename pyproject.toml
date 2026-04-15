@@ -100,6 +100,9 @@ max-complexity = 10
 
 [tool.ty]
 
+[tool.ty.src]
+exclude = ["scripts/sync_agent_config.py"]
+
 [tool.ty.rules]
 possibly-unresolved-reference = "error"
 
