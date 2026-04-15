@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.12"
 # dependencies = ["pyyaml>=6.0", "tomli_w>=1.0"]
 # ///
 """Sync Claude <-> Codex skills and subagents.
@@ -50,7 +50,12 @@ def parse_md(path: Path) -> tuple[dict, str]:
     m = FRONTMATTER_RE.match(text)
     if not m:
         raise SystemExit(f"{path}: missing YAML frontmatter")
-    meta = yaml.safe_load(m.group(1)) or {}
+    try:
+        meta = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError as e:
+        raise SystemExit(f"{path}: invalid YAML frontmatter: {e}") from e
+    if not isinstance(meta, dict):
+        raise SystemExit(f"{path}: YAML frontmatter must be a mapping, got {type(meta).__name__}")
     return meta, m.group(2).lstrip("\r\n")
 
 
@@ -168,12 +173,25 @@ def sync_skill_symlinks() -> list[str]:
 
     # If .agents/skills/ was missing entirely (sparse checkout, manual rm) and we
     # just created it empty, refuse to prune - otherwise we'd silently delete every
-    # Claude symlink. User-created symlinks elsewhere are unaffected either way.
+    # Claude symlink we manage. User-maintained symlinks pointing elsewhere are
+    # left alone regardless (see managed-target check below).
     if not shared_existed and not wanted:
         return changes
 
+    shared_resolved = SHARED_SKILLS.resolve()
     for link in CLAUDE_SKILLS.iterdir():
-        if link.is_symlink() and link.name not in wanted:
+        if not link.is_symlink() or link.name in wanted:
+            continue
+        raw_target = os.readlink(link)
+        expected_rel = os.path.normpath(str(Path("..") / ".." / ".agents" / "skills" / link.name))
+        managed = os.path.normpath(raw_target) == expected_rel
+        if not managed:
+            try:
+                resolved = (link.parent / raw_target).resolve(strict=False)
+                managed = resolved.parent == shared_resolved
+            except OSError:
+                managed = False
+        if managed:
             link.unlink()
             changes.append(f"pruned dangling {link.relative_to(REPO)}")
     return changes
