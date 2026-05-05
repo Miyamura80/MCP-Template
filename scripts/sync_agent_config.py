@@ -235,6 +235,7 @@ def sync_skill_symlinks() -> list[str]:
 def sync_rule_symlinks() -> list[str]:
     """Create symlinks from .agents/rules/<name>.md -> ../../.claude/rules/<name>.md."""
     changes: list[str] = []
+    rules_existed = CLAUDE_RULES.exists()
     SHARED_RULES.mkdir(parents=True, exist_ok=True)
     CLAUDE_RULES.mkdir(parents=True, exist_ok=True)
 
@@ -257,6 +258,9 @@ def sync_rule_symlinks() -> list[str]:
             )
         link.symlink_to(target)
         changes.append(f"symlinked {link.relative_to(REPO)}")
+
+    if not rules_existed and not wanted:
+        return changes
 
     for link in SHARED_RULES.iterdir():
         if link.is_symlink() and link.name not in wanted:

@@ -5,7 +5,7 @@ description: Guide for creating a new path-scoped .claude/rules/ file with prope
 
 # Creating a new path-scoped rule
 
-Rules keep CLAUDE.md lean by scoping guidance to specific file paths. A rule only loads when the agent touches files matching its `globs:` pattern.
+Rules keep CLAUDE.md lean by scoping guidance to specific file paths. A rule applies when the agent touches files matching its `globs:` pattern.
 
 ## When to create a rule
 
