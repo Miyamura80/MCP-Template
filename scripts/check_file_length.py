@@ -44,7 +44,9 @@ def main() -> int:
         if rel.as_posix() in exclude:
             continue
         try:
-            line_count = len(path.read_text(encoding="utf-8", errors="ignore").splitlines())
+            line_count = len(
+                path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            )
         except OSError as e:
             print(f"  Warning: could not read {rel}: {e}")
             continue
@@ -52,7 +54,9 @@ def main() -> int:
             violations.append((rel, line_count))
 
     if violations:
-        print(f"File length check failed: {len(violations)} file(s) exceed {max_lines} lines")
+        print(
+            f"File length check failed: {len(violations)} file(s) exceed {max_lines} lines"
+        )
         for rel_path, count in sorted(violations):
             print(f"  {rel_path}: {count} lines")
         print(

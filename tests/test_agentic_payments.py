@@ -236,9 +236,7 @@ class TestX402VerifyPayment(TestTemplate):
             with (
                 patch("x402.http.HTTPFacilitatorClient") as mock_fc_cls,
                 patch.object(proto, "_to_sdk_payload", return_value=MagicMock()),
-                patch.object(
-                    proto, "_to_sdk_requirements", return_value=MagicMock()
-                ),
+                patch.object(proto, "_to_sdk_requirements", return_value=MagicMock()),
             ):
                 instance = MagicMock()
                 if mock_verify_side_effect:
@@ -314,8 +312,6 @@ class TestX402VerifyPayment(TestTemplate):
     def test_verify_when_not_initialized_returns_failed(self):
         """Calling verify_payment on uninitialized protocol -> FAILED."""
         proto = X402Protocol(X402ProtocolConfig())
-        result = asyncio.run(
-            proto.verify_payment(self._payload(), self._requirement())
-        )
+        result = asyncio.run(proto.verify_payment(self._payload(), self._requirement()))
         assert result.status == PaymentStatus.FAILED
         assert "not initialized" in result.error

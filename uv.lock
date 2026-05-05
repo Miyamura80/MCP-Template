@@ -7,6 +7,10 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[options]
+exclude-newer = "2026-04-28T15:59:25.120612Z"
+exclude-newer-span = "P7D"
+
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
