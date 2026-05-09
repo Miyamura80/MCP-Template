@@ -53,13 +53,12 @@ Both use URIs but differ:
 
 Resources answer "what can I read?"; Roots answer "where am I scoped to?".
 
-## 4b. "MCP Apps" (the extension, not the noun)
+## 4b. MCP Apps
 
-The [ext-apps](https://github.com/modelcontextprotocol/ext-apps) extension —
-Tools that return embeddable interactive UIs instead of plain text.
-*Not* a synonym for "MCP application". Claude Desktop is a **Host**, your
-backend is a **Server**; neither is an "App". See also the
-[OpenAI Apps SDK](https://developers.openai.com/apps-sdk/concepts/mcp-server).
+The [ext-apps](https://github.com/modelcontextprotocol/ext-apps) extension:
+Tools returning embeddable UIs. *Not* a synonym for "MCP application" —
+Claude Desktop is a Host, your backend is a Server, neither is an "App".
+([OpenAI Apps SDK](https://developers.openai.com/apps-sdk/concepts/mcp-server))
 
 ## 5. Transports
 
