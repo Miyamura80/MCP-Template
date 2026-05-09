@@ -55,21 +55,11 @@ Resources answer "what can I read?"; Roots answer "where am I scoped to?".
 
 ## 4b. "MCP Apps" (the extension, not the noun)
 
-**MCP Apps** is a specific protocol extension
-([modelcontextprotocol/ext-apps](https://github.com/modelcontextprotocol/ext-apps))
-for **interactive UIs embedded inside AI chatbots, served by MCP servers** —
-i.e., a Tool can return a rendered widget instead of plain text. It is *not*
-a synonym for "an MCP application" or "an MCP-enabled product".
-
-- ✅ "We added an MCP App so the calendar tool returns a clickable timeline."
-- ❌ "Claude Desktop is an MCP App." (It's a **Host**.)
-- ❌ "Our backend is an MCP App." (It's a **Server**.)
-
-When referring to the generic concept, say "MCP application", "MCP-enabled
-app", "Host", or "Server" — never bare "App".
-
-See [OpenAI Apps SDK MCP server docs](https://developers.openai.com/apps-sdk/concepts/mcp-server)
-for the most fleshed-out implementation.
+The [ext-apps](https://github.com/modelcontextprotocol/ext-apps) extension —
+Tools that return embeddable interactive UIs instead of plain text.
+*Not* a synonym for "MCP application". Claude Desktop is a **Host**, your
+backend is a **Server**; neither is an "App". See also the
+[OpenAI Apps SDK](https://developers.openai.com/apps-sdk/concepts/mcp-server).
 
 ## 5. Transports
 
