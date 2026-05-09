@@ -34,12 +34,14 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
         log.warning("Failed to delete orphaned Stripe customer {}", orphaned_id)
 
 
-_ACTIVE_PLUS_STATUSES = frozenset({
-    SubscriptionStatus.ACTIVE.value,
-    SubscriptionStatus.CANCELING.value,
-    SubscriptionStatus.PAST_DUE.value,
-    SubscriptionStatus.INCOMPLETE.value,
-})
+_ACTIVE_PLUS_STATUSES = frozenset(
+    {
+        SubscriptionStatus.ACTIVE.value,
+        SubscriptionStatus.CANCELING.value,
+        SubscriptionStatus.PAST_DUE.value,
+        SubscriptionStatus.INCOMPLETE.value,
+    }
+)
 
 
 def _recover_concurrent_customer(
@@ -57,7 +59,9 @@ def _recover_concurrent_customer(
         and sub.subscription_status in _ACTIVE_PLUS_STATUSES
     ):
         if sub.stripe_customer_id and orphaned_customer_id != sub.stripe_customer_id:
-            _delete_orphaned_customer(orphaned_customer_id, user.user_id, sub.stripe_customer_id)
+            _delete_orphaned_customer(
+                orphaned_customer_id, user.user_id, sub.stripe_customer_id
+            )
         raise HTTPException(
             status_code=409,
             detail="Active Plus subscription already exists",
@@ -126,8 +130,11 @@ def _ensure_stripe_customer(
         if sub and sub.stripe_customer_id:
             # Another thread won the race -- clean up our orphan
             if customer_id != sub.stripe_customer_id:
-                _delete_orphaned_customer(customer_id, user.user_id, sub.stripe_customer_id)
+                _delete_orphaned_customer(
+                    customer_id, user.user_id, sub.stripe_customer_id
+                )
             return sub.stripe_customer_id, sub
+        assert sub is not None
         sub.stripe_customer_id = customer_id
     else:
         sub = UserSubscription(
@@ -139,9 +146,7 @@ def _ensure_stripe_customer(
         session.commit()
     except IntegrityError:
         session.rollback()
-        customer_id, sub = _recover_concurrent_customer(
-            session, user, customer_id
-        )
+        customer_id, sub = _recover_concurrent_customer(session, user, customer_id)
     except SQLAlchemyError:
         session.rollback()
         log.error(

@@ -5,10 +5,11 @@ import random
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger as log
-from sqlalchemy import delete
+from sqlalchemy import CursorResult, delete
 from sqlalchemy.exc import IntegrityError
 
 from api_server.billing.stripe_config import (
@@ -167,10 +168,13 @@ def _cleanup_old_events() -> None:
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
         with use_db_session() as session:
-            result = session.execute(
-                delete(ProcessedStripeEvent).where(
-                    ProcessedStripeEvent.processed_at < cutoff,
-                )
+            result = cast(
+                CursorResult,
+                session.execute(
+                    delete(ProcessedStripeEvent).where(
+                        ProcessedStripeEvent.processed_at < cutoff,
+                    )
+                ),
             )
             session.commit()
             if result.rowcount:

@@ -2,10 +2,11 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from fastapi import HTTPException
 from loguru import logger as log
-from sqlalchemy import update
+from sqlalchemy import CursorResult, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -153,17 +154,20 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     },
                     headers={"Retry-After": str(retry_after)},
                 )
-            result = session.execute(
-                update(UserSubscription)
-                .where(
-                    UserSubscription.user_id == user_id,
-                    UserSubscription.daily_quota_reset_at < day_start,
-                )
-                .values(
-                    current_period_usage=1,
-                    daily_quota_reset_at=day_start,
-                    updated_at=now,
-                )
+            result = cast(
+                CursorResult,
+                session.execute(
+                    update(UserSubscription)
+                    .where(
+                        UserSubscription.user_id == user_id,
+                        UserSubscription.daily_quota_reset_at < day_start,
+                    )
+                    .values(
+                        current_period_usage=1,
+                        daily_quota_reset_at=day_start,
+                        updated_at=now,
+                    )
+                ),
             )
             session.commit()
             if result.rowcount > 0:
@@ -190,16 +194,19 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
         # Atomic increment: only succeeds if usage is still under the limit.
         # Both the happy path (day-reset winner) and the fall-through
         # (day-reset loser) converge here with a fresh `sub` object.
-        result = session.execute(
-            update(UserSubscription)
-            .where(
-                UserSubscription.user_id == user_id,
-                UserSubscription.current_period_usage < daily_limit,
-            )
-            .values(
-                current_period_usage=UserSubscription.current_period_usage + 1,
-                updated_at=datetime.now(UTC),
-            )
+        result = cast(
+            CursorResult,
+            session.execute(
+                update(UserSubscription)
+                .where(
+                    UserSubscription.user_id == user_id,
+                    UserSubscription.current_period_usage < daily_limit,
+                )
+                .values(
+                    current_period_usage=UserSubscription.current_period_usage + 1,
+                    updated_at=datetime.now(UTC),
+                )
+            ),
         )
         session.commit()
 
