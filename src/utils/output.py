@@ -56,7 +56,7 @@ def _render_table(data: Any, title: str = "") -> None:
         console.print(table)
     elif isinstance(data, list) and data and isinstance(data[0], dict):
         table = Table(title=title or None)
-        columns = list(data[0].keys())
+        columns = [str(k) for k in data[0]]
         for col in columns:
             table.add_column(col, style="primary")
         for row in data:

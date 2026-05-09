@@ -62,6 +62,7 @@ dependencies = [
     "limits>=5.8.0",
     "redis>=5.0.0",
     "x402[fastapi,httpx]>=2.5.0",
+    "starlette>=0.40.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
@@ -114,6 +115,7 @@ python-version = "3.12"
 
 [tool.deptry]
 ignore = ["DEP002"]
+extend_exclude = ["scripts/sync_agent_config.py"]
 
 [tool.vulture]
 exclude = [

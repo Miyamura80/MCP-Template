@@ -506,7 +506,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if hit_window is not None and hit_item is not None:
             _, rst = window_stats.get(hit_window, (0, time.time() + 60))
             return self._build_429(
-                request, hit_window, hit_item, identity, limits_cfg, precomputed_reset=rst
+                request,
+                hit_window,
+                hit_item,
+                identity,
+                limits_cfg,
+                precomputed_reset=rst,
             )
 
         # Use stats collected during _check_and_hit to find the most

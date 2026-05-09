@@ -166,7 +166,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 )
             )
             session.commit()
-            if result.rowcount > 0:
+            if result.rowcount > 0:  # type: ignore[unresolved-attribute]
                 return LimitStatus(
                     allowed=True,
                     current_usage=1,
@@ -203,7 +203,7 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
         )
         session.commit()
 
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # type: ignore[unresolved-attribute]
             session.refresh(sub)
             reset_ts = sub.daily_quota_reset_at or datetime.now(UTC)
             if reset_ts.tzinfo is None:
