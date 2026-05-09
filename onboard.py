@@ -319,26 +319,10 @@ def branding() -> None:
 
 
 _RENAME_EXTENSIONS = {
-    ".py",
-    ".toml",
-    ".md",
-    ".mdx",
-    ".yml",
-    ".yaml",
-    ".json",
-    ".tsx",
-    ".ts",
-    ".sh",
-    ".txt",
+    ".py", ".toml", ".md", ".mdx", ".yml", ".yaml",
+    ".json", ".tsx", ".ts", ".sh", ".txt",
 }
-_RENAME_SKIP_DIRS = {
-    ".venv",
-    ".venv-test",
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".uv_cache",
-}
+_RENAME_SKIP_DIRS = {".venv", ".venv-test", ".git", "node_modules", "__pycache__", ".uv_cache"}
 _RENAME_SKIP_FILES = {"uv.lock", "onboard.py", "install-skills.sh"}
 
 
@@ -403,12 +387,10 @@ def _build_rename_replacements(
     for old_repo in _TEMPLATE_REPO_NAMES:
         pairs.append((f"{_TEMPLATE_OWNER}/{old_repo}", f"{github_owner}/{github_repo}"))
         # URL-encoded form (used in badge URLs)
-        pairs.append(
-            (
-                f"{_TEMPLATE_OWNER}%2F{old_repo}",
-                f"{github_owner}%2F{github_repo}",
-            )
-        )
+        pairs.append((
+            f"{_TEMPLATE_OWNER}%2F{old_repo}",
+            f"{github_owner}%2F{github_repo}",
+        ))
 
     # Standalone owner references (CODEOWNERS, author)
     pairs.append((f"@{_TEMPLATE_OWNER}", f"@{github_owner}"))
@@ -472,9 +454,7 @@ def rename() -> None:
         raise typer.Abort()
 
     github_owner, github_repo = _prompt_github_info()
-    replacements = _build_rename_replacements(
-        name, description, github_owner, github_repo
-    )
+    replacements = _build_rename_replacements(name, description, github_owner, github_repo)
     changed_files = _replace_in_files(replacements)
 
     changes = [f"  [green]{f}[/green]" for f in changed_files]
@@ -488,11 +468,7 @@ def rename() -> None:
     summary_lines.append(f"Updated [bold]{len(changed_files)}[/bold] file(s):")
     summary_lines.extend(changes)
 
-    rprint(
-        Panel(
-            "\n".join(summary_lines), title="✅ Rename Complete", border_style="green"
-        )
-    )
+    rprint(Panel("\n".join(summary_lines), title="✅ Rename Complete", border_style="green"))
 
 
 def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
@@ -576,11 +552,7 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
     regex_replacements: list[tuple[Path, str, str]] = [
         (PROJECT_ROOT / "README.md", rf"\b{re.escape(old_name)}\b", new_name),
         (PROJECT_ROOT / "release.md", rf"\b{re.escape(old_name)}\b", new_name),
-        (
-            PROJECT_ROOT / ".claude" / "skills" / "usage" / "SKILL.md",
-            rf"\b{re.escape(old_name)}\b",
-            new_name,
-        ),
+        (PROJECT_ROOT / ".claude" / "skills" / "usage" / "SKILL.md", rf"\b{re.escape(old_name)}\b", new_name),
     ]
 
     changes: list[str] = []
