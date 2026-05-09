@@ -5,11 +5,10 @@ import random
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger as log
-from sqlalchemy import CursorResult, delete
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
 from api_server.billing.stripe_config import (
@@ -168,17 +167,17 @@ def _cleanup_old_events() -> None:
     try:
         cutoff = datetime.now(UTC) - _EVENT_RETENTION
         with use_db_session() as session:
-            result = cast(
-                CursorResult,
-                session.execute(
-                    delete(ProcessedStripeEvent).where(
-                        ProcessedStripeEvent.processed_at < cutoff,
-                    )
-                ),
+            result = session.execute(
+                delete(ProcessedStripeEvent).where(
+                    ProcessedStripeEvent.processed_at < cutoff,
+                )
             )
             session.commit()
-            if result.rowcount:
-                log.info("Cleaned up {} old processed stripe events", result.rowcount)
+            if result.rowcount:  # type: ignore[unresolved-attribute]
+                log.info(
+                    "Cleaned up {} old processed stripe events",
+                    result.rowcount,  # type: ignore[unresolved-attribute]
+                )
     except Exception:
         with _cleanup_lock:
             if _last_cleanup == new_cleanup:
