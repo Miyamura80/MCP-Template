@@ -134,7 +134,20 @@ def _ensure_stripe_customer(
                     customer_id, user.user_id, sub.stripe_customer_id
                 )
             return sub.stripe_customer_id, sub
-        assert sub is not None
+        if sub is None:
+            # Row vanished between the unlocked check and with_for_update --
+            # extremely rare. Log the orphan for manual cleanup and surface
+            # a transient error so the client can retry.
+            log.error(
+                "Subscription row for user {} disappeared during checkout; "
+                "Stripe customer {} is orphaned",
+                user.user_id,
+                customer_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Database error during checkout",
+            )
         sub.stripe_customer_id = customer_id
     else:
         sub = UserSubscription(
