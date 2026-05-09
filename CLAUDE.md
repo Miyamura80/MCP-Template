@@ -8,6 +8,8 @@ Super-opinionated Python stack for fast development. Python >= 3.12 required. Us
 
 **Before any other work in this repo, enable prek:** `uv tool install prek && prek install`. Hooks are defined in `prek.toml`.
 
+**MCP terminology:** For nuances around frequently-confused MCP terms (Host vs. Client vs. Server, Tools vs. Resources vs. Prompts, Roots vs. Resources, transports, OAuth pitfalls, etc.), see [`COMMON_TERMS.md`](./COMMON_TERMS.md). Consult it before naming or designing new MCP-related code.
+
 ## Common Commands
 
 ```bash
