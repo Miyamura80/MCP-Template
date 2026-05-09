@@ -12,7 +12,7 @@ Super-opinionated Python stack for fast development. Python >= 3.12 required. Us
 
 **MCP Apps:** an MCP extension for interactive iframe-sandboxed UIs (HTML resources via `ui://` URIs) embedded in chat clients, with bidirectional `postMessage` / JSON-RPC communication. See [ext-apps](https://github.com/modelcontextprotocol/ext-apps). *Not* a generic word for "MCP application".
 
-**MCP is an actively-evolving spec.** Revisions land roughly every 1-3 months and behaviors change (transports, auth, primitives). Don't rely on training-data assumptions for anything MCP-related — always verify against the [current spec](https://modelcontextprotocol.io/specification/2025-11-25), [changelog](https://modelcontextprotocol.io/specification/2025-11-25/changelog), or a fresh web search before writing or reviewing MCP code.
+**MCP is an actively-evolving spec.** Behaviors change frequently (transports, auth, primitives). Don't rely on training-data assumptions for anything MCP-related — always verify against the current spec via a fresh web search before writing or reviewing MCP code.
 
 ## Common Commands
 
