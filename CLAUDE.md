@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Super-opinionated Python template that ships **one codebase, three interfaces** (CLI, MCP server, HTTP API) over a shared service registry. Python >= 3.12 required. Uses `uv` for dependency management (not pip).
 
-The headline idea: write business logic once as a pure function in `services/`, register it with `@service`, and it shows up as a Typer CLI subcommand, an MCP tool, and (where wired) a FastAPI route — with the same Pydantic input/output contract everywhere.
-
 **Before any other work in this repo, enable prek:** `uv tool install prek && prek install`. Hooks are defined in `prek.toml`.
 
 **MCP terminology:** For nuances around frequently-confused MCP terms (Host vs. Client vs. Server, Tools vs. Resources vs. Prompts, Roots vs. Resources, transports, OAuth pitfalls, etc.), see [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md). Consult it before naming or designing new MCP-related code.
@@ -61,38 +59,32 @@ Layering (top calls down, never the reverse):
 
 ### Top-level layout
 
-- **`cli.py`** + **`commands/`** — Typer CLI entrypoint (`mycli`). `cli.py:181 main_cli` is the console script; `commands/__init__.py` auto-discovers subcommands from `commands/*.py` (config, doctor, greet, secrets) and registers them on the Typer app.
-- **`mcp_server/`** — FastMCP server exposed as the `mycli-mcp` console script. `mcp_server/server.py:9` creates `FastMCP("mycli")`; `_register_tools` (line 12) imports every `services/*.py` module to populate the registry, then `_make_tool` (line 23) wraps each `ServiceEntry` as an MCP tool by synthesizing a signature from its Pydantic input model. Transport is **stdio only**. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before naming/designing MCP code.
-- **`api_server/`** — FastAPI HTTP server with `auth/`, `billing/`, `middleware/`, `routes/`. Independent of the MCP server.
-- **`services/`** — **The core abstraction.** Pure functions decorated with `@service(name=, description=, input_model=, output_model=)` (see `services/__init__.py:20`). They take a Pydantic input model and return a Pydantic output model — no logging, no transport concerns. Currently: `config_svc.py`, `doctor_svc.py`, `greet.py`.
-- **`models/`** — Pydantic input/output schemas referenced by services (`auth.py`, `config.py`, `doctor.py`, `greet.py`).
+- **`cli.py`** + **`commands/`** — Typer CLI (`mycli`); `commands/__init__.py` auto-discovers `commands/*.py` and registers them.
+- **`mcp_server/`** — FastMCP server (`mycli-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
+- **`api_server/`** — FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`).
+- **`services/`** — `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).
+- **`models/`** — Pydantic input/output schemas referenced by services.
 - **`common/`** — Global configuration via pydantic-settings.
-  - `global_config.yaml` — base config (LLM defaults, logging, features, server)
-  - `<name>.yaml` — optional split configs, loaded as root key `<name>` (e.g. `payments.yaml`, `subscription_config.yaml`)
+  - `global_config.yaml` — base; `<name>.yaml` — split configs loaded as root key `<name>`
   - `production_config.yaml` — overlay loaded with high priority when `DEV_ENV=prod`
-  - `global_config.py:39` — custom `YamlSettingsSource` that merges YAMLs + `.env`
-  - `config_models.py` — typed `BaseSettings` model classes
-  - Access via `from common import global_config`
-- **`db/`** — SQLAlchemy `base.py` + `engine.py`, ORM `models/`, Alembic `migrations/`. Driven by `alembic.ini` at repo root.
-- **`src/`** — CLI plumbing (`src/cli/state.py` — Verbosity/OutputFormat contextvars; `src/cli/telemetry.py`, `src/cli/security.py`, `src/cli/scaffold.py`, `src/cli/update.py`, `src/cli/completions.py`) and `src/utils/` (logging_config, theme, errors, interactive, progress, output).
-- **`utils/llm/`** — `dspy_inference.py` wraps DSPY + LiteLLM with a fallback model and Tenacity retries; `dspy_langfuse.py` adds LangFuse observability.
-- **`tests/`** — pytest. Subclass `TestTemplate` (`tests/test_template.py:14`) which deep-copies `global_config` per test, marks `test=True`, and exposes config keys as `self.*`. Markers (`slow_test`, `nondeterministic_test`, `e2e_test`) are registered in `tests/conftest.py`.
-- **`init/`** — one-time brand-asset generators (banner, logo) used by `make banner` / `make logo`.
-- **`onboard.py`** + **`make onboard`** — interactive Typer wizard that renames the project (kebab-case → `pyproject.toml [project].name`, `[project.scripts]`, config), wires `.env`, runs `uv sync`, installs `prek`, and generates media.
-- **`docs/`** — Next.js + Fumadocs site. English source in `docs/content/en/`; `docs/content/{es,ja,zh}/` is generated by the **Jules Translation Sync** workflow — never edit translations by hand. See `docs/translation-guide.md`.
-- **`.claude/`**, **`.agents/`**, **`.codex/`** — Claude Code and Codex agent/skill definitions kept in sync by `scripts/sync_agent_config.py` (run via `make sync-agent-config`, also enforced by a pre-commit hook).
-- **`.github/workflows/`** — CI (tests, ruff/ty/vulture, folder-size, large-files, codeql), release on tag, Jules translation sync, branch cleanup.
+- **`db/`** — SQLAlchemy `base.py` + `engine.py`, ORM `models/`, Alembic `migrations/`.
+- **`src/`** — CLI plumbing (`src/cli/`) + shared utils (logging, theme, errors, output).
+- **`utils/llm/`** — DSPY + LiteLLM wrapper with fallback model, Tenacity retries, LangFuse observability.
+- **`tests/`** — pytest; subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
+- **`init/`** — one-time brand-asset generators (`make banner` / `make logo`).
+- **`onboard.py`** — wizard backing `make onboard` (see Common Commands).
+- **`docs/`** — Next.js + Fumadocs site; English source in `docs/content/en/` (translations auto-generated, see Jules section below).
+- **`.claude/`**, **`.agents/`**, **`.codex/`** — Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
+- **`.github/workflows/`** — CI, release-on-tag, translation sync.
 
-### Adding a new feature (the canonical flow)
+### Adding a new feature
 
-1. Define input/output Pydantic models in `models/<feature>.py`.
-2. Write a pure function in `services/<feature>_svc.py` decorated with `@service(...)`.
-3. (CLI) Add a Typer command in `commands/<feature>.py` that calls the service.
-4. (MCP) Nothing to do — `mcp_server/server.py` auto-registers it as a tool on import.
-5. (HTTP, optional) Add a route in `api_server/routes/` that calls the service.
-6. Add tests under `tests/` inheriting `TestTemplate`.
-
-Keep services free of logging, I/O, and transport concerns. Anything that needs side effects belongs in the caller.
+1. Pydantic models in `models/<feature>.py`.
+2. Pure `@service` function in `services/<feature>_svc.py`.
+3. (CLI) Typer command in `commands/<feature>.py` calling the service.
+4. (MCP) Nothing — `mcp_server/server.py` auto-registers on import.
+5. (HTTP, optional) Route in `api_server/routes/`.
+6. Tests inheriting `TestTemplate`.
 
 ## Code Style
 
