@@ -79,6 +79,33 @@ Opinionated Python CLI template for fast development. The `saas` branch extends 
 
 [Full comparison](manual_docs/branch_comparison.md)
 
+## Architecture
+
+One codebase, three interfaces. Write business logic once in `services/` and it ships as a CLI subcommand, an MCP tool, and an HTTP route — same Pydantic input/output contract everywhere.
+
+```
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  cli.py      │  │ mcp_server/  │  │ api_server/  │   transport / interface
+│  (Typer)     │  │ (FastMCP)    │  │ (FastAPI)    │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         ▼
+                 ┌───────────────┐
+                 │  services/    │   pure @service functions
+                 │  @service     │   (transport-agnostic)
+                 └───────┬───────┘
+                         ▼
+                 ┌───────────────┐
+                 │  models/      │   Pydantic I/O contracts
+                 └───────┬───────┘
+                         ▼
+        ┌────────────┬───────┬────────────┬─────────────┐
+        │ common/    │ db/   │ utils/llm/ │ src/utils/  │   shared infra
+        │ (config)   │ (ORM) │ (DSPY)     │ (logs/theme)│
+        └────────────┴───────┴────────────┴─────────────┘
+```
+
 ## Quick Start
 
 ```bash
