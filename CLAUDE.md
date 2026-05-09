@@ -10,6 +10,8 @@ Super-opinionated Python stack for fast development. Python >= 3.12 required. Us
 
 **MCP terminology:** For nuances around frequently-confused MCP terms (Host vs. Client vs. Server, Tools vs. Resources vs. Prompts, Roots vs. Resources, transports, OAuth pitfalls, etc.), see [`COMMON_TERMS.md`](./COMMON_TERMS.md). Consult it before naming or designing new MCP-related code.
 
+**MCP Apps:** "MCP Apps" is *not* a synonym for "an MCP application" — it's the specific extension to the core spec for embeddable interactive UIs served by MCP servers. If you're building UI surfaces, see the [MCP Apps spec & SDK repo](https://github.com/modelcontextprotocol/ext-apps) and [OpenAI Apps SDK MCP server docs](https://developers.openai.com/apps-sdk/concepts/mcp-server). Don't reuse the name "App" for plain Tools or Resources.
+
 ## Common Commands
 
 ```bash

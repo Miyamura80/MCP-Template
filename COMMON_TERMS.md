@@ -53,6 +53,24 @@ Both use URIs but differ:
 
 Resources answer "what can I read?"; Roots answer "where am I scoped to?".
 
+## 4b. "MCP Apps" (the extension, not the noun)
+
+**MCP Apps** is a specific protocol extension
+([modelcontextprotocol/ext-apps](https://github.com/modelcontextprotocol/ext-apps))
+for **interactive UIs embedded inside AI chatbots, served by MCP servers** —
+i.e., a Tool can return a rendered widget instead of plain text. It is *not*
+a synonym for "an MCP application" or "an MCP-enabled product".
+
+- ✅ "We added an MCP App so the calendar tool returns a clickable timeline."
+- ❌ "Claude Desktop is an MCP App." (It's a **Host**.)
+- ❌ "Our backend is an MCP App." (It's a **Server**.)
+
+When referring to the generic concept, say "MCP application", "MCP-enabled
+app", "Host", or "Server" — never bare "App".
+
+See [OpenAI Apps SDK MCP server docs](https://developers.openai.com/apps-sdk/concepts/mcp-server)
+for the most fleshed-out implementation.
+
 ## 5. Transports
 
 - **stdio** — local child process; simplest, fastest. Use for local tools.
@@ -109,6 +127,7 @@ connection. Over Streamable HTTP, the version is also conveyed via the
 | "Capabilities"  | Negotiated feature flags from `initialize`             |
 | "DCR" / "CIMD"  | Client registration; CIMD is now the default, DCR is MAY |
 | "DPoP"          | Sender-constrained tokens (SEP-1932, in review)        |
+| "MCP App"       | The **ext-apps** extension (embeddable UI), *not* "an MCP application" |
 
 ## Sources
 
