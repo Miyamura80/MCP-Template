@@ -135,6 +135,58 @@ Structure as: `init()` → `continue(id)` → `cleanup(id)`
 - Use descriptive IDs (runId, taskId)
 - Handle rate limits, timeouts, retries at system boundaries
 
+## MCP: Headless vs UI
+
+This template supports two MCP tool styles:
+
+- **Headless tools** (default) — sync wrapper, no `Context`, returns the
+  Pydantic output model so FastMCP derives `outputSchema`. The CLI/API/MCP
+  transports share identical behavior. Use this for any tool the LLM should
+  call autonomously without UI affordances.
+- **Enhanced tools** (opt-in via `@enhance` in `mcp_server/enhancers/`) — async
+  wrapper with `Context`, may elicit user input mid-call, attach images/audio,
+  or render an MCP App (iframe dashboard). MCP-only — never affects CLI/API
+  consumers of the same service. The pure service stays untouched in
+  `services/`.
+
+If a tool just returns data, leave it headless. Reach for an enhancer only
+when the MCP transport needs something the spec offers and other transports
+don't.
+
+### Adding an enhancer
+
+```python
+from mcp_server.enhancers import enhance
+from mcp_server.enhancers.base import EnhancedTool
+
+@enhance("my_service", fallback="headless")
+async def my_enhanced(tool: EnhancedTool[MyInput, MyOutput]) -> MyOutput:
+    result = tool.call()
+    if tool.can_elicit:
+        ...  # await tool.elicit(...)
+    if tool.can_show_app:
+        tool.send_app("ui://mycli/my_dashboard")
+    return result
+```
+
+Then add `import mcp_server.enhancers.my_service  # noqa: F401` to
+`_register_tools()` in `mcp_server/server.py`.
+
+### MCP Apps (iframe dashboards)
+
+Apps live in `mcp_server/apps/<name>/`:
+- React + Vite + `vite-plugin-singlefile` (always bun, never npm)
+- `dist/mcp-app.html` is **committed** so the template works without Node
+- `make build_apps` rebuilds the bundle (developer-only; not part of CI)
+- `make dev_host` runs the upstream `@modelcontextprotocol/ext-apps` basic-host
+  for manual smoke testing
+
+When adding a new app, also add an entry to `[tool.hatch.build.targets.wheel]
+force-include` in `pyproject.toml` so the HTML ships in the wheel.
+
+See `memory/project_mcp_ui_architecture.md` for design rationale and
+`docs/EDGE_CASES.md` for the edge-case spec.
+
 ## Subagents
 
 - Folder-size CI failure → spawn subagent `.claude/agents/folder-refactor-advisor.md`.

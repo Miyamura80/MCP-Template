@@ -13,6 +13,7 @@ See `memory/project_mcp_ui_architecture.md` and `docs/EDGE_CASES.md`.
 """
 
 import inspect
+from pathlib import Path
 from typing import Any
 
 from loguru import logger as log
@@ -27,9 +28,13 @@ from services import ServiceEntry
 
 mcp = FastMCP("mycli")
 
+_APPS_DIR = Path(__file__).parent / "apps"
+_APP_MIME_TYPE = "text/html;profile=mcp-app"
+
 
 def _register_tools() -> None:
     """Import service & enhancer modules to populate registries, then register MCP tools."""
+    import mcp_server.app_tools.doctor_dashboard  # noqa: F401
     import mcp_server.enhancers.config  # noqa: F401
     import mcp_server.enhancers.doctor  # noqa: F401
     import services.config_svc  # noqa: F401
@@ -39,6 +44,27 @@ def _register_tools() -> None:
 
     for entry in get_registry():
         _make_tool(entry)
+
+
+def _register_app_resources() -> None:
+    """Register ui:// resources for each MCP App with a built dist/mcp-app.html."""
+    if not _APPS_DIR.is_dir():
+        return
+    for app_dir in sorted(_APPS_DIR.iterdir()):
+        if not app_dir.is_dir():
+            continue
+        html_path = app_dir / "dist" / "mcp-app.html"
+        uri = f"ui://mycli/{app_dir.name}"
+        _register_app_resource(uri, html_path, app_dir.name)
+
+
+def _register_app_resource(uri: str, html_path: Path, app_name: str) -> None:
+    @mcp.resource(uri, mime_type=_APP_MIME_TYPE, name=f"{app_name} app")
+    def _read_app() -> str:
+        if not html_path.exists():
+            log.warning("MCP App {!r} missing build at {}", app_name, html_path)
+            return f"<!-- {app_name} not built. Run `make build_apps`. -->"
+        return html_path.read_text()
 
 
 def _make_tool(entry: ServiceEntry) -> None:
@@ -139,6 +165,7 @@ def _build_call_tool_result(result, tool: EnhancedTool) -> CallToolResult:
 
 
 _register_tools()
+_register_app_resources()
 
 
 def main() -> None:

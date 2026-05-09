@@ -85,7 +85,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "common", "utils", "commands", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"cli.py" = "cli.py"}
+force-include = {"cli.py" = "cli.py", "mcp_server/apps/doctor_dashboard/dist/mcp-app.html" = "mcp_server/apps/doctor_dashboard/dist/mcp-app.html"}
 
 [tool.ruff]
 line-length = 88
@@ -161,6 +161,7 @@ exclude = [
     "src/payments/",
     "tests/test_agentic_payments.py",
     "tests/test_agentic_payments_api.py",
+    "tests/test_enhancers.py",
 ]
 
 [tool.file_length]

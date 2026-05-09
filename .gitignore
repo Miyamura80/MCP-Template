@@ -22,6 +22,8 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+!mcp_server/apps/*/dist/
+!mcp_server/apps/*/dist/mcp-app.html
 downloads/
 eggs/
 .eggs/
