@@ -8,6 +8,12 @@ Super-opinionated Python stack for fast development. Python >= 3.12 required. Us
 
 **Before any other work in this repo, enable prek:** `uv tool install prek && prek install`. Hooks are defined in `prek.toml`.
 
+**MCP terminology:** For nuances around frequently-confused MCP terms (Host vs. Client vs. Server, Tools vs. Resources vs. Prompts, Roots vs. Resources, transports, OAuth pitfalls, etc.), see [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md). Consult it before naming or designing new MCP-related code.
+
+**MCP Apps:** an MCP extension for interactive iframe-sandboxed UIs (HTML resources via `ui://` URIs) embedded in chat clients, with bidirectional `postMessage` / JSON-RPC communication. See [ext-apps](https://github.com/modelcontextprotocol/ext-apps). *Not* a generic word for "MCP application".
+
+**MCP is an actively-evolving spec.** Behaviors change frequently (transports, auth, primitives). Don't rely on training-data assumptions for anything MCP-related - always verify against the current spec via a fresh web search before writing or reviewing MCP code.
+
 ## Common Commands
 
 ```bash
