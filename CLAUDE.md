@@ -52,28 +52,12 @@ uv run pytest path/to/test.py  # Run specific test
 
 ## Architecture
 
-```
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  cli.py      │  │ mcp_server/  │  │ api_server/  │   transport / interface layer
-│  (Typer)     │  │ (FastMCP)    │  │ (FastAPI)    │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                 │                 │
-       └─────────────────┼─────────────────┘
-                         ▼
-                 ┌───────────────┐
-                 │  services/    │   pure business logic, transport-agnostic
-                 │  @service     │   (registered into a shared registry)
-                 └───────┬───────┘
-                         │   I/O contracts
-                 ┌───────▼───────┐
-                 │  models/      │   Pydantic input/output models
-                 └───────┬───────┘
-                         ▼
-        ┌────────────┬───────┬────────────┬─────────────┐
-        │ common/    │ db/   │ utils/llm/ │ src/utils/  │   shared infra
-        │ (config)   │ (ORM) │ (DSPY)     │ (logs/theme)│
-        └────────────┴───────┴────────────┴─────────────┘
-```
+Layering (top calls down, never the reverse):
+
+- **Transports:** `cli.py` (Typer) · `mcp_server/` (FastMCP) · `api_server/` (FastAPI)
+- **Services:** `services/` — pure `@service`-decorated functions, transport-agnostic
+- **Contracts:** `models/` — Pydantic input/output schemas shared by all transports
+- **Infra:** `common/` (config) · `db/` (SQLAlchemy + Alembic) · `utils/llm/` (DSPY) · `src/utils/` (logging, theme, errors)
 
 ### Top-level layout
 
