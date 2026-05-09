@@ -45,8 +45,10 @@ Server→client calls:
 ## 4. MCP Apps
 
 The [ext-apps](https://github.com/modelcontextprotocol/ext-apps) extension:
-Tools returning embeddable UIs. *Not* a synonym for "MCP application" —
-Claude Desktop is a Host, your backend is a Server, neither is an "App".
+interactive iframe-sandboxed UIs (HTML resources via `ui://` URIs) embedded
+in chat clients, with bidirectional `postMessage` / JSON-RPC communication.
+*Not* a synonym for "MCP application" — Claude Desktop is a Host, your
+backend is a Server, neither is an "App".
 ([OpenAI Apps SDK](https://developers.openai.com/apps-sdk/concepts/mcp-server))
 
 ## 5. Transports
