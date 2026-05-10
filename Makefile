@@ -38,7 +38,7 @@ help: ## Show this help message
 ### Initialization
 .PHONY: onboard banner logo
 onboard: check_uv ## Run interactive onboarding CLI
-	@$(PYTHON) onboard.py
+	@$(PYTHON) -m init.onboard
 
 banner: check_uv ## Generate project banner image
 	@echo "$(YELLOW)🔍Generating banner...$(RESET)"
@@ -95,14 +95,12 @@ view_python_venv_size_by_libraries:
 ########################################################
 
 ### Running
-all: check_uv ## Sync dependencies and run main application
+all: check_uv ## Sync dependencies
 	@uv sync
-	@echo "$(GREEN)🏁Running main application...$(RESET)"
-	@$(PYTHON) main.py
-	@echo "$(GREEN)✅ Main application run completed.$(RESET)"
+	@echo "$(GREEN)✅ Dependencies synced.$(RESET)"
 
 cli: check_uv ## Run the CLI (pass ARGS="..." for arguments)
-	@$(PYTHON) -m cli $(ARGS)
+	@$(PYTHON) -m src.cli.app $(ARGS)
 
 docs: ## Run docs with bun
 	@echo "$(GREEN)📚Running docs...$(RESET)"
@@ -259,7 +257,7 @@ ty: install_tools ## Run type checker
 
 docs_lint: ## Lint docs links
 	@echo "$(YELLOW)🔍Linting docs links...$(RESET)"
-	@cd docs && bun run lint:links
+	@cd docs && bun install --frozen-lockfile && bun run lint:links
 	@echo "$(GREEN)✅Docs linting completed.$(RESET)"
 
 lint_links: ## Lint all markdown links using pytest-check-links

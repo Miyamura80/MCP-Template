@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from cli import _register_builtin_commands, _register_user_commands, app
-from commands.secrets import _mask_value
+from src.cli.app import _register_builtin_commands, _register_user_commands, app
+from src.cli.commands.secrets import _mask_value
 from tests.test_template import TestTemplate
 
 runner = CliRunner()
@@ -38,13 +38,13 @@ class FakeKeyring:
 def _apply_patches(stack: ExitStack, fake: FakeKeyring) -> None:
     """Apply all keyring patches onto an ExitStack."""
     stack.enter_context(
-        patch("commands.secrets.keyring.get_password", fake.get_password)
+        patch("src.cli.commands.secrets.keyring.get_password", fake.get_password)
     )
     stack.enter_context(
-        patch("commands.secrets.keyring.set_password", fake.set_password)
+        patch("src.cli.commands.secrets.keyring.set_password", fake.set_password)
     )
     stack.enter_context(
-        patch("commands.secrets.keyring.delete_password", fake.delete_password)
+        patch("src.cli.commands.secrets.keyring.delete_password", fake.delete_password)
     )
 
 

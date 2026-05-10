@@ -73,7 +73,7 @@ Repository = "https://github.com/Miyamura80/CLI-Template"
 Issues = "https://github.com/Miyamura80/CLI-Template/issues"
 
 [project.scripts]
-mycli = "cli:main_cli"
+mycli = "src.cli.app:main_cli"
 mycli-mcp = "mcp_server:main"
 mycli-api = "api_server:main"
 
@@ -85,8 +85,8 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "common", "utils", "commands", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"cli.py" = "cli.py", "mcp_server/apps/doctor_dashboard/dist/mcp-app.html" = "mcp_server/apps/doctor_dashboard/dist/mcp-app.html"}
+packages = ["src", "common", "utils", "services", "models", "mcp_server", "db", "api_server"]
+force-include = {"mcp_server/apps/doctor_dashboard/dist/mcp-app.html" = "mcp_server/apps/doctor_dashboard/dist/mcp-app.html"}
 
 [tool.ruff]
 line-length = 88
@@ -150,10 +150,8 @@ exclude = [
     "src/utils/theme.py",
     "tests/conftest.py",
     "init/",
-    "onboard.py",
-    "commands/",
+    "init/onboard.py",
     "src/cli/",
-    "cli.py",
     "templates/",
     "services/",
     "models/",
@@ -170,14 +168,14 @@ exclude = [
 [tool.file_length]
 max_lines = 500
 exclude = [
-    "onboard.py",
+    "init/onboard.py",
     "api_server/routes/payments/webhooks.py",
     "api_server/middleware/rate_limit.py",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["src", "common", "utils", "commands", "services", "models", "db", "api_server"]
+source = ["src", "common", "utils", "services", "models", "db", "api_server"]
 omit = [
     "tests/*",
     "docs/*",

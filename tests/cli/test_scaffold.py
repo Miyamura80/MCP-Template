@@ -5,7 +5,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from cli import _register_builtin_commands, _register_user_commands, app
+from src.cli.app import _register_builtin_commands, _register_user_commands, app
 from tests.test_template import TestTemplate
 
 runner = CliRunner()
@@ -13,7 +13,7 @@ runner = CliRunner()
 _register_builtin_commands()
 _register_user_commands()
 
-_COMMANDS_DIR = Path(__file__).parent.parent.parent / "commands"
+_COMMANDS_DIR = Path(__file__).parent.parent.parent / "src" / "cli" / "commands"
 
 # Use PID in file names so parallel xdist workers don't collide.
 _SUFFIX = os.getpid()
