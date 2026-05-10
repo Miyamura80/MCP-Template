@@ -116,6 +116,9 @@ def _ensure_stripe_customer(
 
     # Now lock the row briefly to serialize the DB write.  Re-check after
     # acquiring the lock in case another thread already set the customer ID.
+    # Nested rather than `and`-combined: the inner re-query may return None if
+    # the row was deleted between reads, and that case must fall through to the
+    # `else` branch below to create a fresh row.
     if sub:
         sub = (
             session.query(UserSubscription)
