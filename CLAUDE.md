@@ -50,31 +50,31 @@ uv run pytest path/to/test.py  # Run specific test
 Layering (top calls down, never the reverse):
 
 - **Transports:** `cli.py` (Typer) · `mcp_server/` (FastMCP) · `api_server/` (FastAPI)
-- **Services:** `services/` — pure `@service`-decorated functions, transport-agnostic
-- **Contracts:** `models/` — Pydantic input/output schemas shared by all transports
+- **Services:** `services/` - pure `@service`-decorated functions, transport-agnostic
+- **Contracts:** `models/` - Pydantic input/output schemas shared by all transports
 - **Infra:** `common/` (config) · `db/` (SQLAlchemy + Alembic) · `utils/llm/` (DSPY) · `src/utils/` (logging, theme, errors)
 
 ### Top-level layout
 
-- **`cli.py`** + **`commands/`** — Typer CLI (`mycli`); `commands/__init__.py` auto-discovers `commands/*.py` and registers them.
-- **`mcp_server/`** — FastMCP server (`mycli-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
-- **`api_server/`** — FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`).
-- **`services/`** — `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).
-- **`common/`** — pydantic-settings config.
-  - `global_config.yaml` — base; `<name>.yaml` — split configs loaded as root key `<name>`
-  - `production_config.yaml` — overlay loaded with high priority when `DEV_ENV=prod`
-- **`src/`** — CLI plumbing (`src/cli/`) + shared utils (logging, theme, errors, output).
-- **`utils/llm/`** — DSPY + LiteLLM wrapper with fallback model, Tenacity retries, LangFuse observability.
-- **`tests/`** — subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
-- **`docs/`** — Next.js + Fumadocs site; English source in `docs/content/en/`.
-- **`.claude/`**, **`.agents/`**, **`.codex/`** — Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
+- **`cli.py`** + **`commands/`** - Typer CLI (`mycli`); `commands/__init__.py` auto-discovers `commands/*.py` and registers them.
+- **`mcp_server/`** - FastMCP server (`mycli-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
+- **`api_server/`** - FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`).
+- **`services/`** - `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).
+- **`common/`** - pydantic-settings config.
+  - `global_config.yaml` - base; `<name>.yaml` - split configs loaded as root key `<name>`
+  - `production_config.yaml` - overlay loaded with high priority when `DEV_ENV=prod`
+- **`src/`** - CLI plumbing (`src/cli/`) + shared utils (logging, theme, errors, output).
+- **`utils/llm/`** - DSPY + LiteLLM wrapper with fallback model, Tenacity retries, LangFuse observability.
+- **`tests/`** - subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
+- **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`.
+- **`.claude/`**, **`.agents/`**, **`.codex/`** - Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
 
 ### Adding a new feature
 
 1. Pydantic models in `models/<feature>.py`.
 2. Pure `@service` function in `services/<feature>_svc.py`.
 3. (CLI) Typer command in `commands/<feature>.py` calling the service.
-4. (MCP) Nothing — `mcp_server/server.py` auto-registers on import.
+4. (MCP) Nothing - `mcp_server/server.py` auto-registers on import.
 5. (HTTP, optional) Route in `api_server/routes/`.
 6. Tests inheriting `TestTemplate`.
 

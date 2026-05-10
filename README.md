@@ -5,24 +5,24 @@
 </p>
 
 <p align="center">
-<b>Batteries-included Python CLI template. Auto-discovery commands, global flags, output formatting, self-update, and a whole lot more.</b>
+<b>Batteries-included Python template. One codebase ships as a CLI, an MCP server, and an HTTP API over a shared service registry.</b>
 </p>
 
 <p align="center">
   <a href="#key-features">Key Features</a> •
+  <a href="#architecture">Architecture</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#cli-usage">CLI Usage</a> •
   <a href="#adding-commands">Adding Commands</a> •
   <a href="#configuration">Configuration</a> •
-  <a href="#credits">Credits</a> •
-  <a href="#about-the-core-contributors">About the Core Contributors</a>
+  <a href="#credits">Credits</a>
 </p>
 
 <p align="center">
-  <img alt="Project Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FCLI-Template%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=blue">
-  <img alt="Python Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FCLI-Template%2Fmain%2Fpyproject.toml&query=%24.project['requires-python']&label=python&logo=python&color=blue">
-  <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/Miyamura80/CLI-Template">
-  <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/Miyamura80/CLI-Template/a_test_target_tests.yml?branch=main">
+  <img alt="Project Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FMCP-Template%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=blue">
+  <img alt="Python Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FMCP-Template%2Fmain%2Fpyproject.toml&query=%24.project['requires-python']&label=python&logo=python&color=blue">
+  <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/Miyamura80/MCP-Template">
+  <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/Miyamura80/MCP-Template/a_test_target_tests.yml?branch=main">
 
 </p>
 
@@ -58,30 +58,25 @@ bash install-skills.sh && rm install-skills.sh
 
 ## Key Features
 
-Opinionated Python CLI template for fast development. The `saas` branch extends `main` with web framework, auth, and payments.
+Opinionated Python template for fast development. Three transports, one shared service layer.
 
-| Feature | `main` | `saas` |
-|---------|:------:|:------:|
-| Auto-discovery command system | ✅ | ✅ |
-| Interactive fallback prompts | ✅ | ✅ |
-| Shell completions | ✅ | ✅ |
-| Self-update | ✅ | ✅ |
-| Anonymous telemetry with opt-out | ✅ | ✅ |
-| UV + Pydantic config | ✅ | ✅ |
-| CI/Linters (Ruff, Vulture) | ✅ | ✅ |
-| Pre-commit hooks (prek) | ✅ | ✅ |
-| LLM (DSPY + LangFuse Observability) | ✅ | ✅ |
-| FastAPI + Uvicorn | ❌ | ✅ |
-| SQLAlchemy + Alembic | ❌ | ✅ |
-| Auth (WorkOS + API keys) | ❌ | ✅ |
-| Payments (Stripe) | ❌ | ✅ |
-| Ralph Wiggum Agent Loop | ✅ | ✅ |
+**Transports**
+- Typer **CLI** with auto-discovery commands, global flags, output formatting, shell completions, and self-update
+- **MCP server** (FastMCP, stdio) - every service is auto-registered as a tool
+- **FastAPI HTTP server** with WorkOS + API-key auth, Stripe billing, and rate limiting
 
-[Full comparison](manual_docs/branch_comparison.md)
+**Infra**
+- `uv` dependency management + Pydantic-settings config (YAML + `.env`)
+- SQLAlchemy + Alembic (`db/`)
+- DSPY + LiteLLM with LangFuse observability (`utils/llm/`)
+- pytest with `TestTemplate` config-isolation base class
+- Ruff + Vulture + ty + import-linter via `make ci`
+- prek pre-commit hooks (folder-size guards, ai-writing-check, agent-config sync)
+- Ralph Wiggum agent loop, Claude/Codex agent + skill bundles
 
 ## Architecture
 
-One codebase, three interfaces. Write business logic once in `services/` and it ships as a CLI subcommand, an MCP tool, and an HTTP route — same Pydantic input/output contract everywhere.
+One codebase, three interfaces. Write business logic once in `services/` and it ships as a CLI subcommand, an MCP tool, and an HTTP route - same Pydantic input/output contract everywhere.
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
@@ -111,9 +106,12 @@ One codebase, three interfaces. Write business logic once in `services/` and it 
 ```bash
 make onboard              # interactive setup (rename, deps, env, hooks)
 uv sync                   # install deps
-uv run mycli --help       # see all commands
+uv run mycli --help       # see all CLI commands
 uv run mycli greet Alice  # run a command
 uv run mycli init my_command  # scaffold a new command
+
+uv run mycli-mcp          # start the MCP server (stdio)
+uv run mycli-api          # start the FastAPI HTTP server
 ```
 
 ## CLI Usage
@@ -210,8 +208,8 @@ This software uses the following tools:
 
 ## About the Core Contributors
 
-<a href="https://github.com/Miyamura80/CLI-Template/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Miyamura80/CLI-Template" />
+<a href="https://github.com/Miyamura80/MCP-Template/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Miyamura80/MCP-Template" />
 </a>
 
 Made with [contrib.rocks](https://contrib.rocks).
