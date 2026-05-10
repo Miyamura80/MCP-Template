@@ -9,16 +9,24 @@ take the headless path unchanged.
 See `mcp_server/MCP_UI_ARCHITECTURE.md` and `mcp_server/MCP_UI_EDGE_CASES.md`.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
+from mcp_server.enhancers.base import EnhancedTool
 
 FallbackMode = Literal["headless", "error"]
+
+# Enhancer functions take an EnhancedTool wrapper around the pure service and
+# return the service's output_model instance. Always async (we await them).
+EnhancerFn = Callable[[EnhancedTool[Any, Any]], Awaitable[BaseModel]]
 
 
 @dataclass(frozen=True)
 class EnhancerEntry:
-    fn: Callable
+    fn: EnhancerFn
     fallback: FallbackMode
 
 
@@ -32,7 +40,7 @@ def enhance(service_name: str, fallback: FallbackMode = "headless"):
     fallback="error" - propagate the exception (FastMCP turns it into isError).
     """
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: EnhancerFn) -> EnhancerFn:
         if service_name in _enhancers:
             raise ValueError(f"Duplicate enhancer registration for {service_name!r}")
         _enhancers[service_name] = EnhancerEntry(fn=fn, fallback=fallback)
