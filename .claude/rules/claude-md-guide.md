@@ -10,11 +10,12 @@ paths:
 
 `AGENTS.md` is a symlink to `CLAUDE.md` - editing one edits the other.
 
-## Hard requirements
+## Validation
 
-- `make agents_validate` (run by CI as `agents_validate.yaml`) requires these section headings to exist verbatim: **Project Overview**, **Common Commands**, **Architecture**, **Code Style**, **Configuration Pattern**. Don't rename or remove them. If a section's content is now redundant, leave the heading and put a one-liner under it.
-- The `ai-writing-check` prek hook bans the em-dash character (U+2014). Use hyphens (`-`) instead.
-- Run `make ci` before committing changes to this file. The `agents_validate` and `ai-writing-check` failures both surface there.
+Before committing, run both (neither is in `make ci`):
+
+- `make agents_validate` - requires these section headings verbatim: **Project Overview**, **Common Commands**, **Architecture**, **Code Style**, **Configuration Pattern**. If a section's content is now redundant, leave the heading and put a one-liner under it.
+- `uv run python scripts/check_ai_writing.py` - bans the em-dash character (U+2014). Use hyphens (`-`) instead. Also runs as the `ai-writing-check` prek hook on commit.
 
 ## What earns its place
 
@@ -44,9 +45,4 @@ Things that earn their place:
 - Sections duplicated by a dedicated section below (e.g. don't explain config-loading in the architecture bullet AND in `## Configuration Pattern`).
 - Code-block comments that restate the next line (`# Access secrets from .env` immediately above `global_config.OPENAI_API_KEY`).
 
-## Process for edits
-
-1. State the change in one sentence and identify which existing line(s) it replaces or duplicates.
-2. Make the edit.
-3. Run `make agents_validate` and `uv run python scripts/check_ai_writing.py` locally before committing. Don't rely on CI to catch the section-heading or em-dash gotchas.
-4. Use a content-appropriate commit emoji from the convention table - `🔨` for content changes, `✨` for trim/format-only.
+Use a content-appropriate commit emoji from the convention list in `CLAUDE.md` - `🔨` for content changes, `✨` for trim/format-only.
