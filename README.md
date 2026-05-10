@@ -101,6 +101,12 @@ One codebase, three interfaces. Write business logic once in `services/` and it 
         └────────────┴───────┴────────────┴─────────────┘
 ```
 
+### MCP UI (optional)
+
+Need elicitation, image output, or an iframe dashboard for an MCP tool? Add an opt-in **enhancer** in `mcp_server/enhancers/`. Enhancers wrap a service for the MCP transport only - the pure service stays untouched and CLI/API consumers are unaffected.
+
+See [`mcp_server/MCP_UI_ARCHITECTURE.md`](mcp_server/MCP_UI_ARCHITECTURE.md) for the full design.
+
 ## Quick Start
 
 ```bash
