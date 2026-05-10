@@ -14,6 +14,18 @@ paths:
 
 Repos commonly enforce structure (required headings, banned characters, link checks) via Make targets, scripts, or pre-commit hooks. Before committing, run whatever the repo defines locally - don't rely on CI to catch it. If the repo has no validation, the hard requirement is just: don't break the section headings other tools rely on.
 
+## Where it goes
+
+Before adding to root `CLAUDE.md`, check whether it belongs somewhere else:
+
+- **Always relevant in this repo** -> root `CLAUDE.md`.
+- **Scoped to a subtree** -> nested `CLAUDE.md` / `AGENTS.md` inside that subtree.
+- **Sometimes relevant, situation-triggered** -> a skill (`.claude/skills/<name>/SKILL.md`), loaded on demand.
+- **Triggered by editing specific files** -> a path-scoped rule (`.claude/rules/<name>.md` with `paths:` frontmatter), like this file.
+- **Must happen deterministically** -> a hook (pre-commit, `.claude/settings.json`), not prose. Hooks are deterministic; CLAUDE.md is advisory and Claude can ignore it.
+
+If root `CLAUDE.md` crosses ~200 lines, that's a smell: push specifics into nested files, skills, or rules.
+
 ## What earns its place
 
 Include a line only if it's all of:
@@ -41,3 +53,5 @@ Categories that typically earn their place:
 - Boilerplate intros ("This file provides guidance to Claude Code...").
 - Sections duplicated by a dedicated section below.
 - Code-block comments that restate the next line.
+- Deterministic must-happens better expressed as a hook (pre-commit, `settings.json`) - prose is advisory, hooks are enforced.
+- Self-evident platitudes ("write clean code", "follow best practices").
