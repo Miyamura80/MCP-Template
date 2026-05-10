@@ -243,7 +243,7 @@ ty: install_tools ## Run type checker
 
 docs_lint: ## Lint docs links
 	@echo "$(YELLOW)🔍Linting docs links...$(RESET)"
-	@cd docs && bun run lint:links
+	@cd docs && bun install --frozen-lockfile && bun run lint:links
 	@echo "$(GREEN)✅Docs linting completed.$(RESET)"
 
 lint_links: ## Lint all markdown links using pytest-check-links
