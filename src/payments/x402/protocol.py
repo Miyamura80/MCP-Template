@@ -91,7 +91,9 @@ class X402Protocol(PaymentProtocol):
                 )
                 return True
 
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
+                # x402 SDK init can fail in many ways (env, key derivation, network
+                # discovery); a failed init must not crash the host — we retry next call.
                 log.warning("x402 init failed; will retry next call: {}", exc)
                 return False
 
@@ -164,7 +166,9 @@ class X402Protocol(PaymentProtocol):
                     raw_response=response.model_dump(),
                 )
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
+            # External SDK boundary: any failure (HTTP, signing, parse) must be
+            # surfaced as a structured PaymentResult, not propagated to the caller.
             log.error("x402 payment verification failed: {}", exc)
             return PaymentResult(
                 status=PaymentStatus.FAILED,

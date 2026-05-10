@@ -91,7 +91,7 @@ def _get_endpoint() -> str | None:
 
         ep = global_config.telemetry.endpoint
         return ep if ep else None
-    except Exception:
+    except (ImportError, AttributeError):
         return None
 
 
@@ -115,8 +115,10 @@ def _post_event(event: dict) -> None:
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=2)  # noqa: S310
-        except Exception:
-            pass  # best-effort: never block the CLI
+        except Exception:  # noqa: BLE001
+            # Daemon thread: any failure (network, encoding, import) must be swallowed
+            # so telemetry never crashes the CLI process.
+            pass
 
     threading.Thread(target=_send, daemon=True).start()
 

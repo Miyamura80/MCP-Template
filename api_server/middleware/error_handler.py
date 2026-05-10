@@ -183,7 +183,9 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
 
             return response
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
+            # Top-level HTTP error boundary: any unhandled exception in the request
+            # pipeline must be converted to a structured 5xx response.
             log.exception("Unhandled exception in request {}", request_id)
 
             # Sanitize Stripe errors

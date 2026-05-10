@@ -61,7 +61,9 @@ def _make_enhanced_tool(
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
         try:
             result = await enhancer_entry.fn(tool)
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Enhancer failures of any kind must fall back to the pure service
+            # so MCP clients still get a structured result on the headless path.
             if enhancer_entry.fallback == "error":
                 raise
             log.exception(

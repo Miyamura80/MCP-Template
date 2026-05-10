@@ -26,7 +26,7 @@ def update_command() -> None:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             data = json.loads(resp.read().decode())
         latest_str = data["info"]["version"]
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError):
         console.print("[yellow]Could not check PyPI for updates.[/yellow]")
         raise typer.Exit(code=0) from None
 

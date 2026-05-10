@@ -102,7 +102,9 @@ class LangFuseDSPYCallback(BaseCallback):  # noqa
                 outputs_extracted = dict(outputs.items())
             except AttributeError:
                 outputs_extracted = {"value": outputs}
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
+                # Observability hook: any failure to extract DSPY module output
+                # must be recorded as a span attribute, never propagated.
                 outputs_extracted = {"error_extracting_module_output": str(e)}
         get_client().update_current_span(
             input=self.input_field_values.get(None) or {},

@@ -45,7 +45,9 @@ def interactive_fallback(func: Any) -> Any:
         sig = inspect.signature(func)
         try:
             hints = get_type_hints(func)
-        except Exception:
+        except (NameError, TypeError, AttributeError):
+            # Forward refs that don't resolve in this scope, or unhashable defaults
+            # — fall back to no hints rather than failing the prompt.
             hints = {}
 
         bound = sig.bind_partial(*args, **kwargs)

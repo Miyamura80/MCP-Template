@@ -15,7 +15,7 @@ def _load_cli_config() -> dict[str, object]:
         config_path = _ROOT / "common" / "global_config.yaml"
         data = yaml.safe_load(config_path.read_text()) or {}
         return data.get("cli", {})
-    except Exception:
+    except (OSError, yaml.YAMLError):
         return {}
 
 

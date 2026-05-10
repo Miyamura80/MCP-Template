@@ -73,7 +73,9 @@ def _check_database() -> dict:
         with use_db_session() as session:
             session.execute(text("SELECT 1"))
         return {"status": "ok"}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Health probe: must report any DB/connection/config failure mode as a
+        # structured status, never propagate.
         return {"status": "error", "message": type(exc).__name__}
 
 
@@ -126,8 +128,9 @@ def _check_redis() -> dict:
             return {"status": "not_configured"}
         client.ping()
         return {"status": "ok"}
-    except Exception as exc:
-        # Reset so the next health probe re-creates the client
+    except Exception as exc:  # noqa: BLE001
+        # Health probe: any Redis client error (connection, auth, timeout) maps
+        # to a status string; reset the cached client so the next probe retries.
         with _redis_health_client_lock:
             _redis_health_client = None
         return {"status": "error", "message": type(exc).__name__}
@@ -155,7 +158,9 @@ def _check_stripe() -> dict:
             return {"status": "error", "message": "initialization_failed"}
 
         return {"status": "ok"}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Health probe: report any Stripe SDK / config / import failure as a
+        # structured status rather than crashing the /health endpoint.
         return {"status": "error", "message": type(exc).__name__}
 
 
@@ -200,7 +205,7 @@ def _get_git_commit() -> str | None:
             _git_commit_value = (
                 result.stdout.strip() if result.returncode == 0 else None
             )
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             _git_commit_value = None
         if _git_commit_value is None:
             log.warning(
