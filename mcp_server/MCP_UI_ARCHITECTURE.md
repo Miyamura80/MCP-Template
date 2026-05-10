@@ -1,19 +1,12 @@
----
-name: MCP UI Architecture Decisions
-description: Design decisions for adding MCP UI support (elicitation, rich content, MCP Apps) to the template - decided May 2026
-type: project
-originSessionId: d09531ee-3f56-4fd6-9323-fe9bc54d0715
----
-
-# MCP UI Architecture - Decided 2026-04-25
+# MCP UI Architecture
 
 ## Enhancement Pattern
-- Shape B: sparse override, opt-in enhancers wrapping pure services
+- Opt-in enhancers wrap pure services; only services that need MCP UI features get one.
 - `EnhancedTool[TInput, TOutput]` typed wrapper class with capability detection
 - Methods: `send_image`, `send_text`, `send_audio`, `send_app`, `elicit`, `call`
 - Services stay pure `(Input) -> Output` - shared by CLI, API, MCP
 - Enhancers are MCP-only plugins in `mcp_server/enhancers/`
-- `@enhance("service_name")` decorator, registered as sparse overlay
+- `@enhance("service_name")` decorator. Services without an enhancer run as headless tools.
 - Headless tools = unchanged, zero overhead. Enhanced = async with Context.
 
 ## App Attachment
