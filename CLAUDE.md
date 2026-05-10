@@ -69,7 +69,7 @@ Layering (top calls down, never the reverse):
 - **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`.
 - **`.claude/`**, **`.agents/`**, **`.codex/`** - Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
 
-**Don't add new files or folders to the repo root** unless tooling genuinely requires them there (e.g. `pyproject.toml`, `Makefile`, top-level conventional docs like `README.md`/`LICENSE`/`CLAUDE.md`). Nest under an existing folder: scripts in `scripts/`, template-setup helpers in `init/`, maintainer docs in `manual_docs/`, agent skills in `.agents/skills/`. The root is for things that have to be there.
+**Don't add new files at the repo root** unless tooling requires it. Nest under an existing folder (`scripts/`, `init/`, `manual_docs/`, `.agents/skills/`, ...).
 
 ### Adding a new feature
 
