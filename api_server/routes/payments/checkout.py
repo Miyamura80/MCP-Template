@@ -120,6 +120,9 @@ def _ensure_stripe_customer(
 
     # Now lock the row briefly to serialize the DB write.  Re-check after
     # acquiring the lock in case another thread already set the customer ID.
+    # Nested rather than `and`-combined: the inner re-query may return None if
+    # the row was deleted between reads, and that case must fall through to the
+    # `else` branch below to create a fresh row.
     if sub:
         sub = (
             session.query(UserSubscription)
@@ -127,7 +130,8 @@ def _ensure_stripe_customer(
             .with_for_update()
             .first()
         )
-        if sub and sub.stripe_customer_id:
+    if sub:
+        if sub.stripe_customer_id:
             # Another thread won the race -- clean up our orphan
             if customer_id != sub.stripe_customer_id:
                 _delete_orphaned_customer(
@@ -150,6 +154,8 @@ def _ensure_stripe_customer(
             )
         sub.stripe_customer_id = customer_id
     else:
+        # Either no prior row, or it was deleted between the initial read and
+        # the locking re-query.  Create a fresh row tied to our new customer.
         sub = UserSubscription(
             user_id=user.user_id,
             stripe_customer_id=customer_id,
