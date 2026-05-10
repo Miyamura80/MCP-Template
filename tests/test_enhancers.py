@@ -325,6 +325,46 @@ class TestEnhancerCrashFallback(TestTemplate):
         finally:
             cleanup()
 
+    def test_partial_output_discarded_on_crash(self):
+        """If the enhancer attaches content/app meta and *then* crashes, the
+        fallback CallToolResult must not ship that partial output."""
+
+        async def crashing_after_partial(tool):
+            tool.send_text("DO NOT SHIP THIS")
+            tool.send_app("ui://should-be-discarded")
+            raise RuntimeError("crash after partial")
+
+        tool_fn, cleanup = self._register_test_service_and_get_tool_fn(
+            "headless", crashing_after_partial
+        )
+        try:
+            ctx = _make_mock_ctx()
+            result = asyncio.run(tool_fn(ctx=ctx, x=3))
+            assert result.structuredContent == {"value": 300}
+            # Only the auto-generated text block; no DO NOT SHIP THIS.
+            assert all("DO NOT SHIP" not in c.text for c in result.content if c.type == "text")
+            assert result.meta is None
+        finally:
+            cleanup()
+
+
+class TestBuildCallToolResultTypeGuard(TestTemplate):
+    """_build_call_tool_result must reject non-BaseModel results loudly."""
+
+    def test_rejects_non_basemodel_result(self):
+        from mcp_server._tool_factory import _build_call_tool_result
+
+        tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
+        with pytest.raises(TypeError, match="must be a Pydantic BaseModel"):
+            _build_call_tool_result("not a model", tool)  # type: ignore[arg-type]
+
+    def test_accepts_basemodel_result(self):
+        from mcp_server._tool_factory import _build_call_tool_result
+
+        tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
+        result = _build_call_tool_result(_Output(doubled=4), tool)
+        assert result.structuredContent == {"doubled": 4}
+
 
 class TestConfigImageEnhancer(TestTemplate):
     """The config_show enhancer renders a PNG of the config tree."""

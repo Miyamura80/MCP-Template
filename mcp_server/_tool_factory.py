@@ -68,7 +68,9 @@ def _make_enhanced_tool(
                 "enhancer for {!r} crashed; falling back to headless", entry.name
             )
             result = func(input_obj)
-            tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
+            # Discard any partial output the enhancer accumulated before crashing.
+            tool.extra_content = []
+            tool.app_resource_uri = None
 
         return _build_call_tool_result(result, tool)
 
@@ -80,10 +82,34 @@ def _make_enhanced_tool(
 
 
 def _patch_output_schema(mcp: FastMCP, tool_name: str, output_model: type) -> None:
-    """FastMCP doesn't derive outputSchema when a tool returns CallToolResult,
-    so publish the schema explicitly from the service's output model."""
-    tool = mcp._tool_manager._tools.get(tool_name)
-    if tool is None or not issubclass(output_model, BaseModel):
+    """Publish outputSchema for tools that return CallToolResult.
+
+    FastMCP only derives outputSchema from a tool's return type annotation,
+    and our enhanced wrappers return CallToolResult so the structured output
+    is opaque to it. We patch the registered Tool's output_schema directly.
+
+    KNOWN FRAGILITY: this reaches into `mcp._tool_manager._tools` (double-
+    private). FastMCP has no public API for setting outputSchema on a tool
+    that returns CallToolResult. Backstopped by integration tests in
+    `tests/test_mcp_server.py::test_enhanced_tools_publish_output_schema`.
+    """
+    if not issubclass(output_model, BaseModel):
+        return
+    try:
+        tools_registry = mcp._tool_manager._tools
+    except AttributeError:
+        log.warning(
+            "FastMCP private _tool_manager._tools not found; outputSchema for "
+            "{!r} will not be published. Likely an SDK upgrade incompatibility.",
+            tool_name,
+        )
+        return
+    tool = tools_registry.get(tool_name)
+    if tool is None:
+        log.warning(
+            "Tool {!r} not found in FastMCP registry; outputSchema not published.",
+            tool_name,
+        )
         return
     tool.__dict__["output_schema"] = output_model.model_json_schema()
 
@@ -114,13 +140,25 @@ def _apply_tool_signature(
     )
 
 
-def _build_call_tool_result(result, tool: EnhancedTool) -> CallToolResult:
-    structured = result.model_dump() if hasattr(result, "model_dump") else result
-    serialized = (
-        result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
-    )
-    content: list = [TextContent(type="text", text=serialized), *tool.extra_content]
-    kwargs: dict = {"content": content, "structuredContent": structured}
+def _build_call_tool_result(result: BaseModel, tool: EnhancedTool) -> CallToolResult:
+    """Assemble CallToolResult from a service result + accumulated extras.
+
+    `result` must be a Pydantic BaseModel - the service's output_model
+    instance. Other return types are rejected so outputSchema/structuredContent
+    stay consistent and failures surface here rather than as opaque
+    pydantic_core ValidationErrors deep inside CallToolResult.
+    """
+    if not isinstance(result, BaseModel):
+        raise TypeError(
+            f"Enhanced tool result must be a Pydantic BaseModel, got "
+            f"{type(result).__name__}. Enhancers must return their service's "
+            "output_model instance."
+        )
+    content: list = [
+        TextContent(type="text", text=result.model_dump_json()),
+        *tool.extra_content,
+    ]
+    kwargs: dict = {"content": content, "structuredContent": result.model_dump()}
     app_meta = tool.app_meta()
     if app_meta is not None:
         kwargs["_meta"] = app_meta
