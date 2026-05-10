@@ -17,8 +17,7 @@ Super-opinionated Python template that ships **one codebase, three interfaces** 
 ## Common Commands
 
 ```bash
-# Onboarding & Setup
-make onboard        # Interactive onboarding CLI (rename, deps, env, hooks, media)
+# Setup
 make all            # Sync deps and run main.py
 
 # Testing
@@ -63,19 +62,14 @@ Layering (top calls down, never the reverse):
 - **`mcp_server/`** — FastMCP server (`mycli-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
 - **`api_server/`** — FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`).
 - **`services/`** — `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).
-- **`models/`** — Pydantic input/output schemas referenced by services.
-- **`common/`** — Global configuration via pydantic-settings.
+- **`common/`** — pydantic-settings config.
   - `global_config.yaml` — base; `<name>.yaml` — split configs loaded as root key `<name>`
   - `production_config.yaml` — overlay loaded with high priority when `DEV_ENV=prod`
-- **`db/`** — SQLAlchemy `base.py` + `engine.py`, ORM `models/`, Alembic `migrations/`.
 - **`src/`** — CLI plumbing (`src/cli/`) + shared utils (logging, theme, errors, output).
 - **`utils/llm/`** — DSPY + LiteLLM wrapper with fallback model, Tenacity retries, LangFuse observability.
-- **`tests/`** — pytest; subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
-- **`init/`** — one-time brand-asset generators (`make banner` / `make logo`).
-- **`onboard.py`** — wizard backing `make onboard` (see Common Commands).
+- **`tests/`** — subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
 - **`docs/`** — Next.js + Fumadocs site; English source in `docs/content/en/` (translations auto-generated, see Jules section below).
 - **`.claude/`**, **`.agents/`**, **`.codex/`** — Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
-- **`.github/workflows/`** — CI, release-on-tag, translation sync.
 
 ### Adding a new feature
 
@@ -86,25 +80,14 @@ Layering (top calls down, never the reverse):
 5. (HTTP, optional) Route in `api_server/routes/`.
 6. Tests inheriting `TestTemplate`.
 
-## Code Style
-
-- snake_case for functions/files/directories
-- CamelCase for classes
-- UPPERCASE for constants
-- 4-space indentation, double quotes
-- Use built-in types (list, dict, tuple) not typing.List/Dict/Tuple
-
 ## Configuration Pattern
 
 ```python
 from common import global_config
 
-# Access config values
 global_config.example_parent.example_child
 global_config.llm_config.default_model
-
-# Access secrets from .env
-global_config.OPENAI_API_KEY
+global_config.OPENAI_API_KEY  # secrets from .env
 ```
 
 ## LLM Inference Pattern
@@ -141,12 +124,7 @@ class TestMyFeature(TestTemplate):
 ```python
 from loguru import logger as log
 from src.utils.logging_config import setup_logging
-
 setup_logging()
-log.debug("detailed diagnostic information")
-log.info("general informational message")
-log.warning("warning message for potentially harmful situations")
-log.error("error message for error events")
 ```
 
 ## Commit Message Convention
