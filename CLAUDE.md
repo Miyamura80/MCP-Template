@@ -201,8 +201,8 @@ Apps live in `mcp_server/apps/<name>/`:
 When adding a new app, also add an entry to `[tool.hatch.build.targets.wheel]
 force-include` in `pyproject.toml` so the HTML ships in the wheel.
 
-See `memory/project_mcp_ui_architecture.md` for design rationale and
-`docs/EDGE_CASES.md` for the edge-case spec.
+See `mcp_server/UI_ARCHITECTURE.md` for design rationale and
+`mcp_server/UI_EDGE_CASES.md` for the edge-case spec.
 
 ## Subagents
 

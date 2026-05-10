@@ -87,4 +87,4 @@ mcp_server/
 
 **How to apply:** When implementing MCP UI, follow this architecture. Don't mix UI concerns into the service layer. All new MCP UI features go through enhancers.
 
-**See also:** `docs/EDGE_CASES.md` for the full edge-case spec.
+**See also:** `UI_EDGE_CASES.md` for the full edge-case spec.
