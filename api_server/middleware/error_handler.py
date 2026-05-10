@@ -59,15 +59,14 @@ def _build_error_response(
     details: dict[str, Any] | None = None,
     code_override: str | None = None,
 ) -> JSONResponse:
-    body: dict[str, Any] = {
-        "error": {
-            "code": code_override or _error_code(status_code),
-            "message": message,
-            "request_id": request_id,
-        }
+    error_payload: dict[str, Any] = {
+        "code": code_override or _error_code(status_code),
+        "message": message,
+        "request_id": request_id,
     }
     if details:
-        body["error"]["details"] = details
+        error_payload["details"] = details
+    body: dict[str, Any] = {"error": error_payload}
     return JSONResponse(status_code=status_code, content=body)
 
 

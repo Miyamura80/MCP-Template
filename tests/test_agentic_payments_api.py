@@ -266,12 +266,10 @@ class TestAgenticPaymentsAPI(TestTemplate):
     # --- Auth / Scopes ---
 
     def test_status_requires_payments_read_scope(self):
-        app.dependency_overrides[get_authenticated_user] = lambda: (
-            AuthenticatedUser(
-                user_id="no-scope",
-                auth_method="api_key",
-                scopes=["services:read"],
-            )
+        app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+            user_id="no-scope",
+            auth_method="api_key",
+            scopes=["services:read"],
         )
         client = TestClient(app)
         resp = client.get("/api/v1/agentic-payments/status")

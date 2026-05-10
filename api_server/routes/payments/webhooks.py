@@ -173,8 +173,11 @@ def _cleanup_old_events() -> None:
                 )
             )
             session.commit()
-            if result.rowcount:
-                log.info("Cleaned up {} old processed stripe events", result.rowcount)
+            if result.rowcount:  # type: ignore[unresolved-attribute]
+                log.info(
+                    "Cleaned up {} old processed stripe events",
+                    result.rowcount,  # type: ignore[unresolved-attribute]
+                )
     except Exception:
         with _cleanup_lock:
             if _last_cleanup == new_cleanup:
