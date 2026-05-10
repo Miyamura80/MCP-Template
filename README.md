@@ -80,7 +80,7 @@ One codebase, three interfaces. Write business logic once in `services/` and it 
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  cli.py      │  │ mcp_server/  │  │ api_server/  │   transport / interface
+│ src/cli/app  │  │ mcp_server/  │  │ api_server/  │   transport / interface
 │  (Typer)     │  │ (FastMCP)    │  │ (FastAPI)    │
 └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
        │                 │                 │
@@ -135,12 +135,12 @@ uv run mycli --verbose greet Alice         # detailed output
 
 ## Adding Commands
 
-Drop a Python file in `commands/` and it is auto-discovered.
+Drop a Python file in `src/cli/commands/` and it is auto-discovered.
 
 **Single command** - export a `main()` function:
 
 ```python
-# commands/hello.py
+# src/cli/commands/hello.py
 from typing import Annotated
 import typer
 
@@ -156,7 +156,7 @@ uv run mycli hello World   # Hello, World!
 **Subcommand group** - export `app = typer.Typer()`:
 
 ```python
-# commands/db.py
+# src/cli/commands/db.py
 import typer
 
 app = typer.Typer()

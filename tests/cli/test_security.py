@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from cli import _register_builtin_commands, _register_user_commands, app
+from src.cli.app import _register_builtin_commands, _register_user_commands, app
 from src.cli.security import (
     _score_bar,
     _score_label,

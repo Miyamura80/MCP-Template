@@ -146,13 +146,13 @@ def _register_builtin_commands() -> None:
 
 
 def _register_user_commands() -> None:
-    """Discover and register user commands from commands/ (idempotent)."""
+    """Discover and register user commands from src/cli/commands/ (idempotent)."""
     global _user_commands_registered  # noqa: PLW0603
     if _user_commands_registered:
         return
     _user_commands_registered = True
 
-    from commands import discover_commands
+    from src.cli.commands import discover_commands
 
     discover_commands(app)
 
