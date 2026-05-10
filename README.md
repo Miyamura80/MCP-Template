@@ -58,21 +58,21 @@ bash install-skills.sh && rm install-skills.sh
 
 ## Key Features
 
-Opinionated Python template for fast development. Three transports, one shared service layer.
-
-**Transports**
-- Typer **CLI** with auto-discovery commands, global flags, output formatting, shell completions, and self-update
-- **MCP server** (FastMCP, stdio) - every service is auto-registered as a tool
-- **FastAPI HTTP server** with WorkOS + API-key auth, Stripe billing, and rate limiting
-
-**Infra**
-- `uv` dependency management + Pydantic-settings config (YAML + `.env`)
-- SQLAlchemy + Alembic (`db/`)
-- DSPY + LiteLLM with LangFuse observability (`utils/llm/`)
-- pytest with `TestTemplate` config-isolation base class
-- Ruff + Vulture + ty + import-linter via `make ci`
-- prek pre-commit hooks (folder-size guards, ai-writing-check, agent-config sync)
-- Ralph Wiggum agent loop, Claude/Codex agent + skill bundles
+| Feature | Stack |
+|---|---|
+| CLI (auto-discovery commands, global flags, shell completions, self-update) | Typer |
+| MCP server (stdio, services auto-registered as tools) | FastMCP |
+| HTTP API server | FastAPI + Uvicorn |
+| Auth | WorkOS + API keys |
+| Payments | Stripe |
+| Database + migrations | SQLAlchemy + Alembic |
+| Config (YAML + `.env`) | Pydantic-settings |
+| LLM inference + observability | DSPY + LiteLLM + LangFuse |
+| Testing | pytest + `TestTemplate` |
+| Lint / type / dead-code | Ruff + Vulture + ty + import-linter |
+| Pre-commit (folder size, ai-writing, agent-config sync) | prek |
+| Agent loop | Ralph Wiggum |
+| Telemetry | Anonymous, opt-out |
 
 ## Architecture
 
