@@ -1,4 +1,4 @@
-"""Enhancer registry — opt-in MCP-only wrappers for pure services.
+"""Enhancer registry - opt-in MCP-only wrappers for pure services.
 
 Enhancers add MCP-specific behavior (elicitation, rich content, MCP Apps) to
 services without polluting the pure `(Input) -> Output` service layer. They
@@ -28,8 +28,8 @@ _enhancers: dict[str, EnhancerEntry] = {}
 def enhance(service_name: str, fallback: FallbackMode = "headless"):
     """Register an MCP-specific enhancement for a pure service.
 
-    fallback="headless" — if the enhancer raises, fall back to the pure service result.
-    fallback="error" — propagate the exception (FastMCP turns it into isError).
+    fallback="headless" - if the enhancer raises, fall back to the pure service result.
+    fallback="error" - propagate the exception (FastMCP turns it into isError).
     """
 
     def decorator(fn: Callable) -> Callable:

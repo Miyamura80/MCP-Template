@@ -156,13 +156,13 @@ Structure as: `init()` → `continue(id)` → `cleanup(id)`
 
 This template supports two MCP tool styles:
 
-- **Headless tools** (default) — sync wrapper, no `Context`, returns the
+- **Headless tools** (default) - sync wrapper, no `Context`, returns the
   Pydantic output model so FastMCP derives `outputSchema`. The CLI/API/MCP
   transports share identical behavior. Use this for any tool the LLM should
   call autonomously without UI affordances.
-- **Enhanced tools** (opt-in via `@enhance` in `mcp_server/enhancers/`) — async
+- **Enhanced tools** (opt-in via `@enhance` in `mcp_server/enhancers/`) - async
   wrapper with `Context`, may elicit user input mid-call, attach images/audio,
-  or render an MCP App (iframe dashboard). MCP-only — never affects CLI/API
+  or render an MCP App (iframe dashboard). MCP-only - never affects CLI/API
   consumers of the same service. The pure service stays untouched in
   `services/`.
 

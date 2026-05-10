@@ -181,7 +181,7 @@ class TestDoctorEnhancerFlows(TestTemplate):
         result = asyncio.run(doctor_enhanced(tool))
 
         assert result.has_failures is True
-        # Service called once (initial check) — no second call after decline.
+        # Service called once (initial check) - no second call after decline.
         assert call_count == 1
 
     def test_accepted_elicit_re_runs_service_with_fix_true(self):
@@ -211,7 +211,7 @@ class TestDoctorEnhancerFlows(TestTemplate):
         assert result.has_failures is False
 
     def test_accepted_elicit_with_fix_false_does_not_re_run(self):
-        """User accepted the dialog but unchecked the box — should not re-run."""
+        """User accepted the dialog but unchecked the box - should not re-run."""
         from mcp_server.enhancers.doctor import doctor_enhanced
         from mcp_server.enhancers.schemas import ConfirmFix
         from models.doctor import DoctorInput, DoctorResult
@@ -347,7 +347,7 @@ class TestConfigImageEnhancer(TestTemplate):
         assert data is not None  # still produces a (small) image
 
     def test_handles_deeply_nested_config(self):
-        """Depth limiter should kick in past 4 levels — should not infinite-recurse."""
+        """Depth limiter should kick in past 4 levels - should not infinite-recurse."""
         from mcp_server.enhancers.config import _format_config_lines
 
         nested: dict = {"a": 1}

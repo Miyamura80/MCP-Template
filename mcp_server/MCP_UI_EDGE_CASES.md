@@ -9,7 +9,7 @@ Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich 
 | C1 | Client does not support elicitation | Enhancer checks `tool.can_elicit`. If false, skip the elicit; fall through with default input. Never call `ctx.elicit()` blindly. |
 | C2 | Client does not support MCP Apps | No spec-standard capability flag exists (SEP-1724/2133 unratified). `tool.can_show_app` returns `True` unless `MCP_DISABLE_APPS=1`. Clients that ignore `_meta.ui.resourceUri` see only the structured/text content. |
 | C3 | Client renders neither apps nor images | Enhancer falls back to plain text via the structured output. The pure service result is always usable on its own. |
-| C4 | Client claims a capability but doesn't honor it | No detection. The user sees a degraded UX. Acceptable — no fix in scope. |
+| C4 | Client claims a capability but doesn't honor it | No detection. The user sees a degraded UX. Acceptable - no fix in scope. |
 
 ## Enhancer failure modes
 
@@ -28,8 +28,8 @@ Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich 
 | EL1 | Schema includes nested `BaseModel` | Spec forbids; SDK raises `TypeError` at registration. Use only flat `BaseModel` with primitive fields. |
 | EL2 | Schema includes `list[str]` | Python SDK accepts; spec does not. Avoid for cross-client compat. Use repeated elicits or comma-separated `str` if needed. |
 | EL3 | User accepts elicitation | `isinstance(r, AcceptedElicitation)` is `True`; `r.data` is the validated Pydantic instance. |
-| EL4 | User declines | `isinstance(r, DeclinedElicitation)`. Treat as "user said no" — do not retry. |
-| EL5 | User cancels (closes dialog) | `isinstance(r, CancelledElicitation)`. Treat as "abort the tool call gracefully" — return what we have so far. |
+| EL4 | User declines | `isinstance(r, DeclinedElicitation)`. Treat as "user said no" - do not retry. |
+| EL5 | User cancels (closes dialog) | `isinstance(r, CancelledElicitation)`. Treat as "abort the tool call gracefully" - return what we have so far. |
 | EL6 | Client returns malformed data | SDK validates against the Pydantic schema before returning. Validation failure surfaces as a `ToolError`. |
 
 ## MCP App attachment
@@ -41,7 +41,7 @@ Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich 
 | A3 | Old host (early ChatGPT Apps SDK) reads only flat `_meta["ui/resourceUri"]` | `EnhancedTool.send_app()` dual-keys both `_meta.ui.resourceUri` and `_meta["ui/resourceUri"]` for compat. |
 | A4 | App-only tool surfaces to LLM | `meta={"ui": {"visibility": ["app"]}}` is convention, not spec. Some clients will expose these to the LLM. Acceptable; documented limitation. For hard isolation, run a second `FastMCP` instance app-tools-only (out of scope). |
 | A5 | App calls server tool that doesn't exist | `app.callServerTool({name})` round-trip returns `isError: true` with a "tool not found" message. Frontend handles via `ontoolresult` error branch. |
-| A6 | Dashboard JS tries to access network/storage | Iframe is sandboxed by the host. Most hosts disallow `fetch`, `localStorage`, top-level navigation. Plan UI accordingly — all state through `callServerTool`. |
+| A6 | Dashboard JS tries to access network/storage | Iframe is sandboxed by the host. Most hosts disallow `fetch`, `localStorage`, top-level navigation. Plan UI accordingly - all state through `callServerTool`. |
 
 ## Output schema
 
@@ -57,7 +57,7 @@ Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich 
 | ID | Scenario | Expected behavior |
 |---|---|---|
 | R1 | Image too large for client to render inline | No size enforcement at the enhancer layer. Hosts may truncate or drop. Keep images <1 MB base64-encoded as a guideline. |
-| R2 | `audience` annotation set to `["assistant"]` only | Client SHOULD hide from human user. Not all clients honor this — treat as a hint, not a guarantee. |
+| R2 | `audience` annotation set to `["assistant"]` only | Client SHOULD hide from human user. Not all clients honor this - treat as a hint, not a guarantee. |
 | R3 | Multiple `send_image` calls in one enhancer | All appended to the response `content` list in call order. No deduplication. |
 | R4 | MIME type unsupported by client | Most clients fall back to showing metadata. No spec-level negotiation. |
 
@@ -65,7 +65,7 @@ Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich 
 
 | ID | Scenario | Expected behavior |
 |---|---|---|
-| B1 | User installs the wheel without running `make build_apps` | `dist/mcp-app.html` is committed and force-included in the wheel — works out of the box. |
+| B1 | User installs the wheel without running `make build_apps` | `dist/mcp-app.html` is committed and force-included in the wheel - works out of the box. |
 | B2 | Developer modifies `App.tsx` but forgets to rebuild | `make build_apps` runs the React build; the committed `dist/mcp-app.html` is overwritten. Pre-commit hook (prek) does NOT auto-build; manual step. Add a test that compares `dist/mcp-app.html` mtime vs `src/` mtimes if drift becomes a problem. |
 | B3 | `bun` not installed when `make build_apps` runs | Target fails fast with a clear error message. CI never invokes this target. |
 | B4 | Adding a new MCP App | Create `mcp_server/apps/<name>/` mirroring `doctor_dashboard/`. Update `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml` to include the new `dist/mcp-app.html`. |
@@ -76,22 +76,22 @@ Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich 
 |---|---|---|
 | T1 | Service called from CLI (`cli.py`) | Enhancers are not invoked. Pure service runs. No `Context`, no elicitation, no app meta. |
 | T2 | Service called from API (`api_server/`) | Same as T1. Enhancers are MCP-only. |
-| T3 | Service called from MCP without an enhancer | Headless path — returns Pydantic model directly via FastMCP. |
-| T4 | Service called from MCP with an enhancer | Enhanced path — async, with `Context`, returns `CallToolResult`. |
+| T3 | Service called from MCP without an enhancer | Headless path - returns Pydantic model directly via FastMCP. |
+| T4 | Service called from MCP with an enhancer | Enhanced path - async, with `Context`, returns `CallToolResult`. |
 
 ## Testing
 
 | ID | Scenario | Expected behavior |
 |---|---|---|
-| TT1 | Unit-testing an enhancer | Use `MockContext` helper. Stub `session.check_client_capability` and `session.elicit`. Don't try to mock `RequestContext` — too deep. |
+| TT1 | Unit-testing an enhancer | Use `MockContext` helper. Stub `session.check_client_capability` and `session.elicit`. Don't try to mock `RequestContext` - too deep. |
 | TT2 | E2E-testing the dashboard | Out of scope this PR. See [#37](https://github.com/Miyamura80/MCP-Template/issues/37) (Sunpeak) and the future Desktest follow-up. |
-| TT3 | Existing `tests/test_mcp_server.py` after `outputSchema` change | Registry-only assertions — no behavioral break. Add a check that enhanced tools are still listed. |
+| TT3 | Existing `tests/test_mcp_server.py` after `outputSchema` change | Registry-only assertions - no behavioral break. Add a check that enhanced tools are still listed. |
 
 ## Out of scope (intentionally)
 
-- **Resources / Prompts** — no enhancer support; existing FastMCP primitives only
-- **Sampling** — not used by any enhancer in this PR
-- **Tasks (SEP-1686)** — long-running ops, separate work
-- **Real MCP host integration tests** — see [#37](https://github.com/Miyamura80/MCP-Template/issues/37)
-- **Visual regression tests** — premature on a churning UI
-- **Hard LLM/app tool isolation via separate FastMCP servers** — visibility convention is good enough for now
+- **Resources / Prompts** - no enhancer support; existing FastMCP primitives only
+- **Sampling** - not used by any enhancer in this PR
+- **Tasks (SEP-1686)** - long-running ops, separate work
+- **Real MCP host integration tests** - see [#37](https://github.com/Miyamura80/MCP-Template/issues/37)
+- **Visual regression tests** - premature on a churning UI
+- **Hard LLM/app tool isolation via separate FastMCP servers** - visibility convention is good enough for now

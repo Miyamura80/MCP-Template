@@ -8,7 +8,7 @@ Builds FastMCP tools from `ServiceEntry` records, branching between two paths:
   function. Returns a `CallToolResult`. We patch `outputSchema` explicitly
   because FastMCP doesn't derive it when a tool returns `CallToolResult`.
 
-Don't reach for these helpers from feature code — use `@service` and `@enhance`.
+Don't reach for these helpers from feature code - use `@service` and `@enhance`.
 """
 
 import inspect
@@ -26,7 +26,7 @@ from services import ServiceEntry
 
 
 def make_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
-    """Register a service as an MCP tool — enhanced if an enhancer exists, else headless."""
+    """Register a service as an MCP tool - enhanced if an enhancer exists, else headless."""
     enhancer_entry = get_enhancer(entry.name)
     if enhancer_entry is not None:
         _make_enhanced_tool(mcp, entry, enhancer_entry)

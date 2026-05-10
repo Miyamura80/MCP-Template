@@ -1,4 +1,4 @@
-"""EnhancedTool — typed wrapper passed to enhancer functions.
+"""EnhancedTool - typed wrapper passed to enhancer functions.
 
 Provides capability detection, content emission helpers, and elicitation
 passthrough while keeping the pure service callable via `tool.call()`.

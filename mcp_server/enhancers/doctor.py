@@ -1,4 +1,4 @@
-"""Doctor enhancer — elicits before fixing, attaches a dashboard if the client supports it."""
+"""Doctor enhancer - elicits before fixing, attaches a dashboard if the client supports it."""
 
 from mcp.server.elicitation import AcceptedElicitation
 

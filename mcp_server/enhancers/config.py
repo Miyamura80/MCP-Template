@@ -1,4 +1,4 @@
-"""Config enhancer — attaches a rendered config tree image when the client can show it."""
+"""Config enhancer - attaches a rendered config tree image when the client can show it."""
 
 import base64
 import io
