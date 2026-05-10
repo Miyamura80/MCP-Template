@@ -33,16 +33,24 @@ const statusColor: Record<CheckStatus, string> = {
 export function Dashboard({ mcpApp }: DashboardProps) {
   const [result, setResult] = useState<DoctorResult | null>(null);
   const [fixing, setFixing] = useState(false);
+  const [fixError, setFixError] = useState<string | null>(null);
 
   useEffect(() => {
-    mcpApp.ontoolresult = (raw) => {
+    const handler = (raw: unknown) => {
       const data = extractDoctorResult(raw);
       if (data) setResult(data);
+    };
+    mcpApp.ontoolresult = handler;
+    return () => {
+      if (mcpApp.ontoolresult === handler) {
+        mcpApp.ontoolresult = undefined;
+      }
     };
   }, [mcpApp]);
 
   const onFix = async () => {
     setFixing(true);
+    setFixError(null);
     try {
       const raw = await mcpApp.callServerTool({
         name: "doctor",
@@ -50,6 +58,10 @@ export function Dashboard({ mcpApp }: DashboardProps) {
       });
       const data = extractDoctorResult(raw);
       if (data) setResult(data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("doctor auto-fix failed:", err);
+      setFixError(msg);
     } finally {
       setFixing(false);
     }
@@ -67,6 +79,11 @@ export function Dashboard({ mcpApp }: DashboardProps) {
           </button>
         )}
       </header>
+      {fixError && (
+        <div role="alert" style={errorStyle}>
+          Auto-fix failed: {fixError}
+        </div>
+      )}
       <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
         {result.checks.map((c) => (
           <li key={c.name} style={rowStyle}>
@@ -125,4 +142,14 @@ const fixButtonStyle: React.CSSProperties = {
   padding: "6px 12px",
   borderRadius: 6,
   cursor: "pointer",
+};
+
+const errorStyle: React.CSSProperties = {
+  background: "#fef2f2",
+  border: "1px solid #fecaca",
+  color: "#991b1b",
+  padding: "8px 12px",
+  borderRadius: 6,
+  marginBottom: 12,
+  fontSize: 13,
 };

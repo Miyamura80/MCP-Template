@@ -57,4 +57,22 @@ describe("Dashboard", () => {
     });
     expect(screen.queryByRole("button", { name: /auto-fix/i })).not.toBeInTheDocument();
   });
+
+  it("shows error feedback when callServerTool rejects", async () => {
+    const { app } = makeMcpApp();
+    app.callServerTool = vi.fn().mockRejectedValue(new Error("server boom"));
+    render(<Dashboard mcpApp={app} />);
+    app.ontoolresult?.({ structuredContent: sampleResult });
+    const button = await screen.findByRole("button", { name: /auto-fix/i });
+    fireEvent.click(button);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/server boom/i);
+  });
+
+  it("clears the ontoolresult handler on unmount", () => {
+    const { app } = makeMcpApp();
+    const { unmount } = render(<Dashboard mcpApp={app} />);
+    expect(app.ontoolresult).toBeDefined();
+    unmount();
+    expect(app.ontoolresult).toBeUndefined();
+  });
 });
