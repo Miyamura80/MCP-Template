@@ -78,6 +78,10 @@ Layering (top calls down, never the reverse):
 5. (HTTP, optional) Route in `api_server/routes/`.
 6. Tests inheriting `TestTemplate`.
 
+## Code Style
+
+Enforced by ruff - see `[tool.ruff]` in `pyproject.toml`. Run `make fmt` and `make ruff`.
+
 ## Configuration Pattern
 
 ```python
