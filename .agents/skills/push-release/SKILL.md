@@ -5,15 +5,7 @@ description: Cut a new release - bump the version in pyproject.toml, tag, and pu
 
 # Push Release
 
-This project ships three interfaces from a single version in `pyproject.toml`:
-
-| Interface | Entry point | Distribution |
-|-----------|-------------|--------------|
-| **CLI** | `mycli` | PyPI + GitHub Release |
-| **API** | `mycli-api` | PyPI + GitHub Release |
-| **MCP** | `mycli-mcp` | PyPI + GitHub Release + MCP Registry |
-
-All three are packaged together and share the same version number.
+This project ships **one wheel** to PyPI containing all three console scripts (`mycli`, `mycli-api`, `mycli-mcp`) at a single version. One tag push, one PyPI publish — there is no separate PyPI step for the API or MCP. Downstream users `pip install` the package and run whichever entry point they want; the API and MCP server aren't deployed by this repo. The MCP Registry entry refreshes automatically on the same tag (`mcp-registry-publish.yml`), so it's discovery metadata, not a second distribution.
 
 ## Workflow
 
