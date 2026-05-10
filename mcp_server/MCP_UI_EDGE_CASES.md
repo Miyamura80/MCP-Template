@@ -1,6 +1,6 @@
 # MCP UI Edge Cases
 
-Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich content). Pair with `UI_ARCHITECTURE.md` for design rationale.
+Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich content). Pair with `MCP_UI_ARCHITECTURE.md` for design rationale.
 
 ## Capability gaps
 

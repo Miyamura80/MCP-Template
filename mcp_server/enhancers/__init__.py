@@ -6,7 +6,7 @@ are registered via `@enhance("service_name")` and looked up by
 `mcp_server/server.py` at tool registration time. Services without an enhancer
 take the headless path unchanged.
 
-See `mcp_server/UI_ARCHITECTURE.md` and `mcp_server/UI_EDGE_CASES.md`.
+See `mcp_server/MCP_UI_ARCHITECTURE.md` and `mcp_server/MCP_UI_EDGE_CASES.md`.
 """
 
 from collections.abc import Callable

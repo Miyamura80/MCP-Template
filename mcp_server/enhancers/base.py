@@ -55,7 +55,7 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
         """Best-effort check; spec lacks a standard capability for app rendering.
 
         Defaults to True. Set MCP_DISABLE_APPS=1 to force-skip on misbehaving clients.
-        See mcp_server/UI_EDGE_CASES.md C2.
+        See mcp_server/MCP_UI_EDGE_CASES.md C2.
         """
         return os.environ.get("MCP_DISABLE_APPS", "") == ""
 

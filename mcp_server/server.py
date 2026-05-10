@@ -9,7 +9,7 @@ Two registration paths:
   app metadata. Returns a `CallToolResult` carrying both structured output and
   any extra content.
 
-See `mcp_server/UI_ARCHITECTURE.md` and `mcp_server/UI_EDGE_CASES.md`.
+See `mcp_server/MCP_UI_ARCHITECTURE.md` and `mcp_server/MCP_UI_EDGE_CASES.md`.
 """
 
 import inspect
