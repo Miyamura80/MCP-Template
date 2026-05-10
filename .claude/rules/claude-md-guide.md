@@ -33,13 +33,11 @@ Categories that typically earn their place:
 
 ## What to cut
 
-- ASCII architecture diagrams - they belong in `README.md`. Prefer compact bullet layering.
-- Restating directory purpose when the name already says it.
+- ASCII architecture diagrams - they're a low-density way to transmit structure to a coding agent (lots of tokens for what a few bullets convey). Prefer compact bullet layering; put the diagram in `README.md` if humans want it.
+- Restating directory purpose when the name already says it (`db/` is the database, `tests/` is tests, `.github/workflows/` is CI workflows).
 - Listing files that mirror a directory - they rot, and `ls` is one tool call.
 - Implementation walkthroughs. A `file:line` anchor + one sentence is enough; details are rediscoverable in one `Read`.
 - Style rules already enforced by the linter/formatter. The Code Style section should just point at the linter config.
 - Boilerplate intros ("This file provides guidance to Claude Code...").
 - Sections duplicated by a dedicated section below.
 - Code-block comments that restate the next line.
-
-If the repo defines a commit message convention (emoji prefixes, conventional commits, etc.), follow it for changes to this file.
