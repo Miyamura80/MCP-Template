@@ -69,7 +69,7 @@ Layering (top calls down, never the reverse):
 - **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`.
 - **`.claude/`**, **`.agents/`**, **`.codex/`** - Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
 
-**Don't add new files at the repo root** unless tooling requires it. Nest under an existing folder (`scripts/`, `init/`, `manual_docs/`, `.agents/skills/`, ...).
+**Don't add new files at the repo root** unless tooling requires it. Nest under an existing folder.
 
 ### Adding a new feature
 
