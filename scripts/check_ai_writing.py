@@ -16,7 +16,7 @@ ROOT_SKIP_DIRS = {
     "node_modules",
     ".next",
 }
-RECURSIVE_SKIP_DIRS = {"__pycache__", ".pytest_cache"}
+RECURSIVE_SKIP_DIRS = {"__pycache__", ".pytest_cache", "node_modules", "dist"}
 SKIP_PATH_PREFIXES = {
     ("docs", ".next"),
     ("docs", "node_modules"),

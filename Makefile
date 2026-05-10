@@ -117,6 +117,22 @@ mcp: check_uv ## Run MCP server locally (stdio)
 mcp_inspect: check_uv ## Run MCP server with inspector for debugging
 	@$(PYTHON) mcp dev mcp_server/server.py
 
+build_apps: ## Build all MCP App frontends to dist/mcp-app.html (requires bun)
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@for dir in mcp_server/apps/*/; do \
+		if [ -f "$$dir/package.json" ]; then \
+			echo "$(YELLOW)📦 Building $$dir$(RESET)"; \
+			(cd "$$dir" && bun install --silent && bun run build); \
+		fi; \
+	done
+	@echo "$(GREEN)✅ All MCP Apps built.$(RESET)"
+
+dev_host: ## Run upstream @modelcontextprotocol/ext-apps basic-host for manual smoke testing
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@echo "$(YELLOW)Cloning ext-apps basic-host (one-time)...$(RESET)"
+	@if [ ! -d /tmp/ext-apps ]; then git clone --depth 1 https://github.com/modelcontextprotocol/ext-apps.git /tmp/ext-apps; fi
+	@cd /tmp/ext-apps/examples/basic-host && bun install --silent && bun start
+
 ralph: check_jq ## Run Ralph agent loop
 	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
 	@echo "$(RED)⚠️  It is HIGHLY RECOMMENDED to run Ralph in a sandboxed environment.$(RESET)"
@@ -246,7 +262,7 @@ docs_lint: ## Lint docs links
 
 lint_links: ## Lint all markdown links using pytest-check-links
 	@echo "$(YELLOW)🔍Linting all markdown links with pytest-check-links...$(RESET)"
-	@find . -name "*.md" -not -path "./.venv/*" -not -path "./.venv-test/*" -not -path "./node_modules/*" -not -path "./docs/node_modules/*" | xargs uv run pytest -p no:cov -o "addopts=" --check-links --check-links-ignore "http://localhost:.*"
+	@find . -name "*.md" -not -path "./.venv/*" -not -path "./.venv-test/*" -not -path "*/node_modules/*" | xargs uv run pytest -p no:cov -o "addopts=" --check-links --check-links-ignore "http://localhost:.*"
 	@echo "$(GREEN)✅Link linting completed.$(RESET)"
 
 agents_validate: ## Validate AGENTS.md content

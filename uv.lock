@@ -1951,7 +1951,7 @@ requires-dist = [
     { name = "limits", specifier = ">=5.8.0" },
     { name = "litellm", specifier = ">=1.59.8,!=1.82.*" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.0.0" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.10.0,<2.0.0" },
     { name = "numpy", specifier = ">=2.2.2" },
     { name = "openfeature-sdk", specifier = ">=0.7.1" },
     { name = "packaging", specifier = ">=24.0" },
