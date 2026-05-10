@@ -38,7 +38,7 @@ help: ## Show this help message
 ### Initialization
 .PHONY: onboard banner logo
 onboard: check_uv ## Run interactive onboarding CLI
-	@$(PYTHON) scripts/onboard.py
+	@$(PYTHON) -m init.onboard
 
 banner: check_uv ## Generate project banner image
 	@echo "$(YELLOW)🔍Generating banner...$(RESET)"
