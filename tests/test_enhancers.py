@@ -117,15 +117,24 @@ class TestEnhancerRegistry(TestTemplate):
 
     def test_duplicate_registration_raises(self):
         # Use a unique service name to avoid conflicting with real services.
-        @enhance("__test_dup_service")
-        async def _first(tool):  # pragma: no cover
-            return None
+        # Clean up after ourselves so the test stays idempotent under repeat runs.
+        from mcp_server.enhancers import _enhancers
 
-        with pytest.raises(ValueError, match="Duplicate enhancer"):
+        name = "__test_dup_service"
+        _enhancers.pop(name, None)
+        try:
 
-            @enhance("__test_dup_service")
-            async def _second(tool):  # pragma: no cover
+            @enhance(name)
+            async def _first(tool):  # pragma: no cover
                 return None
+
+            with pytest.raises(ValueError, match="Duplicate enhancer"):
+
+                @enhance(name)
+                async def _second(tool):  # pragma: no cover
+                    return None
+        finally:
+            _enhancers.pop(name, None)
 
     def test_get_enhancer_unknown_returns_none(self):
         assert get_enhancer("__definitely_not_a_real_service__") is None

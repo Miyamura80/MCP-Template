@@ -164,6 +164,7 @@ exclude = [
     "tests/test_agentic_payments.py",
     "tests/test_agentic_payments_api.py",
     "tests/test_enhancers.py",
+    "tests/test_mcp_server.py",
 ]
 
 [tool.file_length]
