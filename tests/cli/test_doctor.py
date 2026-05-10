@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from cli import _register_builtin_commands, _register_user_commands, app
 from models.doctor import CheckResultModel
 from services.doctor_svc import (
     _check_env_exists,
@@ -12,6 +11,7 @@ from services.doctor_svc import (
     _check_python_version,
     _check_uv_installed,
 )
+from src.cli.app import _register_builtin_commands, _register_user_commands, app
 from tests.test_template import TestTemplate
 
 runner = CliRunner()

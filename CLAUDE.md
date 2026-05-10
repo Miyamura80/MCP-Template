@@ -16,7 +16,7 @@ Super-opinionated Python template that ships **one codebase, three interfaces** 
 
 ```bash
 # Setup
-make all            # Sync deps and run main.py
+make all            # Sync dependencies
 
 # Testing
 make test           # Run pytest on tests/
@@ -49,14 +49,14 @@ uv run pytest path/to/test.py  # Run specific test
 
 Layering (top calls down, never the reverse):
 
-- **Transports:** `cli.py` (Typer) · `mcp_server/` (FastMCP) · `api_server/` (FastAPI)
+- **Transports:** `src/cli/app.py` (Typer) · `mcp_server/` (FastMCP) · `api_server/` (FastAPI)
 - **Services:** `services/` - pure `@service`-decorated functions, transport-agnostic
 - **Contracts:** `models/` - Pydantic input/output schemas shared by all transports
 - **Infra:** `common/` (config) · `db/` (SQLAlchemy + Alembic) · `utils/llm/` (DSPY) · `src/utils/` (logging, theme, errors)
 
 ### Top-level layout
 
-- **`cli.py`** + **`commands/`** - Typer CLI (`mycli`); `commands/__init__.py` auto-discovers `commands/*.py` and registers them.
+- **`src/cli/app.py`** + **`commands/`** - Typer CLI (`mycli`); `commands/__init__.py` auto-discovers `commands/*.py` and registers them.
 - **`mcp_server/`** - FastMCP server (`mycli-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
 - **`api_server/`** - FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`).
 - **`services/`** - `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).

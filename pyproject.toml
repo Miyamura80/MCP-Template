@@ -73,7 +73,7 @@ Repository = "https://github.com/Miyamura80/CLI-Template"
 Issues = "https://github.com/Miyamura80/CLI-Template/issues"
 
 [project.scripts]
-mycli = "cli:main_cli"
+mycli = "src.cli.app:main_cli"
 mycli-mcp = "mcp_server:main"
 mycli-api = "api_server:main"
 
@@ -86,7 +86,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "common", "utils", "commands", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"cli.py" = "cli.py"}
 
 [tool.ruff]
 line-length = 88
@@ -150,10 +149,9 @@ exclude = [
     "src/utils/theme.py",
     "tests/conftest.py",
     "init/",
-    "onboard.py",
+    "scripts/onboard.py",
     "commands/",
     "src/cli/",
-    "cli.py",
     "templates/",
     "services/",
     "models/",
@@ -168,7 +166,7 @@ exclude = [
 [tool.file_length]
 max_lines = 500
 exclude = [
-    "onboard.py",
+    "scripts/onboard.py",
     "api_server/routes/payments/webhooks.py",
     "api_server/middleware/rate_limit.py",
 ]

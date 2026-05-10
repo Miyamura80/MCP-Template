@@ -80,7 +80,7 @@ One codebase, three interfaces. Write business logic once in `services/` and it 
 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  cli.py      │  │ mcp_server/  │  │ api_server/  │   transport / interface
+│ src/cli/app  │  │ mcp_server/  │  │ api_server/  │   transport / interface
 │  (Typer)     │  │ (FastMCP)    │  │ (FastAPI)    │
 └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
        │                 │                 │

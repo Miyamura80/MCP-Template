@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from cli import (
+from src.cli.app import (
     _detect_command,
     _register_builtin_commands,
     _register_user_commands,

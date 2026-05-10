@@ -18,7 +18,7 @@ from rich.table import Table
 
 console = Console()
 
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Branding configuration -------------------------------------------------------
 
@@ -484,7 +484,10 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
         (
             PROJECT_ROOT / "pyproject.toml",
             [
-                (f'{old_name} = "cli:main_cli"', f'{new_name} = "cli:main_cli"'),
+                (
+                    f'{old_name} = "src.cli.app:main_cli"',
+                    f'{new_name} = "src.cli.app:main_cli"',
+                ),
                 (
                     f'{old_name}-mcp = "mcp_server:main"',
                     f'{new_name}-mcp = "mcp_server:main"',
@@ -492,7 +495,7 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
             ],
         ),
         (
-            PROJECT_ROOT / "cli.py",
+            PROJECT_ROOT / "src" / "cli" / "app.py",
             [
                 (f'name="{old_name}"', f'name="{new_name}"'),
                 (f"{old_name} {{version}}", f"{new_name} {{version}}"),
@@ -551,7 +554,7 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
     # Files where we use regex word-boundary replacement instead of literal
     regex_replacements: list[tuple[Path, str, str]] = [
         (PROJECT_ROOT / "README.md", rf"\b{re.escape(old_name)}\b", new_name),
-        (PROJECT_ROOT / "release.md", rf"\b{re.escape(old_name)}\b", new_name),
+        (PROJECT_ROOT / "manual_docs" / "release.md", rf"\b{re.escape(old_name)}\b", new_name),
         (PROJECT_ROOT / ".claude" / "skills" / "usage" / "SKILL.md", rf"\b{re.escape(old_name)}\b", new_name),
     ]
 
