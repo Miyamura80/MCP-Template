@@ -124,7 +124,12 @@ class TestMyFeature(TestTemplate):
 ```python
 from loguru import logger as log
 from src.utils.logging_config import setup_logging
+
 setup_logging()
+log.debug("detailed diagnostic information")
+log.info("general informational message")
+log.warning("warning message for potentially harmful situations")
+log.error("error message for error events")
 ```
 
 ## Commit Message Convention
