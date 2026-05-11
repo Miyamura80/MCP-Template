@@ -1,5 +1,5 @@
 [project]
-name = "miyamura80-cli-template"
+name = "mcp-template"
 version = "0.1.1"
 description = "🪛 CLI tool template (python) with batteries included. Auto-install, updates, linting, dead code analysis, and a whole lot more."
 authors = [
@@ -68,14 +68,14 @@ readme = "README.md"
 requires-python = ">= 3.12"
 
 [project.urls]
-Homepage = "https://github.com/Miyamura80/CLI-Template"
-Repository = "https://github.com/Miyamura80/CLI-Template"
-Issues = "https://github.com/Miyamura80/CLI-Template/issues"
+Homepage = "https://github.com/Miyamura80/MCP-Template"
+Repository = "https://github.com/Miyamura80/MCP-Template"
+Issues = "https://github.com/Miyamura80/MCP-Template/issues"
 
 [project.scripts]
-mycli = "src.cli.app:main_cli"
-mycli-mcp = "mcp_server:main"
-mycli-api = "api_server:main"
+mymcp = "src.cli.app:main_cli"
+mymcp-mcp = "mcp_server:main"
+mymcp-api = "api_server:main"
 
 [build-system]
 requires = ["hatchling"]

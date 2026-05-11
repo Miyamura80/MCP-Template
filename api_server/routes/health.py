@@ -13,7 +13,7 @@ from fastapi import APIRouter
 from loguru import logger as log
 
 try:
-    _APP_VERSION = _pkg_version("miyamura80-cli-template")
+    _APP_VERSION = _pkg_version("mcp-template")
 except PackageNotFoundError:
     _APP_VERSION = "0.1.0"
 

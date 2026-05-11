@@ -1,4 +1,4 @@
-# cli-template
+# mcp-template
 
 <p align="center">
   <img src="media/banner.png" alt="2" width="400">
@@ -35,7 +35,7 @@
 ```text
 Install the CLI and download the usage skill:
 
-pip install miyamura80-cli-template
+pip install mcp-template
 
 curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh -o install-skills.sh
 bash install-skills.sh && rm install-skills.sh
@@ -112,12 +112,12 @@ See [`mcp_server/MCP_UI_ARCHITECTURE.md`](mcp_server/MCP_UI_ARCHITECTURE.md) for
 ```bash
 make onboard              # interactive setup (rename, deps, env, hooks)
 uv sync                   # install deps
-uv run mycli --help       # see all CLI commands
-uv run mycli greet Alice  # run a command
-uv run mycli init my_command  # scaffold a new command
+uv run mymcp --help       # see all CLI commands
+uv run mymcp greet Alice  # run a command
+uv run mymcp init my_command  # scaffold a new command
 
-uv run mycli-mcp          # start the MCP server (stdio)
-uv run mycli-api          # start the FastAPI HTTP server
+uv run mymcp-mcp          # start the MCP server (stdio)
+uv run mymcp-api          # start the FastAPI HTTP server
 ```
 
 ## CLI Usage
@@ -134,9 +134,9 @@ Global flags go **before** the subcommand:
 | `--version` | `-V` | Print version and exit |
 
 ```bash
-uv run mycli --format json config show     # JSON output
-uv run mycli --dry-run greet Bob           # preview without executing
-uv run mycli --verbose greet Alice         # detailed output
+uv run mymcp --format json config show     # JSON output
+uv run mymcp --dry-run greet Bob           # preview without executing
+uv run mymcp --verbose greet Alice         # detailed output
 ```
 
 ## Adding Commands
@@ -156,7 +156,7 @@ def main(name: Annotated[str, typer.Argument(help="Who to greet.")]) -> None:
 ```
 
 ```bash
-uv run mycli hello World   # Hello, World!
+uv run mymcp hello World   # Hello, World!
 ```
 
 **Subcommand group** - export `app = typer.Typer()`:
@@ -174,10 +174,10 @@ def migrate() -> None:
 ```
 
 ```bash
-uv run mycli db migrate
+uv run mymcp db migrate
 ```
 
-Or scaffold with: `uv run mycli init my_command --desc "Does something"`.
+Or scaffold with: `uv run mymcp init my_command --desc "Does something"`.
 
 ## Configuration
 
@@ -194,9 +194,9 @@ global_config.OPENAI_API_KEY
 CLI config inspection:
 
 ```bash
-uv run mycli config show                           # full config
-uv run mycli config get llm_config.cache_enabled   # single value
-uv run mycli config set logging.verbose false      # write override
+uv run mymcp config show                           # full config
+uv run mymcp config get llm_config.cache_enabled   # single value
+uv run mymcp config set logging.verbose false      # write override
 ```
 
 [Full configuration docs](manual_docs/configuration.md)

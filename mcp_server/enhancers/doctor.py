@@ -9,7 +9,9 @@ from models.doctor import DoctorInput, DoctorResult
 
 
 @enhance("doctor", fallback="headless")
-async def doctor_enhanced(tool: EnhancedTool[DoctorInput, DoctorResult]) -> DoctorResult:
+async def doctor_enhanced(
+    tool: EnhancedTool[DoctorInput, DoctorResult],
+) -> DoctorResult:
     result = tool.call()
 
     if result.has_failures and tool.can_elicit and not tool.input.fix:

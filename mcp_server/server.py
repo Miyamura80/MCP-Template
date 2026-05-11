@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 from mcp_server._tool_factory import make_tool
 
-mcp = FastMCP("mycli")
+mcp = FastMCP("mymcp")
 
 _APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"

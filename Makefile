@@ -112,7 +112,7 @@ api: check_uv ## Run authenticated API server
 	@$(PYTHON) mycli-api
 
 mcp: check_uv ## Run MCP server locally (stdio)
-	@$(PYTHON) mycli-mcp
+	@$(PYTHON) mymcp-mcp
 
 mcp_inspect: check_uv ## Run MCP server with inspector for debugging
 	@$(PYTHON) mcp dev mcp_server/server.py

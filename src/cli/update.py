@@ -11,7 +11,7 @@ from rich.console import Console
 
 console = Console(stderr=True)
 
-_PACKAGE_NAME = "miyamura80-cli-template"
+_PACKAGE_NAME = "mcp-template"
 _PYPI_URL = f"https://pypi.org/pypi/{_PACKAGE_NAME}/json"
 _TIMEOUT = 5
 
@@ -43,6 +43,6 @@ def update_command() -> None:
         console.print(f"[green]Updated to {latest_str}![/green]")
     except subprocess.CalledProcessError:
         console.print(
-            "[red]Update failed.[/red] Try manually: uv pip install --upgrade miyamura80-cli-template"
+            "[red]Update failed.[/red] Try manually: uv pip install --upgrade mcp-template"
         )
         raise typer.Exit(code=1) from None

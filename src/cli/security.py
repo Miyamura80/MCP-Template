@@ -10,7 +10,7 @@ from rich.table import Table
 
 from src.cli.state_store import load_state, save_state
 
-_PACKAGE_NAME = "miyamura80-cli-template"
+_PACKAGE_NAME = "mcp-template"
 _TIMEOUT = 5
 _VALID_PACKAGE_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$")
 
