@@ -516,7 +516,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 self._check_and_hit, windows, identity
             )
         except Exception:  # noqa: BLE001
-            # Fail-open on storage backend errors (Redis outage, network) — the
+            # Fail-open on storage backend errors (Redis outage, network); the
             # alternative is converting every request to a 500 during incidents.
             log.warning("Rate limiter error; allowing request through")
             return await call_next(request)

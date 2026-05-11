@@ -477,7 +477,7 @@ def _resolve_payment_error(data: dict) -> str | None:
             if raw_err:
                 return getattr(raw_err, "message", None)
         except Exception:  # noqa: BLE001
-            # Best-effort enrichment: Stripe API errors are non-fatal here —
+            # Best-effort enrichment: Stripe API errors are non-fatal here;
             # webhook processing continues with no error-message detail.
             log.debug("Failed to retrieve PaymentIntent {} for error details", pi)
     return None

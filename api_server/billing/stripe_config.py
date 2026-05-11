@@ -84,7 +84,7 @@ def ensure_stripe() -> bool:
             return True
         except Exception as exc:  # noqa: BLE001
             # Stripe SDK init can fail on env, network, or auth; report and let
-            # the next request retry — billing routes detect the False return.
+            # the next request retry. Billing routes detect the False return.
             log.warning("Failed to initialize Stripe; will retry on next call: {}", exc)
             return False
 

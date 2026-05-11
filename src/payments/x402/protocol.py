@@ -93,7 +93,7 @@ class X402Protocol(PaymentProtocol):
 
             except Exception as exc:  # noqa: BLE001
                 # x402 SDK init can fail in many ways (env, key derivation, network
-                # discovery); a failed init must not crash the host — we retry next call.
+                # discovery); a failed init must not crash the host, so we retry next call.
                 log.warning("x402 init failed; will retry next call: {}", exc)
                 return False
 

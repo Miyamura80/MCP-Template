@@ -86,7 +86,7 @@ Enforced by ruff - see `[tool.ruff]` in `pyproject.toml`. Run `make fmt` and `ma
 
 ### Error handling
 
-Bare `except:`, `except Exception:`, and `except BaseException:` are banned by `ruff`'s `BLE001` rule. Either narrow the catch to the concrete exception types you expect, or — if the call site is a genuine defensive boundary (middleware, health probe, background task, third-party SDK) — suppress with `# noqa: BLE001` *and* a justification comment on the next line (or trailing the same line) explaining why a broad catch is correct. `scripts/check_blind_except_justification.py` (wired into `make ci` and prek) fails the build if any `# noqa: BLE001` lacks a justification.
+Bare `except:`, `except Exception:`, and `except BaseException:` are banned by `ruff`'s `BLE001` rule. Either narrow the catch to the concrete exception types you expect, or - if the call site is a genuine defensive boundary (middleware, health probe, background task, third-party SDK) - suppress with `# noqa: BLE001` *and* a justification comment on the next line (or trailing the same line) explaining why a broad catch is correct. `scripts/check_blind_except_justification.py` (wired into `make ci` and prek) fails the build if any `# noqa: BLE001` lacks a justification.
 
 ## Configuration Pattern
 
