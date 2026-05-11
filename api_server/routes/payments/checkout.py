@@ -30,7 +30,9 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
         import stripe
 
         stripe.Customer.delete(orphaned_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Best-effort cleanup: any Stripe API / network error here is non-fatal;
+        # the orphan will eventually be cleaned by Stripe's GC or ops tooling.
         log.warning("Failed to delete orphaned Stripe customer {}", orphaned_id)
 
 

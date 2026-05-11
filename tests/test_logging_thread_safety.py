@@ -30,7 +30,9 @@ class TestLoggingThreadSafety(TestTemplate):
             try:
                 barrier.wait(timeout=5)
                 logging_module.setup_logging()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
+                # Test harness: collect any thread-side error so the assert below
+                # can fail with the original exception, not a worker-thread crash.
                 errors.append(e)
 
         threads = [threading.Thread(target=call_setup) for _ in range(10)]

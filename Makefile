@@ -280,7 +280,12 @@ file_len_check: check_uv ## Check Python files don't exceed max line count
 	@uv run python scripts/check_file_length.py
 	@echo "$(GREEN)✅File length check completed.$(RESET)"
 
-ci: ruff vulture import_lint ty docs_lint lint_links check_deps file_len_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, lint_links, file_len_check)
+blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification comment
+	@echo "$(YELLOW)🔍Checking blind-except justifications...$(RESET)"
+	@uv run python scripts/check_blind_except_justification.py
+	@echo "$(GREEN)✅Blind-except justification check completed.$(RESET)"
+
+ci: ruff vulture import_lint ty docs_lint lint_links check_deps file_len_check blind_except_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, lint_links, file_len_check, blind_except_check)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
 .PHONY: sync-agent-config

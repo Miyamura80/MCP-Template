@@ -40,3 +40,5 @@ jobs:
         run: make import_lint
       - name: Run file length check
         run: uv run python scripts/check_file_length.py
+      - name: Run blind-except justification check
+        run: uv run python scripts/check_blind_except_justification.py

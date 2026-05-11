@@ -63,7 +63,9 @@ def _fetch_snyk_score(package: str) -> float | None:
                 digits = "".join(c for c in raw if c.isdigit())
                 if digits:
                     return int(digits) / 100
-    except Exception:
+    except (OSError, ValueError):
+        # Network failures (URLError/timeout = OSError) and decode/parse errors;
+        # missing score is non-fatal and shown as "n/a" by the caller.
         pass
     return None
 

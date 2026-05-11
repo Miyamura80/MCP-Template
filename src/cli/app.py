@@ -199,7 +199,8 @@ def main_cli() -> None:
     except SystemExit as exc:
         success = exc.code in (None, 0)
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Top-level CLI boundary: record telemetry for any failure mode then re-raise.
         success = False
         raise
     finally:

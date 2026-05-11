@@ -98,7 +98,10 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
                 time.time() + _STRIPE_STATUS_TTL,
             )
         return status
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Stripe SDK raises StripeError + many subclasses, plus network errors;
+        # any failure here must fall back to the DB-backed status (the function
+        # returns None to signal the caller to use the cached/DB value).
         if isinstance(exc, stripe.AuthenticationError):
             from api_server.billing.stripe_config import reset_stripe_on_auth_error
 

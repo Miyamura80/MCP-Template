@@ -31,7 +31,7 @@ make ruff           # Run ruff linter
 make vulture        # Find dead code
 make ty             # Run type checker
 make lint_links     # Check for broken links in markdown files (README, etc.)
-make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, check_deps, lint_links)
+make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, check_deps, lint_links, file_len_check, blind_except_check)
 
 # Dependencies
 uv sync             # Install dependencies (not pip install)
@@ -83,6 +83,10 @@ Layering (top calls down, never the reverse):
 ## Code Style
 
 Enforced by ruff - see `[tool.ruff]` in `pyproject.toml`. Run `make fmt` and `make ruff`.
+
+### Error handling
+
+Broad catches like `except Exception:` and `except BaseException:` are banned by `ruff`'s `BLE001` rule; bare `except:` is separately banned by `E722` (part of the `E` select). Either narrow the catch to the concrete exception types you expect, or - if the call site is a genuine defensive boundary (middleware, health probe, background task, third-party SDK) - suppress with `# noqa: BLE001` *and* a justification comment on the next line (or trailing the same line) explaining why a broad catch is correct. `scripts/check_blind_except_justification.py` (wired into `make ci` and prek) fails the build if any `# noqa: BLE001` lacks a justification.
 
 ## Configuration Pattern
 

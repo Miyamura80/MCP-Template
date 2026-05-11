@@ -41,7 +41,7 @@ def _build_storage() -> Storage:
         from common import global_config
 
         redis_url = getattr(global_config, "REDIS_URL", None)
-    except Exception:
+    except (ImportError, AttributeError):
         pass
 
     if redis_url:
@@ -49,7 +49,10 @@ def _build_storage() -> Storage:
             from limits.storage import RedisStorage
 
             return RedisStorage(redis_url)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
+            # Redis client raises a wide range of errors (ImportError, ConnectionError,
+            # AuthenticationError, TimeoutError); any of them must downgrade to
+            # MemoryStorage so the API stays up.
             log.warning(
                 "Redis unavailable for rate limiting ({}), falling back to memory storage",
                 exc,
@@ -75,7 +78,7 @@ def _get_tier_limits(tier: str) -> dict:
                 tier_cfg = tiers.get(tier, tiers.get("default", {}))
                 if isinstance(tier_cfg, dict):
                     return tier_cfg
-    except Exception as exc:
+    except (ImportError, AttributeError, KeyError) as exc:
         log.warning("Rate limit config lookup failed; applying defaults: {}", exc)
     # Defaults if config not available
     return {"rps": 5, "rpm": 60, "rph": 1000, "rpd": 5000}
@@ -89,7 +92,7 @@ def _trust_proxy_headers() -> bool:
         rate_limit_cfg = getattr(global_config, "rate_limit", None)
         if rate_limit_cfg and hasattr(rate_limit_cfg, "trust_proxy_headers"):
             return bool(rate_limit_cfg.trust_proxy_headers)
-    except Exception:
+    except (ImportError, AttributeError):
         pass
     return False
 
@@ -138,7 +141,10 @@ async def _identity(request: Request) -> str:
                 return (
                     "user:" + hashlib.sha256(workos_user.user_id.encode()).hexdigest()
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # WorkOS verification can raise jose JWT errors, network errors, or
+            # SDK-specific exceptions; on any failure fall through to the API-key
+            # path rather than rejecting the request from middleware.
             pass
         # Mark that JWT resolution was attempted (even if it failed) so
         # _resolve_tier doesn't call verify_workos_token a second time.
@@ -197,7 +203,9 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
             elif user_id is None:
                 # API key path: key hash not found in DB
                 tier = _INVALID_KEY_TIER
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # DB / SQLAlchemy / connection errors all degrade to default tier so a
+        # transient backend issue doesn't lock users out of the API.
         log.warning("Tier lookup failed for key {}; defaulting: {}", cache_key[:8], exc)
         # Don't cache failed lookups so the next request retries immediately
         return tier
@@ -254,7 +262,10 @@ async def _resolve_tier(request: Request) -> str:
                     return await asyncio.to_thread(
                         _lookup_tier_sync, cache_key, user_id=workos_user.user_id
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
+                # Same rationale as _identity(): JWT verify can raise a wide
+                # range of jose/network errors; on failure fall through to the
+                # API-key path.
                 pass
 
     api_key = request.headers.get("X-API-KEY", "")
@@ -379,7 +390,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 and not rate_limit_cfg.enabled
             ):
                 return True
-        except Exception:
+        except (ImportError, AttributeError):
             pass
         return False
 
@@ -406,7 +417,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 hit_stats = self._get_limiter().get_window_stats(hit_item, identity)
                 retry_after = max(1, math.ceil(hit_stats.reset_time - time.time()))
                 reset_ts = int(hit_stats.reset_time)
-            except Exception:
+            except Exception:  # noqa: BLE001
+                # Storage backend may raise Redis/connection errors when computing
+                # stats; fall back to a 60s Retry-After so the 429 still ships.
                 retry_after = 60
                 reset_ts = int(time.time()) + 60
         headers = {
@@ -460,7 +473,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             identity = await _identity(request)
             tier = await _resolve_tier(request)
             return identity, tier
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Identity/tier resolution touches DB, Redis, JWT verification, and
+            # config loading. Any failure must fail-open (allow the request) so
+            # a single subsystem hiccup doesn't black-hole all traffic.
             log.warning(
                 "Rate limiter identity/tier resolution error; allowing request through"
             )
@@ -499,7 +515,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             hit_window, hit_item, window_stats = await asyncio.to_thread(
                 self._check_and_hit, windows, identity
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Fail-open on storage backend errors (Redis outage, network); the
+            # alternative is converting every request to a 500 during incidents.
             log.warning("Rate limiter error; allowing request through")
             return await call_next(request)
 
