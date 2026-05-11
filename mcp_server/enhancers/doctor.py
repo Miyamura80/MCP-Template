@@ -24,6 +24,6 @@ async def doctor_enhanced(
                 pass
 
     if tool.can_show_app:
-        tool.send_app("ui://mycli/doctor_dashboard")
+        tool.send_app("ui://mymcp/doctor_dashboard")
 
     return result

@@ -56,8 +56,8 @@ Layering (top calls down, never the reverse):
 
 ### Top-level layout
 
-- **`src/cli/app.py`** + **`src/cli/commands/`** - Typer CLI (`mycli`); `src/cli/commands/__init__.py` auto-discovers `src/cli/commands/*.py` and registers them.
-- **`mcp_server/`** - FastMCP server (`mycli-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
+- **`src/cli/app.py`** + **`src/cli/commands/`** - Typer CLI (`mymcp`); `src/cli/commands/__init__.py` auto-discovers `src/cli/commands/*.py` and registers them.
+- **`mcp_server/`** - FastMCP server (`mymcp-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
 - **`api_server/`** - FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`).
 - **`services/`** - `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).
 - **`common/`** - pydantic-settings config.
@@ -184,7 +184,7 @@ async def my_enhanced(tool: EnhancedTool[MyInput, MyOutput]) -> MyOutput:
     if tool.can_elicit:
         ...  # await tool.elicit(...)
     if tool.can_show_app:
-        tool.send_app("ui://mycli/my_dashboard")
+        tool.send_app("ui://mymcp/my_dashboard")
     return result
 ```
 

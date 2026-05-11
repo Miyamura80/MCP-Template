@@ -48,7 +48,7 @@ app.include_router(agentic_payments.router)
 
 
 def main() -> None:
-    """Entry-point for ``mycli-api`` console script."""
+    """Entry-point for ``mymcp-api`` console script."""
     uvicorn.run(
         "api_server.server:app",
         host=global_config.server.host,

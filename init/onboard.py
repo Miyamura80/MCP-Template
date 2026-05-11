@@ -649,7 +649,7 @@ def cli_name() -> None:
 
     rprint(
         Panel(
-            f"Renamed CLI from [red]mycli[/red] → [green]{name}[/green]\n\n"
+            f"Renamed CLI from [red]mymcp[/red] → [green]{name}[/green]\n\n"
             "Updated files:\n" + "\n".join(f"  {f}" for f in changed_files),
             title="✅ CLI Name Complete",
             border_style="green",
@@ -1084,7 +1084,7 @@ def _disable_mcp() -> None:
 
     pyproject_path = PROJECT_ROOT / "pyproject.toml"
     text = pyproject_path.read_text()
-    # Remove mycli-mcp entrypoint line
+    # Remove mymcp-mcp entrypoint line
     text = re.sub(r'^.*-mcp\s*=\s*"mcp_server:main"\s*\n', "", text, flags=re.MULTILINE)
     # Remove mcp dependency line
     text = re.sub(r'^\s*"mcp\[cli\].*",?\s*\n', "", text, flags=re.MULTILINE)
