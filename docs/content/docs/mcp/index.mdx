@@ -5,7 +5,7 @@ description: Connect AI assistants to use your tools via MCP
 
 The MCP server lets AI assistants call your tools directly. Set it up once and any MCP-compatible client can use all available tools without manual copy-pasting.
 
-The server uses **stdio transport** (stdin/stdout) - no HTTP server or port configuration needed. The AI client spawns the server as a subprocess and communicates over stdin/stdout pipes.
+The server is **remote-first**: by default `mycli-mcp` runs on **Streamable HTTP** so it can be hosted (Smithery, Cloudflare, Railway, your own infra) and reached by any MCP-aware Host over the network at `http://<host>:<port>/mcp`. Stdio transport is supported as a **fallback** for local editor integrations - pass `--stdio` (or set `MCP_TRANSPORT=stdio`) and the AI client spawns the server as a subprocess and communicates over stdin/stdout pipes.
 
 ## Quick Start
 

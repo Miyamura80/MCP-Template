@@ -1,19 +1,27 @@
 """FastMCP server that registers services as MCP tools and exposes app HTML resources.
 
-Two registration paths (see `_tool_factory.py` for details):
+**Remote-first.** By default this server runs on **Streamable HTTP** so it can
+be hosted (Smithery, Cloudflare, Railway, your own infra) and reached by any
+MCP-aware Host over the network. Stdio is still supported for local editor
+integrations via the ``--stdio`` flag, but treat it as the fallback.
+
+Two tool registration paths (see ``_tool_factory.py`` for details):
 
 - **Headless** (default): sync wrapper, returns the Pydantic output model directly.
-- **Enhanced** (opt-in via `@enhance`): async wrapper with `Context`, may elicit
+- **Enhanced** (opt-in via ``@enhance``): async wrapper with ``Context``, may elicit
   user input, attach images/audio, or render an MCP App (iframe dashboard).
 
-See `mcp_server/MCP_UI_ARCHITECTURE.md` and `mcp_server/MCP_UI_EDGE_CASES.md`.
+See ``mcp_server/MCP_UI_ARCHITECTURE.md`` and ``mcp_server/MCP_UI_EDGE_CASES.md``.
 """
 
+import argparse
+import os
 from pathlib import Path
 
 from loguru import logger as log
 from mcp.server.fastmcp import FastMCP
 
+from common import global_config
 from mcp_server._tool_factory import make_tool
 
 mcp = FastMCP("mycli")
@@ -61,6 +69,55 @@ _register_tools()
 _register_app_resources()
 
 
+def _parse_args() -> argparse.Namespace:
+    cfg = global_config.mcp_server
+    parser = argparse.ArgumentParser(
+        prog="mycli-mcp",
+        description="MCP server for mycli. Defaults to remote (Streamable HTTP).",
+    )
+    parser.add_argument(
+        "--stdio",
+        action="store_true",
+        help="Run on stdio (local child-process transport). Fallback for editor integrations.",
+    )
+    parser.add_argument("--host", default=cfg.host, help=f"HTTP bind host (default: {cfg.host}).")
+    parser.add_argument("--port", type=int, default=cfg.port, help=f"HTTP bind port (default: {cfg.port}).")
+    parser.add_argument(
+        "--path",
+        default=cfg.path,
+        help=f"Streamable HTTP endpoint path (default: {cfg.path}).",
+    )
+    parser.add_argument(
+        "--stateless",
+        action="store_true",
+        default=cfg.stateless,
+        help="Stateless HTTP mode (no per-session state on the server).",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    """Run the MCP server on stdio transport."""
-    mcp.run(transport="stdio")
+    """Run the MCP server.
+
+    Default transport: **Streamable HTTP** (remote). Pass ``--stdio`` to fall
+    back to a local stdio child-process transport.
+    """
+    args = _parse_args()
+
+    use_stdio = args.stdio or os.environ.get("MCP_TRANSPORT", "").lower() == "stdio"
+    if use_stdio:
+        log.info("Starting MCP server on stdio (fallback transport)")
+        mcp.run(transport="stdio")
+        return
+
+    mcp.settings.host = args.host
+    mcp.settings.port = args.port
+    mcp.settings.streamable_http_path = args.path
+    mcp.settings.stateless_http = args.stateless
+    log.info(
+        "Starting MCP server on Streamable HTTP at http://{}:{}{}",
+        args.host,
+        args.port,
+        args.path,
+    )
+    mcp.run(transport="streamable-http")

@@ -53,12 +53,21 @@ backend is a Server, neither is an "App".
 
 ## 5. Transports
 
-- **stdio** - Server runs **locally on the Host machine** as a child process
-  spawned by the Client. No network. Use for IDE plugins, CLI tools,
-  per-user local integrations.
-- **Streamable HTTP** - Server runs **remotely**, reached over the network;
-  one HTTP endpoint with optional SSE streaming, OAuth 2.1. Use for hosted/
-  multi-tenant servers.
+> **This repo's policy: remote-first.** `mycli-mcp` defaults to **Streamable
+> HTTP**. Stdio is a **secondary fallback** for local editor integrations
+> (`mycli-mcp --stdio`). When in doubt, design for the remote/HTTP case.
+
+- **Streamable HTTP** *(first-class, default)* - Server runs **remotely**,
+  reached over the network; one HTTP endpoint with optional SSE streaming,
+  OAuth 2.1. Use for hosted/multi-tenant servers. This is what
+  `mycli-mcp` runs by default — host/port/path configured under
+  `mcp_server:` in `common/global_config.yaml`, override per-invocation via
+  `--host` / `--port` / `--path` / `--stateless`.
+- **stdio** *(secondary, fallback)* - Server runs **locally on the Host
+  machine** as a child process spawned by the Client. No network, no auth,
+  single-tenant. Reach for it only when remote hosting isn't an option
+  (e.g. an IDE plugin running fully offline). Enable via `mycli-mcp
+  --stdio` or `MCP_TRANSPORT=stdio`.
 - **SSE** - *deprecated* legacy two-endpoint setup. Don't use for new servers.
 
 ## 6. JSON-RPC handshake

@@ -3,7 +3,46 @@ title: Setup
 description: Configure your MCP client to connect to the server
 ---
 
+The server is **remote-first** - by default `mycli-mcp` runs on **Streamable
+HTTP**, which any modern MCP-aware Host can connect to over the network.
+**Stdio is a fallback** for editor clients that only support spawning a
+subprocess locally.
+
+## Remote (recommended): Streamable HTTP
+
+Start the server (locally for testing, or deployed to Smithery / Cloudflare /
+Railway / your own infra):
+
+```bash
+mycli-mcp                                # binds to 127.0.0.1:8765/mcp by default
+mycli-mcp --host 0.0.0.0 --port 9000     # override host/port for hosting
+```
+
+Then point your MCP client at the URL, e.g.
+`http://localhost:8765/mcp` (local dev) or
+`https://mycli.example.com/mcp` (hosted). Most modern Hosts (Claude Desktop /
+Cowork, Cursor, VS Code, Claude Code, etc.) accept a URL field for
+Streamable HTTP servers - consult your client's MCP docs for the exact field
+name.
+
+For Claude Code, for instance:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "url": "http://localhost:8765/mcp"
+    }
+  }
+}
+```
+
+## Stdio fallback (local subprocess)
+
+Use this only if your editor client doesn't support Streamable HTTP URLs.
 Replace `/path/to/MCP-Template` with the actual path to your cloned repo.
+Note the `--stdio` flag - without it the command would default to Streamable
+HTTP and the editor's stdio pipe wouldn't speak the right transport.
 
 <Tabs items={['Claude Cowork/Desktop', 'Claude Code', 'Cursor', 'VS Code', 'Codex', 'Gemini CLI', 'OpenCode', 'OpenClaw']} groupId="mcp-client">
 <Tab value="Claude Cowork/Desktop">
@@ -19,7 +58,7 @@ Add to your Claude Desktop config file:
   "mcpServers": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
       "env": {}
     }
   }
@@ -38,7 +77,7 @@ Add to your project's `.mcp.json`:
   "mcpServers": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
       "env": {}
     }
   }
@@ -52,7 +91,7 @@ Open **Cursor Settings > MCP** and add a new server with:
 
 - **Name**: `mycli`
 - **Type**: `command`
-- **Command**: `uv --directory /path/to/MCP-Template run mycli-mcp`
+- **Command**: `uv --directory /path/to/MCP-Template run mycli-mcp --stdio`
 
 Or add to `.cursor/mcp.json` in your project root:
 
@@ -61,7 +100,7 @@ Or add to `.cursor/mcp.json` in your project root:
   "mcpServers": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
       "env": {}
     }
   }
@@ -79,7 +118,7 @@ Add to your VS Code settings (`settings.json`) or workspace settings:
     "servers": {
       "mycli": {
         "command": "uv",
-        "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+        "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
         "env": {}
       }
     }
@@ -94,7 +133,7 @@ Or add to `.vscode/mcp.json` in your project root:
   "servers": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
       "env": {}
     }
   }
@@ -107,7 +146,7 @@ Or add to `.vscode/mcp.json` in your project root:
 Add to your project's `codex.json` or pass via CLI:
 
 ```bash
-codex --mcp-config '{"mycli": {"command": "uv", "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"]}}'
+codex --mcp-config '{"mycli": {"command": "uv", "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"]}}'
 ```
 
 Or create a `mcp.json` in your project root:
@@ -117,7 +156,7 @@ Or create a `mcp.json` in your project root:
   "mcpServers": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
       "env": {}
     }
   }
@@ -134,7 +173,7 @@ Add to your Gemini CLI settings file (`~/.gemini/settings.json`):
   "mcpServers": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
       "env": {}
     }
   }
@@ -151,7 +190,7 @@ Add to your OpenCode config (`opencode.json` in your project root):
   "mcp": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"]
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"]
     }
   }
 }
@@ -167,7 +206,7 @@ Add to your OpenClaw MCP config:
   "mcpServers": {
     "mycli": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp", "--stdio"],
       "env": {}
     }
   }
@@ -179,4 +218,6 @@ Add to your OpenClaw MCP config:
 
 ### Other MCP Clients
 
-Any MCP-compatible client can connect by spawning `uv --directory /path/to/MCP-Template run mycli-mcp` as a subprocess using stdio transport.
+Any MCP-compatible client supporting Streamable HTTP can connect directly to
+the server's `/mcp` URL. For stdio-only clients, spawn
+`uv --directory /path/to/MCP-Template run mycli-mcp --stdio` as a subprocess.

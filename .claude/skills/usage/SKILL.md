@@ -37,25 +37,41 @@ mycli-api
 
 ## MCP
 
-The MCP server exposes the same services as CLI tools via the Model Context Protocol.
+The MCP server exposes the same services as CLI tools via the Model Context
+Protocol. **Remote-first**: it defaults to **Streamable HTTP** so it can be
+hosted and reached over the network. Stdio is a fallback for local editor
+integrations.
 
 ```bash
-# Run directly (stdio transport)
+# Default: remote Streamable HTTP server (binds to 127.0.0.1:8765/mcp)
 mycli-mcp
+
+# Override host / port / path
+mycli-mcp --host 0.0.0.0 --port 9000 --path /mcp
+
+# Fallback: stdio transport for local editor integrations
+mycli-mcp --stdio
 
 # Debug with the MCP inspector
 mcp dev mcp_server/server.py
 ```
 
-### Connecting MCP to your editor
+### Connecting to a remote MCP server (recommended)
 
-Add to your MCP client config (e.g. `.mcp.json`):
+Most MCP-aware Hosts accept a URL for Streamable HTTP servers. Point them at
+the server's `/mcp` endpoint, e.g. `https://mycli.example.com/mcp`.
+
+### Connecting via stdio (fallback for local editors)
+
+If your editor only supports stdio, add to your MCP client config (e.g.
+`.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "mycli": {
-      "command": "mycli-mcp"
+      "command": "mycli-mcp",
+      "args": ["--stdio"]
     }
   }
 }

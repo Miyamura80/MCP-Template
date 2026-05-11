@@ -4,6 +4,8 @@
 
 Super-opinionated Python template that ships **one codebase, three interfaces** (CLI, MCP server, HTTP API) over a shared service registry. Python >= 3.12 required. Uses `uv` for dependency management (not pip).
 
+**MCP transport policy:** This template treats **remote MCP servers (Streamable HTTP) as the first-class citizen**. `mycli-mcp` defaults to Streamable HTTP so the server is hostable (Smithery, Cloudflare, Railway, etc.) and reachable by any MCP-aware Host over the network. Stdio is supported as a **secondary fallback** (`mycli-mcp --stdio`) for local editor integrations only — don't reach for it first when designing new features, and don't assume stdio-only behaviors (no network, no auth, single-tenant).
+
 **Before any other work in this repo, enable prek:** `uv tool install prek && prek install`. Hooks are defined in `prek.toml`.
 
 **MCP terminology:** For nuances around frequently-confused MCP terms (Host vs. Client vs. Server, Tools vs. Resources vs. Prompts, Roots vs. Resources, transports, OAuth pitfalls, etc.), see [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md). Consult it before naming or designing new MCP-related code.
@@ -57,7 +59,7 @@ Layering (top calls down, never the reverse):
 ### Top-level layout
 
 - **`src/cli/app.py`** + **`src/cli/commands/`** - Typer CLI (`mycli`); `src/cli/commands/__init__.py` auto-discovers `src/cli/commands/*.py` and registers them.
-- **`mcp_server/`** - FastMCP server (`mycli-mcp` script), **stdio only**. `mcp_server/server.py:9` creates the server and auto-wraps every `ServiceEntry` as a tool. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
+- **`mcp_server/`** - FastMCP server (`mycli-mcp` script). **Remote-first: Streamable HTTP is the default transport**; stdio is an opt-in fallback via `mycli-mcp --stdio`. `mcp_server/server.py` creates the server and auto-wraps every `ServiceEntry` as a tool. Configure host/port/path via the `mcp_server:` section in `common/global_config.yaml` or override per-invocation with `--host` / `--port` / `--path` / `--stateless`. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md) before designing MCP code.
 - **`api_server/`** - FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`).
 - **`services/`** - `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).
 - **`common/`** - pydantic-settings config.
@@ -156,7 +158,13 @@ Structure as: `init()` → `continue(id)` → `cleanup(id)`
 
 ## MCP: Headless vs UI
 
-This template supports two MCP tool styles:
+The MCP server is **remote-first** — `mycli-mcp` runs on Streamable HTTP by
+default and any tool you add is reachable over the network. Stdio
+(`mycli-mcp --stdio`) is supported only as a local fallback; design tools
+for the remote case (multi-tenant, network-bound, OAuth-ready) and let
+stdio inherit the same behavior.
+
+Within that, the template supports two MCP tool styles:
 
 - **Headless tools** (default) - sync wrapper, no `Context`, returns the
   Pydantic output model so FastMCP derives `outputSchema`. The CLI/API/MCP

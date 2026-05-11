@@ -23,6 +23,7 @@ from .config_models import (
     FeaturesConfig,
     LlmConfig,
     LoggingConfig,
+    McpServerConfig,
     RateLimitConfig,
     ServerConfig,
     SubscriptionConfig,
@@ -184,6 +185,7 @@ class Config(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig())
     cli: CliConfig = Field(default_factory=lambda: CliConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
+    mcp_server: McpServerConfig = Field(default_factory=lambda: McpServerConfig())
     subscription_config: SubscriptionConfig = Field(
         default_factory=lambda: SubscriptionConfig()
     )

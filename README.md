@@ -61,7 +61,7 @@ bash install-skills.sh && rm install-skills.sh
 | Feature | Stack |
 |---|---|
 | CLI (auto-discovery commands, global flags, shell completions, self-update) | Typer |
-| MCP server (stdio, services auto-registered as tools) | FastMCP |
+| MCP server (remote-first **Streamable HTTP**; stdio fallback; services auto-registered as tools) | FastMCP |
 | HTTP API server | FastAPI + Uvicorn |
 | Auth | WorkOS + API keys |
 | Payments | Stripe |
@@ -101,6 +101,18 @@ One codebase, three interfaces. Write business logic once in `services/` and it 
         └────────────┴───────┴────────────┴─────────────┘
 ```
 
+### MCP transport: remote-first
+
+`mcp_server/` ships as a **remote** server by default: `mycli-mcp` runs on
+**Streamable HTTP** (one endpoint, optional SSE streaming, OAuth-ready) so it
+can be hosted on Smithery, Cloudflare Workers, Railway, or your own infra and
+reached by any MCP-aware Host over the network. Stdio is still supported as a
+**fallback** for local editor integrations (`mycli-mcp --stdio`); reach for it
+only when remote hosting isn't an option.
+
+Configure host/port/path under `mcp_server:` in `common/global_config.yaml`,
+or override per-invocation with `--host`, `--port`, `--path`, `--stateless`.
+
 ### MCP UI (optional)
 
 Need elicitation, image output, or an iframe dashboard for an MCP tool? Add an opt-in **enhancer** in `mcp_server/enhancers/`. Enhancers wrap a service for the MCP transport only - the pure service stays untouched and CLI/API consumers are unaffected.
@@ -116,7 +128,8 @@ uv run mycli --help       # see all CLI commands
 uv run mycli greet Alice  # run a command
 uv run mycli init my_command  # scaffold a new command
 
-uv run mycli-mcp          # start the MCP server (stdio)
+uv run mycli-mcp          # start the MCP server (Streamable HTTP, remote-ready)
+uv run mycli-mcp --stdio  # fallback: run on stdio for local editor integrations
 uv run mycli-api          # start the FastAPI HTTP server
 ```
 

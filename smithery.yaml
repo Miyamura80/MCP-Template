@@ -1,11 +1,35 @@
+# Smithery deployment manifest.
+#
+# This template is remote-first: the MCP server runs on Streamable HTTP by
+# default (`mycli-mcp`). Smithery deploys it as a hosted HTTP server.
+#
+# For local stdio fallback, end users can invoke `mycli-mcp --stdio` directly
+# in their editor's MCP client config - that path is documented in the
+# README and the `usage` skill rather than configured here.
 startCommand:
-  type: stdio
+  type: http
   configSchema:
     type: object
-    properties: {}
+    properties:
+      host:
+        type: string
+        default: "0.0.0.0"
+        description: HTTP bind host.
+      port:
+        type: integer
+        default: 8765
+        description: HTTP bind port.
+      path:
+        type: string
+        default: "/mcp"
+        description: Streamable HTTP endpoint path.
   commandFunction: |-
     (config) => ({
       command: 'mycli-mcp',
-      args: [],
+      args: [
+        '--host', String(config.host ?? '0.0.0.0'),
+        '--port', String(config.port ?? 8765),
+        '--path', String(config.path ?? '/mcp'),
+      ],
       env: {}
     })

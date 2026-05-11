@@ -104,6 +104,17 @@ server:
     - "http://localhost:3000"
 
 ########################################################
+# MCP Server (remote-first; stdio is a fallback)
+########################################################
+mcp_server:
+  # Default transport is Streamable HTTP. Pass --stdio to mycli-mcp to fall
+  # back to a local child-process transport for editor integrations.
+  host: "127.0.0.1"
+  port: 8765
+  path: "/mcp"
+  stateless: false
+
+########################################################
 # CLI
 ########################################################
 telemetry:

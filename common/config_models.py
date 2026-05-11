@@ -121,6 +121,15 @@ class ServerConfig(BaseModel):
     allowed_origins: list[str] = ["http://localhost:3000"]
 
 
+class McpServerConfig(BaseModel):
+    """MCP server configuration. Remote-first (Streamable HTTP) by default."""
+
+    host: str = "127.0.0.1"
+    port: int = 8765
+    path: str = "/mcp"
+    stateless: bool = False
+
+
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration."""
 

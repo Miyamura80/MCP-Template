@@ -5,10 +5,19 @@ description: Test and troubleshoot MCP tools
 
 ## MCP Inspector
 
-Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to test tools interactively without an AI client:
+Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to test tools interactively without an AI client.
+
+**Streamable HTTP (default transport):** start the server, then point the inspector at the URL.
 
 ```bash
-npx @modelcontextprotocol/inspector uv --directory /path/to/MCP-Template run mycli-mcp
+mycli-mcp                                        # http://127.0.0.1:8765/mcp
+npx @modelcontextprotocol/inspector              # then enter the URL in the UI
+```
+
+**Stdio fallback:**
+
+```bash
+npx @modelcontextprotocol/inspector uv --directory /path/to/MCP-Template run mycli-mcp --stdio
 ```
 
 This opens a web UI where you can:
@@ -29,7 +38,7 @@ This opens a web UI where you can:
 ### Tools not appearing
 
 - Run `uv sync` in the MCP-Template directory to ensure dependencies are installed
-- Try running `uv --directory /path/to/MCP-Template run mycli-mcp` manually to check for errors
+- Try running `mycli-mcp` (HTTP) or `mycli-mcp --stdio` (stdio) manually to check for errors
 
 ### Tool call returns an error
 
