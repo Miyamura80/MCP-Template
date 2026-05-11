@@ -14,7 +14,7 @@ from api_server.routes import agentic_payments, auth, health, services
 from api_server.routes.payments import checkout, metering, subscription, webhooks
 from common import global_config
 
-app = FastAPI(title="mycli-api", version="0.1.0")
+app = FastAPI(title="mymcp-api", version="0.1.0")
 
 # --- Middleware (last-added = outermost in Starlette) ---------------------
 

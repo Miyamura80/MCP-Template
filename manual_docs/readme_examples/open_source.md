@@ -3,7 +3,7 @@
 
 ## How to contribute
 
-1. Clone repo and create a new branch: `$ git checkout https://github.com/Miyamura80/mcp-template.git`
+1. Clone repo and create a new branch: `$ git clone https://github.com/Miyamura80/MCP-Template.git`
 2. Make changes and test
 3. Submit a PR (Pull Request) with comprehensive description of changes
 

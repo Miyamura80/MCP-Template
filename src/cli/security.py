@@ -157,7 +157,7 @@ def show_first_install_notice() -> None:
         f"[bold green]🔒 Security verification available for {pkg}[/bold green]\n"
         f"   Snyk:   {get_snyk_advisor_url(pkg)}\n"
         f"   Socket: {get_socket_url(pkg)}\n"
-        f"   [dim]Run 'mycli security' for full details.[/dim]"
+        f"   [dim]Run 'mymcp security' for full details.[/dim]"
     )
 
     state["security_notice_shown"] = True

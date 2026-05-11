@@ -91,7 +91,7 @@ def _read_cli_name() -> str:
     """Read the current CLI entry-point name from pyproject.toml [project.scripts]."""
     text = (PROJECT_ROOT / "pyproject.toml").read_text()
     match = re.search(r"^\[project\.scripts\]\s*\n(\S+)\s*=", text, re.MULTILINE)
-    return match.group(1) if match else "mycli"
+    return match.group(1) if match else "mymcp"
 
 
 STEPS: list[tuple[str, str]] = [
@@ -621,9 +621,9 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
 
 @app.command()
 def cli_name() -> None:
-    """Step 3: Choose the CLI command name (renames all 'mycli' references)."""
+    """Step 3: Choose the CLI command name (renames all 'mymcp' references)."""
     current = _read_cli_name()
-    if current != "mycli":
+    if current != "mymcp":
         rprint(
             f"[blue]ℹ CLI already renamed to '{current}'. Skipping CLI name step.[/blue]"
         )
@@ -631,17 +631,17 @@ def cli_name() -> None:
 
     name = questionary.text(
         "CLI command name (e.g. my-tool):",
-        default="mycli",
+        default="mymcp",
         validate=_validate_cli_name,
     ).ask()
     if name is None:
         raise typer.Abort()
 
-    if name == "mycli":
-        rprint("[yellow]Keeping default name 'mycli'.[/yellow]")
+    if name == "mymcp":
+        rprint("[yellow]Keeping default name 'mymcp'.[/yellow]")
         return
 
-    changed_files = _replace_cli_name("mycli", name)
+    changed_files = _replace_cli_name("mymcp", name)
 
     if not changed_files:
         rprint("[yellow]No files needed updating.[/yellow]")
@@ -1151,8 +1151,8 @@ def _update_mcp_distribution_files(cli_name: str, mcp_name: str) -> None:
     mcp_json_path = PROJECT_ROOT / ".mcp.json.example"
     if mcp_json_path.exists():
         text = mcp_json_path.read_text()
-        text = text.replace("mycli-mcp", mcp_name)
-        text = text.replace('"mycli"', f'"{cli_name}"')
+        text = text.replace("mymcp-mcp", mcp_name)
+        text = text.replace('"mymcp"', f'"{cli_name}"')
         mcp_json_path.write_text(text)
 
     # Update server.json
@@ -1169,7 +1169,7 @@ def _update_mcp_distribution_files(cli_name: str, mcp_name: str) -> None:
     smithery_path = PROJECT_ROOT / "smithery.yaml"
     if smithery_path.exists():
         text = smithery_path.read_text()
-        text = text.replace("mycli-mcp", mcp_name)
+        text = text.replace("mymcp-mcp", mcp_name)
         smithery_path.write_text(text)
 
 

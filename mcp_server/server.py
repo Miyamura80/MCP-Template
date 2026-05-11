@@ -44,7 +44,7 @@ def _register_app_resources() -> None:
         if not app_dir.is_dir():
             continue
         html_path = app_dir / "dist" / "mcp-app.html"
-        uri = f"ui://mycli/{app_dir.name}"
+        uri = f"ui://mymcp/{app_dir.name}"
         _register_app_resource(uri, html_path, app_dir.name)
 
 

@@ -22,7 +22,7 @@ def _get_cli_name() -> str:
     for ep in eps:
         if ep.dist and ep.dist.name == "mcp-template":
             return ep.name
-    return "mycli"
+    return "mymcp"
 
 
 _SERVICE_NAME = _get_cli_name()
