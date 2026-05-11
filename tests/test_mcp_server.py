@@ -58,9 +58,9 @@ class TestMCPServerIntegration(TestTemplate):
 
         resources = asyncio.run(mcp.list_resources())
         uris = {str(r.uri) for r in resources}
-        assert "ui://mycli/doctor_dashboard" in uris
+        assert "ui://mymcp/doctor_dashboard" in uris
 
-        contents = list(asyncio.run(mcp.read_resource("ui://mycli/doctor_dashboard")))
+        contents = list(asyncio.run(mcp.read_resource("ui://mymcp/doctor_dashboard")))
         assert len(contents) == 1
         text = str(contents[0].content)
         assert text.lstrip().lower().startswith("<!doctype html>")
@@ -80,8 +80,8 @@ class TestMCPServerIntegration(TestTemplate):
         result = asyncio.run(tool_fn(ctx=_mock_ctx(), fix=True))
 
         assert result.meta is not None
-        assert result.meta["ui"]["resourceUri"] == "ui://mycli/doctor_dashboard"
-        assert result.meta["ui/resourceUri"] == "ui://mycli/doctor_dashboard"
+        assert result.meta["ui"]["resourceUri"] == "ui://mymcp/doctor_dashboard"
+        assert result.meta["ui/resourceUri"] == "ui://mymcp/doctor_dashboard"
         assert "has_failures" in (result.structuredContent or {})
 
     def test_doctor_omits_app_meta_when_disabled_via_env(self, monkeypatch):

@@ -14,7 +14,7 @@ from api_server.routes import agentic_payments, auth, health, services
 from api_server.routes.payments import checkout, metering, subscription, webhooks
 from common import global_config
 
-app = FastAPI(title="mycli-api", version="0.1.0")
+app = FastAPI(title="mymcp-api", version="0.1.0")
 
 # --- Middleware (last-added = outermost in Starlette) ---------------------
 
@@ -48,7 +48,7 @@ app.include_router(agentic_payments.router)
 
 
 def main() -> None:
-    """Entry-point for ``mycli-api`` console script."""
+    """Entry-point for ``mymcp-api`` console script."""
     uvicorn.run(
         "api_server.server:app",
         host=global_config.server.host,

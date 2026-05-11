@@ -114,6 +114,6 @@ cli:
   default_format: table
   interactive_fallback: true
   check_updates_on_start: true
-  emoji: ""
-  primary_color: "cyan"
-  secondary_color: "green"
+  emoji: "🏵️"
+  primary_color: "bright_yellow"
+  secondary_color: "yellow"

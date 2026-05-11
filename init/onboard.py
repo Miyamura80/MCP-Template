@@ -91,7 +91,7 @@ def _read_cli_name() -> str:
     """Read the current CLI entry-point name from pyproject.toml [project.scripts]."""
     text = (PROJECT_ROOT / "pyproject.toml").read_text()
     match = re.search(r"^\[project\.scripts\]\s*\n(\S+)\s*=", text, re.MULTILINE)
-    return match.group(1) if match else "mycli"
+    return match.group(1) if match else "mymcp"
 
 
 STEPS: list[tuple[str, str]] = [
@@ -319,10 +319,26 @@ def branding() -> None:
 
 
 _RENAME_EXTENSIONS = {
-    ".py", ".toml", ".md", ".mdx", ".yml", ".yaml",
-    ".json", ".tsx", ".ts", ".sh", ".txt",
+    ".py",
+    ".toml",
+    ".md",
+    ".mdx",
+    ".yml",
+    ".yaml",
+    ".json",
+    ".tsx",
+    ".ts",
+    ".sh",
+    ".txt",
 }
-_RENAME_SKIP_DIRS = {".venv", ".venv-test", ".git", "node_modules", "__pycache__", ".uv_cache"}
+_RENAME_SKIP_DIRS = {
+    ".venv",
+    ".venv-test",
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".uv_cache",
+}
 _RENAME_SKIP_FILES = {"uv.lock", "onboard.py", "install-skills.sh"}
 
 
@@ -387,10 +403,12 @@ def _build_rename_replacements(
     for old_repo in _TEMPLATE_REPO_NAMES:
         pairs.append((f"{_TEMPLATE_OWNER}/{old_repo}", f"{github_owner}/{github_repo}"))
         # URL-encoded form (used in badge URLs)
-        pairs.append((
-            f"{_TEMPLATE_OWNER}%2F{old_repo}",
-            f"{github_owner}%2F{github_repo}",
-        ))
+        pairs.append(
+            (
+                f"{_TEMPLATE_OWNER}%2F{old_repo}",
+                f"{github_owner}%2F{github_repo}",
+            )
+        )
 
     # Standalone owner references (CODEOWNERS, author)
     pairs.append((f"@{_TEMPLATE_OWNER}", f"@{github_owner}"))
@@ -454,7 +472,9 @@ def rename() -> None:
         raise typer.Abort()
 
     github_owner, github_repo = _prompt_github_info()
-    replacements = _build_rename_replacements(name, description, github_owner, github_repo)
+    replacements = _build_rename_replacements(
+        name, description, github_owner, github_repo
+    )
     changed_files = _replace_in_files(replacements)
 
     changes = [f"  [green]{f}[/green]" for f in changed_files]
@@ -468,7 +488,11 @@ def rename() -> None:
     summary_lines.append(f"Updated [bold]{len(changed_files)}[/bold] file(s):")
     summary_lines.extend(changes)
 
-    rprint(Panel("\n".join(summary_lines), title="✅ Rename Complete", border_style="green"))
+    rprint(
+        Panel(
+            "\n".join(summary_lines), title="✅ Rename Complete", border_style="green"
+        )
+    )
 
 
 def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
@@ -554,8 +578,16 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
     # Files where we use regex word-boundary replacement instead of literal
     regex_replacements: list[tuple[Path, str, str]] = [
         (PROJECT_ROOT / "README.md", rf"\b{re.escape(old_name)}\b", new_name),
-        (PROJECT_ROOT / ".agents" / "skills" / "push-release" / "SKILL.md", rf"\b{re.escape(old_name)}\b", new_name),
-        (PROJECT_ROOT / ".claude" / "skills" / "usage" / "SKILL.md", rf"\b{re.escape(old_name)}\b", new_name),
+        (
+            PROJECT_ROOT / ".agents" / "skills" / "push-release" / "SKILL.md",
+            rf"\b{re.escape(old_name)}\b",
+            new_name,
+        ),
+        (
+            PROJECT_ROOT / ".claude" / "skills" / "usage" / "SKILL.md",
+            rf"\b{re.escape(old_name)}\b",
+            new_name,
+        ),
     ]
 
     changes: list[str] = []
@@ -589,9 +621,9 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
 
 @app.command()
 def cli_name() -> None:
-    """Step 3: Choose the CLI command name (renames all 'mycli' references)."""
+    """Step 3: Choose the CLI command name (renames all 'mymcp' references)."""
     current = _read_cli_name()
-    if current != "mycli":
+    if current != "mymcp":
         rprint(
             f"[blue]ℹ CLI already renamed to '{current}'. Skipping CLI name step.[/blue]"
         )
@@ -599,17 +631,17 @@ def cli_name() -> None:
 
     name = questionary.text(
         "CLI command name (e.g. my-tool):",
-        default="mycli",
+        default="mymcp",
         validate=_validate_cli_name,
     ).ask()
     if name is None:
         raise typer.Abort()
 
-    if name == "mycli":
-        rprint("[yellow]Keeping default name 'mycli'.[/yellow]")
+    if name == "mymcp":
+        rprint("[yellow]Keeping default name 'mymcp'.[/yellow]")
         return
 
-    changed_files = _replace_cli_name("mycli", name)
+    changed_files = _replace_cli_name("mymcp", name)
 
     if not changed_files:
         rprint("[yellow]No files needed updating.[/yellow]")
@@ -617,7 +649,7 @@ def cli_name() -> None:
 
     rprint(
         Panel(
-            f"Renamed CLI from [red]mycli[/red] → [green]{name}[/green]\n\n"
+            f"Renamed CLI from [red]mymcp[/red] → [green]{name}[/green]\n\n"
             "Updated files:\n" + "\n".join(f"  {f}" for f in changed_files),
             title="✅ CLI Name Complete",
             border_style="green",
@@ -1052,7 +1084,7 @@ def _disable_mcp() -> None:
 
     pyproject_path = PROJECT_ROOT / "pyproject.toml"
     text = pyproject_path.read_text()
-    # Remove mycli-mcp entrypoint line
+    # Remove mymcp-mcp entrypoint line
     text = re.sub(r'^.*-mcp\s*=\s*"mcp_server:main"\s*\n', "", text, flags=re.MULTILINE)
     # Remove mcp dependency line
     text = re.sub(r'^\s*"mcp\[cli\].*",?\s*\n', "", text, flags=re.MULTILINE)
@@ -1119,8 +1151,8 @@ def _update_mcp_distribution_files(cli_name: str, mcp_name: str) -> None:
     mcp_json_path = PROJECT_ROOT / ".mcp.json.example"
     if mcp_json_path.exists():
         text = mcp_json_path.read_text()
-        text = text.replace("mycli-mcp", mcp_name)
-        text = text.replace('"mycli"', f'"{cli_name}"')
+        text = text.replace("mymcp-mcp", mcp_name)
+        text = text.replace('"mymcp"', f'"{cli_name}"')
         mcp_json_path.write_text(text)
 
     # Update server.json
@@ -1137,7 +1169,7 @@ def _update_mcp_distribution_files(cli_name: str, mcp_name: str) -> None:
     smithery_path = PROJECT_ROOT / "smithery.yaml"
     if smithery_path.exists():
         text = smithery_path.read_text()
-        text = text.replace("mycli-mcp", mcp_name)
+        text = text.replace("mymcp-mcp", mcp_name)
         smithery_path.write_text(text)
 
 

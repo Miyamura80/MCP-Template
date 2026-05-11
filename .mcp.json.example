@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "command": "uvx",
       "args": [
-        "mycli-mcp"
+        "mymcp-mcp"
       ],
       "env": {}
     }

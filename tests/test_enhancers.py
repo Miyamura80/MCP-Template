@@ -149,9 +149,7 @@ class TestDoctorEnhancerFlows(TestTemplate):
 
         return DoctorResult(
             checks=[
-                CheckResultModel(
-                    name="test", status="fail", message="x", fixable=True
-                )
+                CheckResultModel(name="test", status="fail", message="x", fixable=True)
             ],
             has_failures=True,
         )
@@ -198,7 +196,9 @@ class TestDoctorEnhancerFlows(TestTemplate):
             return passing_result if input_obj.fix else failing_result
 
         ctx = _make_mock_ctx(
-            elicit_result=AcceptedElicitation(action="accept", data=ConfirmFix(fix=True))
+            elicit_result=AcceptedElicitation(
+                action="accept", data=ConfirmFix(fix=True)
+            )
         )
         tool: EnhancedTool[DoctorInput, DoctorResult] = EnhancedTool(
             ctx=ctx, input=DoctorInput(fix=False), service_fn=fake_service
@@ -225,7 +225,9 @@ class TestDoctorEnhancerFlows(TestTemplate):
             return failing_result
 
         ctx = _make_mock_ctx(
-            elicit_result=AcceptedElicitation(action="accept", data=ConfirmFix(fix=False))
+            elicit_result=AcceptedElicitation(
+                action="accept", data=ConfirmFix(fix=False)
+            )
         )
         tool: EnhancedTool[DoctorInput, DoctorResult] = EnhancedTool(
             ctx=ctx, input=DoctorInput(fix=False), service_fn=fake_service
@@ -342,7 +344,9 @@ class TestEnhancerCrashFallback(TestTemplate):
             result = asyncio.run(tool_fn(ctx=ctx, x=3))
             assert result.structuredContent == {"value": 300}
             # Only the auto-generated text block; no DO NOT SHIP THIS.
-            assert all("DO NOT SHIP" not in c.text for c in result.content if c.type == "text")
+            assert all(
+                "DO NOT SHIP" not in c.text for c in result.content if c.type == "text"
+            )
             assert result.meta is None
         finally:
             cleanup()
