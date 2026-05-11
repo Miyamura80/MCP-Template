@@ -93,11 +93,16 @@ line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "C901", "FIX"]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "C901", "FIX", "TID"]
 ignore = ["E501", "UP015", "B008"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"importlib.import_module".msg = "Dynamic imports are banned. If genuinely needed (e.g. plugin auto-discovery), add `# noqa: TID251` with a one-line justification."
+"importlib.reload".msg = "importlib.reload is for narrow test-fixture use only. Add `# noqa: TID251` with justification."
+"importlib.util.spec_from_file_location".msg = "Loading modules from arbitrary file paths is banned. Add `# noqa: TID251` with justification."
 
 [tool.ty]
 

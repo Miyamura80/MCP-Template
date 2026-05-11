@@ -35,7 +35,7 @@ def test_pydantic_type_coercion(monkeypatch):
     monkeypatch.setenv("LOGGING__LEVELS__INFO", "0")  # String '0' -> bool False
 
     # Reload the config module to pick up the new environment variables
-    importlib.reload(common_module)
+    importlib.reload(common_module)  # noqa: TID251 — test fixture: re-evaluate config with patched env
     config = common_module.global_config
 
     # Verify integer coercion
@@ -92,4 +92,4 @@ def test_pydantic_type_coercion(monkeypatch):
     assert config.logging.levels.info is False, "info should be False (from '0')"
 
     # Reload the original config to avoid side effects on other tests
-    importlib.reload(common_module)
+    importlib.reload(common_module)  # noqa: TID251 — test fixture: restore original config

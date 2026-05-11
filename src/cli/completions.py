@@ -1,5 +1,6 @@
 """Shell completions install command."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -40,7 +41,7 @@ def _generate_completion_script(shell: Shell) -> str:
         [mycli],
         capture_output=True,
         text=True,
-        env={**__import__("os").environ, env_var: source_map[shell]},
+        env={**os.environ, env_var: source_map[shell]},
     )
     return result.stdout
 
