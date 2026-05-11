@@ -18,7 +18,7 @@ def _register_service_routes() -> None:
     import services as _services_pkg
 
     for module_info in pkgutil.iter_modules(_services_pkg.__path__):
-        importlib.import_module(f"services.{module_info.name}")  # noqa: TID251 — auto-discovery so @service decorators register on startup
+        importlib.import_module(f"services.{module_info.name}")  # noqa: TID251 - auto-discovery so @service decorators register on startup
 
     from services import get_registry
 

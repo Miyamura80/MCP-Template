@@ -22,7 +22,7 @@ def discover_commands(app: typer.Typer) -> None:
         if module_info.name.startswith("_"):
             continue
 
-        module = importlib.import_module(f"src.cli.commands.{module_info.name}")  # noqa: TID251 — plugin auto-discovery; see CLAUDE.md "Adding a new feature"
+        module = importlib.import_module(f"src.cli.commands.{module_info.name}")  # noqa: TID251 - plugin auto-discovery; see CLAUDE.md "Adding a new feature"
         command_name = module_info.name.replace("_", "-")
 
         if hasattr(module, "app") and isinstance(module.app, typer.Typer):
