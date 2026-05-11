@@ -4,6 +4,7 @@
     "index",
     "cli",
     "mcp",
-    "api"
+    "api",
+    "deployment"
   ]
 }
