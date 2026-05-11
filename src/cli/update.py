@@ -26,7 +26,9 @@ def update_command() -> None:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             data = json.loads(resp.read().decode())
         latest_str = data["info"]["version"]
-    except (OSError, json.JSONDecodeError, KeyError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+        # UnicodeDecodeError: non-UTF8 body; TypeError: data["info"] not subscriptable
+        # (e.g. PyPI returns an unexpected shape). All map to the same fallback.
         console.print("[yellow]Could not check PyPI for updates.[/yellow]")
         raise typer.Exit(code=0) from None
 
