@@ -51,3 +51,24 @@ def enhance(service_name: str, fallback: FallbackMode = "headless"):
 
 def get_enhancer(service_name: str) -> EnhancerEntry | None:
     return _enhancers.get(service_name)
+
+
+_discovered: bool = False
+_SKIP_MODULES = frozenset({"base", "schemas"})
+
+
+def discover_enhancers() -> None:
+    """Import every enhancer module so @enhance decorators run."""
+    global _discovered
+    if _discovered:
+        return
+    import importlib
+    import pkgutil
+
+    import mcp_server.enhancers as _pkg
+
+    for module_info in pkgutil.iter_modules(_pkg.__path__):
+        if module_info.name in _SKIP_MODULES:
+            continue
+        importlib.import_module(f"mcp_server.enhancers.{module_info.name}")
+    _discovered = True

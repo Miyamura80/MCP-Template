@@ -80,14 +80,15 @@ forbidden_modules =
     tests
     init
 
-[importlinter:contract:api_server_no_cli_mcp]
-name = API server does not import CLI or MCP layers
+[importlinter:contract:api_server_no_cli]
+# api_server intentionally imports mcp_server to mount it at /mcp (remote MCP transport).
+# CLI remains forbidden.
+name = API server does not import CLI layers
 type = forbidden
 source_modules =
     api_server
 forbidden_modules =
     src.cli
-    mcp_server
     tests
     init
 

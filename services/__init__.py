@@ -15,6 +15,7 @@ class ServiceEntry:
 
 
 _registry: list[ServiceEntry] = []
+_discovered: bool = False
 
 
 def service(*, name: str, description: str, input_model: type, output_model: type):
@@ -33,6 +34,24 @@ def service(*, name: str, description: str, input_model: type, output_model: typ
         return func
 
     return decorator
+
+
+def discover_services() -> None:
+    """Import every ``services.*`` submodule so @service decorators run.
+
+    Idempotent: safe to call from multiple transports during startup.
+    """
+    global _discovered
+    if _discovered:
+        return
+    import importlib
+    import pkgutil
+
+    import services as _pkg
+
+    for module_info in pkgutil.iter_modules(_pkg.__path__):
+        importlib.import_module(f"services.{module_info.name}")
+    _discovered = True
 
 
 def get_registry() -> list[ServiceEntry]:

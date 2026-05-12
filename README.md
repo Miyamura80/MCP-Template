@@ -61,8 +61,8 @@ bash install-skills.sh && rm install-skills.sh
 | Feature | Stack |
 |---|---|
 | CLI (auto-discovery commands, global flags, shell completions, self-update) | Typer |
-| MCP server (stdio, services auto-registered as tools) | FastMCP |
-| HTTP API server | FastAPI + Uvicorn |
+| MCP server (streamable HTTP at `/mcp`, services auto-registered as tools; stdio supported for local dev) | FastMCP |
+| HTTP API server (also hosts `/mcp`) | FastAPI + Uvicorn |
 | Auth | WorkOS + API keys |
 | Payments | Stripe |
 | Database + migrations | SQLAlchemy + Alembic |
@@ -116,8 +116,8 @@ uv run mymcp --help       # see all CLI commands
 uv run mymcp greet Alice  # run a command
 uv run mymcp init my_command  # scaffold a new command
 
-uv run mymcp-mcp          # start the MCP server (stdio)
-uv run mymcp-api          # start the FastAPI HTTP server
+uv run mymcp-serve        # start the server (HTTP API + MCP at /mcp on one port)
+uv run mymcp-mcp          # legacy: stdio MCP only, for local Claude Desktop / dev
 ```
 
 ## CLI Usage
