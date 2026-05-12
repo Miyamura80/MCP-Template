@@ -33,7 +33,7 @@ class MCPAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        user = _authenticate(scope)
+        user = await _authenticate_async(scope)
         if user is None:
             await _send_unauthorized(send)
             return
@@ -43,6 +43,13 @@ class MCPAuthMiddleware:
             await self.app(scope, receive, send)
         finally:
             reset_current_user(token)
+
+
+async def _authenticate_async(scope: Scope) -> AuthenticatedUser | None:
+    """Run blocking auth I/O in a thread to avoid blocking the event loop."""
+    import anyio
+
+    return await anyio.to_thread.run_sync(lambda: _authenticate(scope))
 
 
 def _authenticate(scope: Scope) -> AuthenticatedUser | None:

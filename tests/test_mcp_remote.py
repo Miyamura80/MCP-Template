@@ -6,6 +6,7 @@ MCP `initialize` handshake completes end-to-end.
 """
 
 import json
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
@@ -21,8 +22,11 @@ from db.base import Base
 from tests.test_template import TestTemplate
 
 
+@contextmanager
 def _patch_db():
-    """Wire an in-memory SQLite into db.engine for the duration of the test."""
+    """Wire an in-memory SQLite into db.engine for the duration of the block."""
+    orig_engine = db_engine._engine
+    orig_session = db_engine._SessionLocal
     eng = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -32,7 +36,11 @@ def _patch_db():
     session_factory = sessionmaker(bind=eng, autoflush=False, expire_on_commit=False)
     db_engine._engine = eng
     db_engine._SessionLocal = session_factory
-    return session_factory
+    try:
+        yield session_factory
+    finally:
+        db_engine._engine = orig_engine
+        db_engine._SessionLocal = orig_session
 
 
 def _read_sse_first_message(response) -> dict:
@@ -78,35 +86,35 @@ class TestMCPRemote(TestTemplate):
     def test_mcp_initialize_with_api_key(self, mock_config):
         # No WorkOS -> middleware falls through to API-key path.
         mock_config.WORKOS_CLIENT_ID = None
-        session_factory = _patch_db()
-        with session_factory() as s:
-            raw_key, _ = create_api_key(s, user_id="u-mcp-remote-test")
+        with _patch_db() as session_factory:
+            with session_factory() as s:
+                raw_key, _ = create_api_key(s, user_id="u-mcp-remote-test")
 
-        from api_server.server import app
+            from api_server.server import app
 
-        with TestClient(app) as client:
-            resp = client.post(
-                "/mcp",
-                headers={
-                    "Accept": "application/json, text/event-stream",
-                    "Host": "127.0.0.1:8080",
-                    "X-API-KEY": raw_key,
-                },
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "test", "version": "0"},
+            with TestClient(app) as client:
+                resp = client.post(
+                    "/mcp",
+                    headers={
+                        "Accept": "application/json, text/event-stream",
+                        "Host": "127.0.0.1:8080",
+                        "X-API-KEY": raw_key,
                     },
-                },
-            )
-        assert resp.status_code == 200, resp.text
-        msg = _read_sse_first_message(resp)
-        assert msg["jsonrpc"] == "2.0"
-        assert msg["result"]["serverInfo"]["name"] == "mymcp"
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "test", "version": "0"},
+                        },
+                    },
+                )
+            assert resp.status_code == 200, resp.text
+            msg = _read_sse_first_message(resp)
+            assert msg["jsonrpc"] == "2.0"
+            assert msg["result"]["serverInfo"]["name"] == "mymcp"
 
     def test_health_endpoint_unaffected_by_mcp_auth(self):
         from api_server.server import app

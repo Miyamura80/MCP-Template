@@ -25,8 +25,8 @@ app.add_middleware(ErrorHandlerMiddleware)  # type: ignore[arg-type]
 app.add_middleware(RateLimitMiddleware)  # type: ignore[arg-type]
 app.add_middleware(RequestIdMiddleware)  # type: ignore[arg-type]
 
-# Pure ASGI middleware that only acts on /mcp; sits below RequestId/RateLimit
-# so streaming responses are not buffered through BaseHTTPMiddleware.
+# Pure ASGI middleware that only acts on /mcp; sits outside RequestId/RateLimit
+# so authenticated SSE streams are not buffered through BaseHTTPMiddleware.
 app.add_middleware(MCPAuthMiddleware)  # type: ignore[arg-type]
 
 app.add_middleware(

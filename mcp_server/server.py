@@ -99,20 +99,12 @@ async def lifespan(_app):
     The parent FastAPI app must include this in its ``lifespan=`` argument or
     incoming /mcp requests will fail with "Task group is not initialized".
     """
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-
     mcp = build_mcp_server()
     sm = mcp.session_manager
-    # StreamableHTTPSessionManager.run() can only be called once per instance.
-    # Recreate it if the app lifespan is re-entered (tests, hot-reload).
-    if sm._has_started:
-        mcp._session_manager = StreamableHTTPSessionManager(
-            app=mcp._mcp_server,
-            event_store=mcp._event_store,
-            json_response=mcp.settings.json_response,
-            stateless=mcp.settings.stateless_http,
-        )
-    async with mcp.session_manager.run():
+    # StreamableHTTPSessionManager.run() refuses re-entry once _has_started is set.
+    # Reset it so the same instance can be restarted (tests with --count, hot-reload).
+    sm._has_started = False
+    async with sm.run():
         yield
 
 
