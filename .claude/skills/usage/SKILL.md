@@ -51,7 +51,7 @@ mcp dev mcp_server/server.py
 
 ### Connecting MCP to your editor
 
-Remote (preferred — works on Claude Desktop 0.7+, Cursor, etc.):
+Remote (preferred - works on Claude Desktop 0.7+, Cursor, etc.):
 
 ```json
 {

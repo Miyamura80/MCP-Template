@@ -46,7 +46,9 @@ class MCPAuthMiddleware:
 
 
 def _authenticate(scope: Scope) -> AuthenticatedUser | None:
-    headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+    headers = {
+        k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]
+    }
 
     auth_header = headers.get("authorization", "")
     if auth_header.startswith("Bearer "):

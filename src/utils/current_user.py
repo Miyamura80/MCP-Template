@@ -1,7 +1,7 @@
 """Per-request authenticated user for transports that authenticate (HTTP, /mcp).
 
 Stays ``None`` for the CLI and stdio MCP transport. Services that need a user
-should treat ``None`` as "unauthenticated / local" rather than raising — that
+should treat ``None`` as "unauthenticated / local" rather than raising -- that
 keeps them pure and transport-agnostic.
 """
 
