@@ -360,7 +360,7 @@ class TestBuildCallToolResultTypeGuard(TestTemplate):
 
         tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
         with pytest.raises(TypeError, match="must be a Pydantic BaseModel"):
-            _build_call_tool_result("not a model", tool)  # type: ignore[arg-type]
+            _build_call_tool_result("not a model", tool)  # ty: ignore[invalid-argument-type]
 
     def test_accepts_basemodel_result(self):
         from mcp_server._tool_factory import _build_call_tool_result

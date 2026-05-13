@@ -331,4 +331,4 @@ if is_local:
 
 # Create a singleton instance
 # Note: Config() loads all required fields from YAML and .env files via custom settings sources
-global_config = Config()  # type: ignore[call-arg]
+global_config = Config()  # ty: ignore[missing-argument]

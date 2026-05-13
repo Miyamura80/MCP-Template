@@ -175,10 +175,10 @@ def _cleanup_old_events() -> None:
                 )
             )
             session.commit()
-            if result.rowcount:  # type: ignore[unresolved-attribute]
+            if result.rowcount:  # ty: ignore[unresolved-attribute]
                 log.info(
                     "Cleaned up {} old processed stripe events",
-                    result.rowcount,  # type: ignore[unresolved-attribute]
+                    result.rowcount,  # ty: ignore[unresolved-attribute]
                 )
     except Exception:  # noqa: BLE001
         # Background cleanup: any DB error must not crash the webhook handler;

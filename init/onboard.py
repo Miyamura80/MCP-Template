@@ -151,7 +151,7 @@ def _run_orchestrator() -> None:
 
         try:
             step_fn = STEP_FUNCTIONS[cmd_name]
-            step_fn()  # type: ignore[operator]
+            step_fn()  # ty: ignore[call-non-callable]
             completed.append(label)
         except (typer.Exit, SystemExit) as exc:
             code = getattr(exc, "code", getattr(exc, "exit_code", 1))
