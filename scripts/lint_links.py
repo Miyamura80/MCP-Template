@@ -85,10 +85,9 @@ def main() -> int:
     ignores = list(BOT_BLOCKED_DOMAINS)
     cmd = _build_cmd(ignores)
 
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    combined = result.stdout + result.stderr
     for attempt in range(MAX_RETRIES):
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        combined = result.stdout + result.stderr
-
         if result.returncode == 0:
             return 0
 
@@ -104,6 +103,8 @@ def main() -> int:
                 file=sys.stderr,
             )
             time.sleep(delay)
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            combined = result.stdout + result.stderr
 
     print(combined, file=sys.stderr)
     return result.returncode

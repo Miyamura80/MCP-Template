@@ -49,7 +49,7 @@ async def _authenticate_async(scope: Scope) -> AuthenticatedUser | None:
     """Run blocking auth I/O in a thread to avoid blocking the event loop."""
     import anyio
 
-    return await anyio.to_thread.run_sync(lambda: _authenticate(scope))
+    return await anyio.to_thread.run_sync(lambda: _authenticate(scope))  # ty: ignore[unresolved-attribute]
 
 
 def _authenticate(scope: Scope) -> AuthenticatedUser | None:

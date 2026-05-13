@@ -32,7 +32,7 @@ def _make_route(entry: ServiceEntry) -> None:
         name=f"svc_{entry.name}",
     )
     def _handler(
-        body: input_model,  # type: ignore[valid-type]
+        body: input_model,  # ty: ignore[invalid-type-form]
         _user: AuthenticatedUser = Depends(require_scopes(SERVICES_EXECUTE)),
     ):
         # Quota is consumed before execution (charges for attempts, not

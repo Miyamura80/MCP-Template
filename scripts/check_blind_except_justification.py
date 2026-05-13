@@ -72,7 +72,7 @@ def _collect_comment_tokens(path: pathlib.Path) -> list[tokenize.TokenInfo] | No
         return None
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
-    except (tokenize.TokenizeError, IndentationError, SyntaxError) as e:
+    except (tokenize.TokenError, IndentationError, SyntaxError) as e:
         print(f"  Warning: could not tokenize {path}: {e}", file=sys.stderr)
         return None
     return [tok for tok in tokens if tok.type == token.COMMENT]
