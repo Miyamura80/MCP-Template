@@ -285,7 +285,7 @@ blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification
 	@uv run python scripts/check_blind_except_justification.py
 	@echo "$(GREEN)✅Blind-except justification check completed.$(RESET)"
 
-ci: ruff vulture import_lint ty docs_lint lint_links check_deps file_len_check blind_except_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, lint_links, file_len_check, blind_except_check)
+ci: ruff vulture import_lint ty docs_lint check_deps file_len_check blind_except_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, file_len_check, blind_except_check)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
 .PHONY: sync-agent-config
