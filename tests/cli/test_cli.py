@@ -16,7 +16,7 @@ class TestCLI(TestTemplate):
     def test_version(self):
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "mycli" in result.output
+        assert "mymcp" in result.output
 
     def test_help(self):
         result = runner.invoke(app, ["--help"])

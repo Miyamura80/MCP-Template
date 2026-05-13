@@ -42,7 +42,9 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
 
     def call(self, override_input: TInput | None = None) -> TOutput:
         """Invoke the pure service. Pass `override_input` instead of mutating `tool.input`."""
-        return self._service_fn(override_input if override_input is not None else self.input)
+        return self._service_fn(
+            override_input if override_input is not None else self.input
+        )
 
     @property
     def can_elicit(self) -> bool:
@@ -69,7 +71,9 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
         audience: list[Role] | None = None,
     ) -> None:
         annotations = _annotations(audience)
-        self.extra_content.append(TextContent(type="text", text=text, annotations=annotations))
+        self.extra_content.append(
+            TextContent(type="text", text=text, annotations=annotations)
+        )
 
     def send_image(
         self,
@@ -80,7 +84,9 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
         """Append a base64-encoded image to the response."""
         annotations = _annotations(audience)
         self.extra_content.append(
-            ImageContent(type="image", data=data, mimeType=mime_type, annotations=annotations)
+            ImageContent(
+                type="image", data=data, mimeType=mime_type, annotations=annotations
+            )
         )
 
     def send_audio(
@@ -92,7 +98,9 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
         """Append a base64-encoded audio clip to the response."""
         annotations = _annotations(audience)
         self.extra_content.append(
-            AudioContent(type="audio", data=data, mimeType=mime_type, annotations=annotations)
+            AudioContent(
+                type="audio", data=data, mimeType=mime_type, annotations=annotations
+            )
         )
 
     def send_app(self, resource_uri: str) -> None:

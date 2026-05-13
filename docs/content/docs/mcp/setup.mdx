@@ -3,6 +3,29 @@ title: Setup
 description: Configure your MCP client to connect to the server
 ---
 
+## Remote (recommended)
+
+The server runs as a single process (`mymcp-serve`) that exposes both the
+HTTP API and the MCP streamable-HTTP endpoint at `/mcp`. Most modern MCP
+clients (Claude Cowork/Desktop 0.7+, Cursor, etc.) can connect directly:
+
+```json
+{
+  "mcpServers": {
+    "mycli": {
+      "url": "https://YOUR-DEPLOYMENT/mcp",
+      "headers": { "X-API-KEY": "sk_..." }
+    }
+  }
+}
+```
+
+Authentication accepts a Bearer JWT (WorkOS) or an API key via `X-API-KEY`,
+same as the REST API. See [Deployment](/docs/deployment) for hosting.
+
+## Local (stdio, legacy)
+
+The stdio transport is supported for local Claude Desktop / dev use only.
 Replace `/path/to/MCP-Template` with the actual path to your cloned repo.
 
 <Tabs items={['Claude Cowork/Desktop', 'Claude Code', 'Cursor', 'VS Code', 'Codex', 'Gemini CLI', 'OpenCode', 'OpenClaw']} groupId="mcp-client">

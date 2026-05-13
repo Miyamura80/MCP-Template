@@ -43,7 +43,9 @@ def get_db_session() -> Generator[Session, None, None]:
     session = _SessionLocal()
     try:
         yield session
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Session boundary: any exception escaping the request handler must
+        # roll back the transaction before re-raising.
         session.rollback()
         raise
     finally:
@@ -58,7 +60,9 @@ def use_db_session() -> Generator[Session, None, None]:
     session = _SessionLocal()
     try:
         yield session
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Session boundary: any exception escaping the with-block must roll
+        # back the transaction before re-raising.
         session.rollback()
         raise
     finally:

@@ -34,8 +34,8 @@ try:
     from stripe import AuthenticationError as _StripeAuthError
     from stripe import StripeError as _StripeError
 except ImportError:
-    _StripeError = None  # type: ignore[assignment,misc]
-    _StripeAuthError = None  # type: ignore[assignment,misc]
+    _StripeError = None  # ty: ignore[invalid-assignment]
+    _StripeAuthError = None  # ty: ignore[invalid-assignment]
 
 
 def _is_stripe_error(exc: Exception) -> bool:
@@ -114,13 +114,13 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         """Buffer a JSON error body and wrap it in a consistent envelope."""
         max_error_body = 1 << 20  # 1 MB cap
         body_bytes = b""
-        async for chunk in response.body_iterator:  # type: ignore[union-attr]
+        async for chunk in response.body_iterator:  # ty: ignore[unresolved-attribute]
             body_bytes += chunk if isinstance(chunk, bytes) else chunk.encode()
             if len(body_bytes) > max_error_body:
                 # Too large to rewrite; drain iterator without buffering
                 # to avoid unbounded memory usage, then return a clean
                 # error envelope instead of truncated/malformed JSON.
-                async for _ in response.body_iterator:  # type: ignore[union-attr]
+                async for _ in response.body_iterator:  # ty: ignore[unresolved-attribute]
                     pass
                 return _build_error_response(
                     response.status_code,
@@ -183,7 +183,9 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
 
             return response
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
+            # Top-level HTTP error boundary: any unhandled exception in the request
+            # pipeline must be converted to a structured 5xx response.
             log.exception("Unhandled exception in request {}", request_id)
 
             # Sanitize Stripe errors

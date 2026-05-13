@@ -11,7 +11,7 @@ from rich.console import Console
 
 console = Console(stderr=True)
 
-_PACKAGE_NAME = "miyamura80-cli-template"
+_PACKAGE_NAME = "mcp-template"
 _PYPI_URL = f"https://pypi.org/pypi/{_PACKAGE_NAME}/json"
 _TIMEOUT = 5
 
@@ -26,7 +26,9 @@ def update_command() -> None:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             data = json.loads(resp.read().decode())
         latest_str = data["info"]["version"]
-    except Exception:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+        # UnicodeDecodeError: non-UTF8 body; TypeError: data["info"] not subscriptable
+        # (e.g. PyPI returns an unexpected shape). All map to the same fallback.
         console.print("[yellow]Could not check PyPI for updates.[/yellow]")
         raise typer.Exit(code=0) from None
 
@@ -43,6 +45,6 @@ def update_command() -> None:
         console.print(f"[green]Updated to {latest_str}![/green]")
     except subprocess.CalledProcessError:
         console.print(
-            "[red]Update failed.[/red] Try manually: uv pip install --upgrade miyamura80-cli-template"
+            "[red]Update failed.[/red] Try manually: uv pip install --upgrade mcp-template"
         )
         raise typer.Exit(code=1) from None

@@ -30,15 +30,15 @@ _RC_FILES = {
 
 def _generate_completion_script(shell: Shell) -> str:
     """Generate completion script by invoking Typer's built-in mechanism."""
-    env_var = "_MYCLI_COMPLETE"
+    env_var = "_MYMCP_COMPLETE"
     source_map = {
         Shell.bash: "complete_bash",
         Shell.zsh: "complete_zsh",
         Shell.fish: "complete_fish",
     }
-    mycli = shutil.which("mycli") or sys.argv[0]
+    mymcp = shutil.which("mymcp") or sys.argv[0]
     result = subprocess.run(
-        [mycli],
+        [mymcp],
         capture_output=True,
         text=True,
         env={**os.environ, env_var: source_map[shell]},
@@ -50,24 +50,24 @@ def _generate_completion_script(shell: Shell) -> str:
 def install(
     shell: Annotated[Shell, typer.Argument(help="Shell to install completions for.")],
 ) -> None:
-    """Install shell completions for mycli."""
+    """Install shell completions for mymcp."""
     script = _generate_completion_script(shell)
     if not script.strip():
         console.print("[yellow]Could not generate completion script.[/yellow]")
         console.print(
-            "Try using Typer's built-in: [bold]mycli --install-completion[/bold]"
+            "Try using Typer's built-in: [bold]mymcp --install-completion[/bold]"
         )
         return
 
     rc_file = _RC_FILES[shell]
 
-    if rc_file.exists() and "# mycli completions" in rc_file.read_text():
+    if rc_file.exists() and "# mymcp completions" in rc_file.read_text():
         console.print(f"[yellow]Completions already installed in {rc_file}[/yellow]")
         return
 
     rc_file.parent.mkdir(parents=True, exist_ok=True)
     with open(rc_file, "a") as f:
-        f.write(f"\n# mycli completions\n{script}\n")
+        f.write(f"\n# mymcp completions\n{script}\n")
 
     console.print("[green]Completions installed![/green] Restart your shell or run:")
     console.print(f"  source {rc_file}")
@@ -84,5 +84,5 @@ def show(
     else:
         console.print("[yellow]Could not generate completion script.[/yellow]")
         console.print(
-            "Try using Typer's built-in: [bold]mycli --show-completion[/bold]"
+            "Try using Typer's built-in: [bold]mymcp --show-completion[/bold]"
         )

@@ -30,7 +30,9 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
         import stripe
 
         stripe.Customer.delete(orphaned_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Best-effort cleanup: any Stripe API / network error here is non-fatal;
+        # the orphan will eventually be cleaned by Stripe's GC or ops tooling.
         log.warning("Failed to delete orphaned Stripe customer {}", orphaned_id)
 
 
@@ -221,7 +223,7 @@ def create_checkout(
         payment_method_types=["card"],
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
-        subscription_data=subscription_data,
+        subscription_data=subscription_data,  # ty: ignore[invalid-argument-type]
         success_url=f"{frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{frontend_url}/billing/cancel",
         metadata={"user_id": user.user_id},

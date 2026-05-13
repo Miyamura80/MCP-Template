@@ -10,52 +10,67 @@ This skill teaches you how to use the three interfaces provided by this project.
 
 ```bash
 # Install
-pip install miyamura80-cli-template
+pip install mcp-template
 
 # Basic usage
-mycli --help                  # see all commands
-mycli greet Alice             # run a command
-mycli config show             # view configuration
-mycli doctor                  # check system health
+mymcp --help                  # see all commands
+mymcp greet Alice             # run a command
+mymcp config show             # view configuration
+mymcp doctor                  # check system health
 
 # Global flags (go before the subcommand)
-mycli --verbose greet Alice   # detailed output
-mycli --format json config show  # JSON output
-mycli --dry-run greet Bob     # preview without executing
-mycli --version               # print version
+mymcp --verbose greet Alice   # detailed output
+mymcp --format json config show  # JSON output
+mymcp --dry-run greet Bob     # preview without executing
+mymcp --version               # print version
 ```
 
-## API
+## Server (HTTP API + MCP)
 
 ```bash
-# Start the API server
-mycli-api
+# Start the server: HTTP API and MCP (streamable HTTP) on one port.
+mymcp-serve
 
-# The server runs on http://localhost:8000 by default
-# See /docs for the interactive OpenAPI documentation
+# Default http://localhost:8080. See /docs for OpenAPI, /mcp for MCP.
 ```
 
 ## MCP
 
 The MCP server exposes the same services as CLI tools via the Model Context Protocol.
 
-```bash
-# Run directly (stdio transport)
-mycli-mcp
+**Primary transport: streamable HTTP at `/mcp`** (started by `mymcp-serve`).
+Stdio is supported via `mymcp-mcp` for local Claude Desktop / dev only.
 
-# Debug with the MCP inspector
+```bash
+# Legacy stdio transport
+mymcp-mcp
+
+# Debug with the MCP inspector (stdio)
 mcp dev mcp_server/server.py
 ```
 
 ### Connecting MCP to your editor
 
-Add to your MCP client config (e.g. `.mcp.json`):
+Remote (preferred - works on Claude Desktop 0.7+, Cursor, etc.):
 
 ```json
 {
   "mcpServers": {
-    "mycli": {
-      "command": "mycli-mcp"
+    "mymcp": {
+      "url": "https://YOUR-DEPLOYMENT/mcp",
+      "headers": { "X-API-KEY": "sk_..." }
+    }
+  }
+}
+```
+
+Local stdio (legacy):
+
+```json
+{
+  "mcpServers": {
+    "mymcp": {
+      "command": "mymcp-mcp"
     }
   }
 }
@@ -64,5 +79,5 @@ Add to your MCP client config (e.g. `.mcp.json`):
 ## Updating
 
 ```bash
-mycli update    # check for updates and upgrade
+mymcp update    # check for updates and upgrade
 ```

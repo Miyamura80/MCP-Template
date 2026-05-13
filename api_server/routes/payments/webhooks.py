@@ -95,7 +95,9 @@ async def stripe_webhook(request: Request):
         event = _try_construct_event(payload, sig_header)
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Webhook boundary: Stripe SDK raises SignatureVerificationError plus
+        # ValueError/JSONDecodeError on bad bodies; all map to a 400.
         log.warning("Webhook signature verification failed: {}", exc)
         raise HTTPException(status_code=400, detail="Invalid signature") from exc
 
@@ -173,12 +175,14 @@ def _cleanup_old_events() -> None:
                 )
             )
             session.commit()
-            if result.rowcount:  # type: ignore[unresolved-attribute]
+            if result.rowcount:  # ty: ignore[unresolved-attribute]
                 log.info(
                     "Cleaned up {} old processed stripe events",
-                    result.rowcount,  # type: ignore[unresolved-attribute]
+                    result.rowcount,  # ty: ignore[unresolved-attribute]
                 )
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Background cleanup: any DB error must not crash the webhook handler;
+        # restore the previous cleanup timestamp so the next probe retries.
         with _cleanup_lock:
             if _last_cleanup == new_cleanup:
                 _last_cleanup = prev_cleanup
@@ -472,7 +476,9 @@ def _resolve_payment_error(data: dict) -> str | None:
             raw_err = getattr(pi_obj, "last_payment_error", None)
             if raw_err:
                 return getattr(raw_err, "message", None)
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Best-effort enrichment: Stripe API errors are non-fatal here;
+            # webhook processing continues with no error-message detail.
             log.debug("Failed to retrieve PaymentIntent {} for error details", pi)
     return None
 

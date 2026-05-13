@@ -5,7 +5,7 @@ startCommand:
     properties: {}
   commandFunction: |-
     (config) => ({
-      command: 'mycli-mcp',
+      command: 'mymcp-mcp',
       args: [],
       env: {}
     })

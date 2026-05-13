@@ -107,7 +107,9 @@ async def create_payment_requirement(
             "description": requirement.description,
             "extra": requirement.extra,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Payment-protocol SDKs raise a wide range of errors; surface any failure
+        # as a 500 rather than letting an unrelated exception type leak out.
         log.error("Failed to create payment requirement: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -152,7 +154,10 @@ async def verify_payment(
 
     try:
         result = await proto.verify_payment(payload, requirement)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Defense in depth: protocol.verify_payment() is contracted to return a
+        # PaymentResult, but if it raises (SDK bug, unhandled edge case) we
+        # convert to a 500 instead of leaking a stack trace.
         log.error("Payment verification failed unexpectedly: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

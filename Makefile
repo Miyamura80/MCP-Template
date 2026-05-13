@@ -6,7 +6,7 @@ BLUE=\033[0;34m
 RESET=\033[0m
 
 PYTHON=uv run
-TEST=uv run pytest
+TEST=uv run python -m pytest
 PROJECT_ROOT=.
 
 .DEFAULT_GOAL := help
@@ -112,7 +112,7 @@ api: check_uv ## Run authenticated API server
 	@$(PYTHON) mycli-api
 
 mcp: check_uv ## Run MCP server locally (stdio)
-	@$(PYTHON) mycli-mcp
+	@$(PYTHON) mymcp-mcp
 
 mcp_inspect: check_uv ## Run MCP server with inspector for debugging
 	@$(PYTHON) mcp dev mcp_server/server.py
@@ -237,7 +237,7 @@ tech_debt: install_tools ## Check TODO/FIXME markers
 
 duplicate_code: check_uv ## Detect duplicate code blocks
 	@echo "$(YELLOW)🔍Checking duplicate code...$(RESET)"
-	@uv run pylint --disable=all --enable=R0801 src common utils
+	@uv run python -m pylint --disable=all --enable=R0801 src common utils
 	@echo "$(GREEN)✅Duplicate code check completed.$(RESET)"
 
 vulture: install_tools ## Find dead code with vulture
@@ -262,7 +262,7 @@ docs_lint: ## Lint docs links
 
 lint_links: ## Lint all markdown links using pytest-check-links
 	@echo "$(YELLOW)🔍Linting all markdown links with pytest-check-links...$(RESET)"
-	@find . -name "*.md" -not -path "./.venv/*" -not -path "./.venv-test/*" -not -path "*/node_modules/*" | xargs uv run pytest -p no:cov -o "addopts=" --check-links --check-links-ignore "http://localhost:.*"
+	@uv run python scripts/lint_links.py
 	@echo "$(GREEN)✅Link linting completed.$(RESET)"
 
 agents_validate: ## Validate AGENTS.md content
@@ -280,7 +280,12 @@ file_len_check: check_uv ## Check Python files don't exceed max line count
 	@uv run python scripts/check_file_length.py
 	@echo "$(GREEN)✅File length check completed.$(RESET)"
 
-ci: ruff vulture import_lint ty docs_lint lint_links check_deps file_len_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, lint_links, file_len_check)
+blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification comment
+	@echo "$(YELLOW)🔍Checking blind-except justifications...$(RESET)"
+	@uv run python scripts/check_blind_except_justification.py
+	@echo "$(GREEN)✅Blind-except justification check completed.$(RESET)"
+
+ci: ruff vulture import_lint ty docs_lint check_deps file_len_check blind_except_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, check_deps, file_len_check, blind_except_check)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
 .PHONY: sync-agent-config

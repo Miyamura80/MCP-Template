@@ -25,6 +25,42 @@ from mcp_server.enhancers.base import EnhancedTool
 from services import ServiceEntry
 
 
+def _check_scopes() -> None:
+    """Enforce ``services:execute`` scope for authenticated MCP tool calls.
+
+    Skips silently when no authenticated user is bound (CLI / stdio).
+    """
+    from src.utils.current_user import current_user
+
+    user = current_user()
+    if user is None:
+        return
+
+    from api_server.auth.scopes import SERVICES_EXECUTE, check_scopes
+
+    if not check_scopes([SERVICES_EXECUTE], user.scopes):
+        raise PermissionError(
+            "Insufficient permissions: 'services:execute' scope required."
+        )
+
+
+def _check_quota() -> None:
+    """Enforce daily quota for authenticated MCP tool calls.
+
+    Skips silently when no authenticated user is bound (CLI / stdio).
+    Called *after* input validation so malformed requests don't burn quota.
+    """
+    from src.utils.current_user import current_user
+
+    user = current_user()
+    if user is None:
+        return
+
+    from api_server.billing.limits import ensure_daily_limit
+
+    ensure_daily_limit(user.user_id)
+
+
 def make_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
     """Register a service as an MCP tool - enhanced if an enhancer exists, else headless."""
     enhancer_entry = get_enhancer(entry.name)
@@ -41,7 +77,9 @@ def _make_headless_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
     output_model = entry.output_model
 
     def tool_fn(**kwargs):
+        _check_scopes()
         input_obj = input_model(**kwargs)
+        _check_quota()
         return func(input_obj)
 
     _apply_tool_signature(tool_fn, entry, return_annotation=output_model)
@@ -57,11 +95,15 @@ def _make_enhanced_tool(
     output_model = entry.output_model
 
     async def tool_fn(ctx: Context, **kwargs) -> CallToolResult:
+        _check_scopes()
         input_obj = input_model(**kwargs)
+        _check_quota()
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
         try:
             result = await enhancer_entry.fn(tool)
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Enhancer failures of any kind must fall back to the pure service
+            # so MCP clients still get a structured result on the headless path.
             if enhancer_entry.fallback == "error":
                 raise
             log.exception(

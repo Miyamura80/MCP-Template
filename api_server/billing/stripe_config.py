@@ -82,7 +82,9 @@ def ensure_stripe() -> bool:
             _stripe_initialized = True
             log.info("Stripe SDK initialized (api_version={})", cfg.api_version)
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
+            # Stripe SDK init can fail on env, network, or auth; report and let
+            # the next request retry. Billing routes detect the False return.
             log.warning("Failed to initialize Stripe; will retry on next call: {}", exc)
             return False
 

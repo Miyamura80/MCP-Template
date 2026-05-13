@@ -10,7 +10,7 @@ from rich.table import Table
 
 from src.cli.state_store import load_state, save_state
 
-_PACKAGE_NAME = "miyamura80-cli-template"
+_PACKAGE_NAME = "mcp-template"
 _TIMEOUT = 5
 _VALID_PACKAGE_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$")
 
@@ -63,7 +63,9 @@ def _fetch_snyk_score(package: str) -> float | None:
                 digits = "".join(c for c in raw if c.isdigit())
                 if digits:
                     return int(digits) / 100
-    except Exception:
+    except (OSError, ValueError):
+        # Network failures (URLError/timeout = OSError) and decode/parse errors;
+        # missing score is non-fatal and shown as "n/a" by the caller.
         pass
     return None
 
@@ -157,7 +159,7 @@ def show_first_install_notice() -> None:
         f"[bold green]🔒 Security verification available for {pkg}[/bold green]\n"
         f"   Snyk:   {get_snyk_advisor_url(pkg)}\n"
         f"   Socket: {get_socket_url(pkg)}\n"
-        f"   [dim]Run 'mycli security' for full details.[/dim]"
+        f"   [dim]Run 'mymcp security' for full details.[/dim]"
     )
 
     state["security_notice_shown"] = True
