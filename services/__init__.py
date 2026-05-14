@@ -50,7 +50,7 @@ def discover_services() -> None:
     import services as _pkg
 
     for module_info in pkgutil.iter_modules(_pkg.__path__):
-        importlib.import_module(f"services.{module_info.name}")
+        importlib.import_module(f"services.{module_info.name}")  # noqa: TID251 - service auto-discovery so @service decorators register on startup
     _discovered = True
 
 

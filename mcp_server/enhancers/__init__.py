@@ -70,5 +70,5 @@ def discover_enhancers() -> None:
     for module_info in pkgutil.iter_modules(_pkg.__path__):
         if module_info.name in _SKIP_MODULES:
             continue
-        importlib.import_module(f"mcp_server.enhancers.{module_info.name}")
+        importlib.import_module(f"mcp_server.enhancers.{module_info.name}")  # noqa: TID251 - enhancer auto-discovery so @enhance decorators register on startup
     _discovered = True
