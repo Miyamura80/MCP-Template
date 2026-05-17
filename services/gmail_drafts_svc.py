@@ -256,11 +256,12 @@ class GmailReplyInput(BaseModel):
 def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
     """Create a reply draft attached to the given thread.
 
-    Derives ``To`` from the last message's ``From`` header and prefixes the
-    subject with ``Re:`` unless the originating subject already starts with
-    ``Re:`` (case-insensitive). The draft is created via the same
-    ``drafts().create`` call as ``gmail_compose`` but with ``threadId`` set
-    so Gmail threads the reply correctly.
+    Derives ``To`` from the last message's ``Reply-To`` header when present,
+    falling back to ``From`` (RFC 5322 5.2.2). Prefixes the subject with ``Re:``
+    unless the originating subject already starts with ``Re:``. Propagates the
+    parent's ``Message-ID`` as ``In-Reply-To`` and appends to ``References``
+    so non-Gmail MUAs also thread the conversation; Gmail itself uses the
+    ``threadId`` on the API wrapper.
     """
     svc = _get_gmail_client(input.user_id)
     thread = (
@@ -274,7 +275,7 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         raise ValueError(f"Thread {input.thread_id!r} has no messages to reply to")
     last_msg = messages[-1]
     headers = _headers_to_dict((last_msg.get("payload") or {}).get("headers"))
-    to = headers.get("from") or ""
+    to = headers.get("reply-to") or headers.get("from") or ""
     orig_subject = headers.get("subject") or ""
     if input.subject is not None:
         subject = input.subject
@@ -284,11 +285,21 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         subject = f"Re: {orig_subject}" if orig_subject else "Re:"
     body = input.body if input.body is not None else ""
 
+    parent_message_id = headers.get("message-id")
+    parent_references = headers.get("references")
+    in_reply_to = parent_message_id
+    if parent_message_id and parent_references:
+        references = f"{parent_references} {parent_message_id}"
+    else:
+        references = parent_references or parent_message_id
+
     raw = _build_raw_message(
         to=to,
         subject=subject,
         body=body,
         in_reply_to_thread_id=input.thread_id,
+        in_reply_to=in_reply_to,
+        references=references,
     )
     created = (
         svc.users()

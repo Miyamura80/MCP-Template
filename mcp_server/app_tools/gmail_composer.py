@@ -2,10 +2,11 @@
 
 These tools are callable by the iframe via ``mcpApp.callServerTool`` and are
 hinted as ``visibility=["app"]`` so well-behaved hosts hide them from the
-LLM. The wire payload carries ``user_id`` exactly like the headless services;
-a later wiring step will inject it from the authenticated principal.
+LLM. ``user_id`` arrives on the wire but is overridden by the authenticated
+principal when one is bound; see ``mcp_server/app_tools/_auth_guard.py``.
 """
 
+from mcp_server.app_tools._auth_guard import guard_user_id
 from mcp_server.server import mcp
 from models.gmail import (
     GmailDiscardDraftInput,
@@ -46,9 +47,10 @@ def save_draft(
     cc: str | None = None,
     bcc: str | None = None,
 ) -> GmailDraft:
+    uid = guard_user_id(user_id)
     return _gmail_update_draft(
         GmailUpdateDraftInput(
-            user_id=user_id,
+            user_id=uid,
             draft_id=draft_id,
             to=to,
             subject=subject,
@@ -73,9 +75,10 @@ def send(
     cc: str | None = None,
     bcc: str | None = None,
 ) -> GmailSendResult:
+    uid = guard_user_id(user_id)
     _gmail_update_draft(
         GmailUpdateDraftInput(
-            user_id=user_id,
+            user_id=uid,
             draft_id=draft_id,
             to=to,
             subject=subject,
@@ -84,7 +87,7 @@ def send(
             bcc=bcc,
         )
     )
-    return _gmail_send(GmailSendInput(user_id=user_id, draft_id=draft_id))
+    return _gmail_send(GmailSendInput(user_id=uid, draft_id=draft_id))
 
 
 @mcp.tool(
@@ -93,8 +96,9 @@ def send(
     meta=_APP_META,
 )
 def discard(user_id: str, draft_id: str) -> GmailDiscardDraftResult:
+    uid = guard_user_id(user_id)
     return _gmail_discard_draft(
-        GmailDiscardDraftInput(user_id=user_id, draft_id=draft_id)
+        GmailDiscardDraftInput(user_id=uid, draft_id=draft_id)
     )
 
 
@@ -104,4 +108,5 @@ def discard(user_id: str, draft_id: str) -> GmailDiscardDraftResult:
     meta=_APP_META,
 )
 def refresh(user_id: str, draft_id: str) -> GmailDraft:
-    return _gmail_get_draft(GmailGetDraftInput(user_id=user_id, draft_id=draft_id))
+    uid = guard_user_id(user_id)
+    return _gmail_get_draft(GmailGetDraftInput(user_id=uid, draft_id=draft_id))

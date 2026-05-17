@@ -49,7 +49,7 @@ class GmailDisconnectResult(BaseModel):
 
 class GmailListDraftsInput(BaseModel):
     user_id: str
-    limit: int = 20
+    limit: int = Field(default=20, ge=1, le=500)
 
 
 class GmailDraftSummary(BaseModel):
@@ -127,7 +127,7 @@ class GmailDiscardDraftResult(BaseModel):
 class GmailListInboxInput(BaseModel):
     user_id: str
     query: str | None = None
-    limit: int = 25
+    limit: int = Field(default=25, ge=1, le=500)
 
 
 class GmailMessageSummary(BaseModel):
@@ -184,7 +184,7 @@ class GmailThread(BaseModel):
 class GmailCurateInboxInput(BaseModel):
     user_id: str
     query: str | None = None
-    limit: int = 10
+    limit: int = Field(default=10, ge=1, le=100)
 
 
 class GmailCuratedThread(BaseModel):

@@ -315,8 +315,16 @@ def _build_raw_message(
     cc: str | None = None,
     bcc: str | None = None,
     in_reply_to_thread_id: str | None = None,  # noqa: ARG001 - threadId travels on the wrapper, not headers
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> str:
-    """Return a base64-url-encoded MIME message for ``drafts.create`` / ``messages.send``."""
+    """Return a base64-url-encoded MIME message for ``drafts.create`` / ``messages.send``.
+
+    For replies, supply ``in_reply_to`` (the parent ``Message-ID``) and ``references``
+    (the parent's existing ``References`` plus its ``Message-ID``) so MUAs other
+    than Gmail also thread the conversation. Gmail itself uses ``threadId`` on
+    the API wrapper; these headers are belt-and-braces for the recipient.
+    """
     msg = EmailMessage()
     msg["To"] = to
     if cc:
@@ -324,6 +332,10 @@ def _build_raw_message(
     if bcc:
         msg["Bcc"] = bcc
     msg["Subject"] = subject
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
     msg.set_content(body, subtype="plain", charset="utf-8")
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     return raw
@@ -343,8 +355,12 @@ def _headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:
 def _decode_body_data(data: str | None) -> str | None:
     if not data:
         return None
+    # Gmail returns base64url with padding stripped; re-add per RFC 4648 5.
+    padded = data + "=" * (-len(data) % 4)
     try:
-        return base64.urlsafe_b64decode(data.encode("ascii")).decode("utf-8", "replace")
+        return base64.urlsafe_b64decode(padded.encode("ascii")).decode(
+            "utf-8", "replace"
+        )
     except (binascii.Error, ValueError):
         return None
 

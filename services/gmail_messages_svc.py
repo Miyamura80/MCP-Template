@@ -143,7 +143,8 @@ def _score_thread(
 )
 def gmail_list_inbox(input: GmailListInboxInput) -> GmailListInboxResult:
     svc = _get_gmail_client(input.user_id)
-    q = input.query or "in:inbox"
+    # Always scope to the inbox; a caller-provided query AND'd, not replaced.
+    q = f"in:inbox {input.query}" if input.query else "in:inbox"
     listing = (
         svc.users().messages().list(userId="me", q=q, maxResults=input.limit).execute()
     )
@@ -200,7 +201,8 @@ def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
     from googleapiclient.errors import HttpError
 
     svc = _get_gmail_client(input.user_id)
-    q = input.query or "in:inbox"
+    # Curation is inbox-scoped; AND any caller query within it.
+    q = f"in:inbox {input.query}" if input.query else "in:inbox"
     over_fetch = max(input.limit * 3, 30)
     listing = (
         svc.users().threads().list(userId="me", q=q, maxResults=over_fetch).execute()

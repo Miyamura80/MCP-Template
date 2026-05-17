@@ -2,10 +2,11 @@
 
 These are visible to the iframe via ``visibility=["app"]`` but should not be
 invoked by the LLM directly - the curated reader UI calls them on user action.
-``user_id`` travels on the wire today; a later wiring step will inject it from
-the authenticated principal.
+``user_id`` arrives on the wire but is overridden by the authenticated
+principal when one is bound; see ``mcp_server/app_tools/_auth_guard.py``.
 """
 
+from mcp_server.app_tools._auth_guard import guard_user_id
 from mcp_server.server import mcp
 from models.gmail import (
     GmailCurateInboxInput,
@@ -51,8 +52,9 @@ def refresh(
     query: str | None = None,
     limit: int = 10,
 ) -> GmailCurateInboxResult:
+    uid = guard_user_id(user_id)
     return _gmail_curate_inbox(
-        GmailCurateInboxInput(user_id=user_id, query=query, limit=limit)
+        GmailCurateInboxInput(user_id=uid, query=query, limit=limit)
     )
 
 
@@ -62,7 +64,8 @@ def refresh(
     meta=_APP_META,
 )
 def open_thread(user_id: str, thread_id: str) -> GmailThread:
-    return _gmail_get_thread(GmailGetThreadInput(user_id=user_id, thread_id=thread_id))
+    uid = guard_user_id(user_id)
+    return _gmail_get_thread(GmailGetThreadInput(user_id=uid, thread_id=thread_id))
 
 
 @mcp.tool(
@@ -71,8 +74,9 @@ def open_thread(user_id: str, thread_id: str) -> GmailThread:
     meta=_APP_META,
 )
 def mark_read(user_id: str, thread_id: str) -> GmailMarkReadResult:
+    uid = guard_user_id(user_id)
     return _gmail_mark_thread_read(
-        GmailThreadModifyInput(user_id=user_id, thread_id=thread_id)
+        GmailThreadModifyInput(user_id=uid, thread_id=thread_id)
     )
 
 
@@ -82,8 +86,9 @@ def mark_read(user_id: str, thread_id: str) -> GmailMarkReadResult:
     meta=_APP_META,
 )
 def archive(user_id: str, thread_id: str) -> GmailArchiveResult:
+    uid = guard_user_id(user_id)
     return _gmail_archive_thread(
-        GmailThreadModifyInput(user_id=user_id, thread_id=thread_id)
+        GmailThreadModifyInput(user_id=uid, thread_id=thread_id)
     )
 
 
@@ -98,8 +103,9 @@ def reply(
     body: str | None = None,
     subject: str | None = None,
 ) -> GmailDraft:
+    uid = guard_user_id(user_id)
     return _gmail_reply_to_thread(
         GmailReplyInput(
-            user_id=user_id, thread_id=thread_id, body=body, subject=subject
+            user_id=uid, thread_id=thread_id, body=body, subject=subject
         )
     )

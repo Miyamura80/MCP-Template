@@ -111,20 +111,27 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   const persistDraft = async (next: Draft) => {
     setSaveStatus({ kind: "saving" });
+    // Snapshot what we're saving so a save that completes after a newer
+    // edit doesn't falsely clear the dirty flag and lose the unsaved diff.
+    const snapshot = next;
     try {
       await mcpApp.callServerTool({
         name: "gmail_composer.save_draft",
         arguments: {
-          draft_id: next.draft_id,
-          to: next.to ?? "",
-          cc: next.cc ?? "",
-          bcc: next.bcc ?? "",
-          subject: next.subject ?? "",
-          body: next.body ?? "",
+          draft_id: snapshot.draft_id,
+          to: snapshot.to ?? "",
+          cc: snapshot.cc ?? "",
+          bcc: snapshot.bcc ?? "",
+          subject: snapshot.subject ?? "",
+          body: snapshot.body ?? "",
         },
       });
       setSaveStatus({ kind: "saved", at: new Date() });
-      localDirtyRef.current = false;
+      // Only clear dirty if the user hasn't typed anything newer.
+      const latest = draftRef.current;
+      if (latest && fieldsEqual(latest, snapshot)) {
+        localDirtyRef.current = false;
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
@@ -172,6 +179,12 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   const onDiscardConfirm = async () => {
     if (!draft) return;
+    // Cancel any queued autosave so a debounced save can't race ahead and
+    // re-create a row immediately after the discard call returns.
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     try {
       await mcpApp.callServerTool({
         name: "gmail_composer.discard",
@@ -188,6 +201,12 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   const applyAgentUpdate = () => {
     if (!pendingAgent) return;
+    // Drop any queued local autosave; otherwise the prior local-dirty content
+    // would land on Gmail seconds after the user accepted the agent's update.
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     setDraft(pendingAgent);
     setPendingAgent(null);
     localDirtyRef.current = false;

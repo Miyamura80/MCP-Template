@@ -61,6 +61,7 @@ class TestMCPServerIntegration(TestTemplate):
         # gmail_composer / gmail_inbox apps are added in later phases; here we
         # only assert that whatever ui:// resources are registered serve HTML.
         ui_uris = [u for u in uris if u.startswith("ui://mymcp/")]
+        assert ui_uris, "expected at least one ui://mymcp/ resource registered"
         for uri in ui_uris:
             contents = list(asyncio.run(mcp.read_resource(uri)))
             assert len(contents) == 1

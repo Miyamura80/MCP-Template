@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type CuratedThread = {
   thread_id: string;
@@ -54,6 +54,8 @@ export function Inbox({ mcpApp }: InboxProps) {
   const [unreadRemoved, setUnreadRemoved] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Monotonic id for openThread; only the most-recent request may mutate state.
+  const openSeqRef = useRef(0);
 
   useEffect(() => {
     const handler = (raw: unknown) => {
@@ -67,6 +69,7 @@ export function Inbox({ mcpApp }: InboxProps) {
   }, [mcpApp]);
 
   const openThread = async (thread_id: string) => {
+    const seq = ++openSeqRef.current;
     setSelectedId(thread_id);
     setThread(null);
     setLoadingThread(true);
@@ -76,12 +79,15 @@ export function Inbox({ mcpApp }: InboxProps) {
         name: "gmail_inbox.open_thread",
         arguments: { thread_id },
       });
+      // A newer click happened while we were awaiting; ignore the stale result.
+      if (seq !== openSeqRef.current) return;
       const data = extractStructuredContent<Thread>(raw);
       if (data && Array.isArray(data.messages)) setThread(data);
     } catch (err) {
+      if (seq !== openSeqRef.current) return;
       setError(errMsg(err));
     } finally {
-      setLoadingThread(false);
+      if (seq === openSeqRef.current) setLoadingThread(false);
     }
   };
 

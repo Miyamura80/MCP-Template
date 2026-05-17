@@ -66,7 +66,16 @@ class PlaintextEncryption:
 
 
 def get_default_encryption() -> TokenEncryption | None:
-    """Return a ``FernetEncryption`` from config, or ``None`` if unset."""
+    """Return a ``FernetEncryption`` from config, or ``None`` if unset.
+
+    v1 scope: a single active key with ``key_id="v1"``. The ``google_tokens``
+    table stamps ``key_id`` on every row so a multi-key backend can decrypt
+    legacy rows during rotation; that backend is out of scope here and is the
+    KMS upgrade path described in ``mcp_server/MCP_UI_ARCHITECTURE.md``. To
+    rotate this v1 key today, force a re-consent by calling
+    ``gmail_disconnect`` (sets ``revoked_at``) and then ``gmail_connect`` per
+    user. Implementing in-place rotation is intentionally deferred.
+    """
     key = getattr(global_config, "GOOGLE_TOKEN_ENC_KEY", None)
     if not key:
         return None

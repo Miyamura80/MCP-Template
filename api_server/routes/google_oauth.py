@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import html
 import json
 from datetime import UTC, datetime
 
@@ -58,12 +59,15 @@ def _decode_id_token_email(id_token: str) -> str | None:
 
 
 def _error_page(message: str, status_code: int = 400) -> HTMLResponse:
+    # message may include the raw `error` query param from Google's redirect,
+    # which is attacker-influenceable; escape before inlining into the page.
+    safe = html.escape(message, quote=True)
     return HTMLResponse(
         status_code=status_code,
         content=(
             "<!doctype html><html><body>"
             "<h1>Connection failed</h1>"
-            f"<p>{message}</p>"
+            f"<p>{safe}</p>"
             "</body></html>"
         ),
     )
