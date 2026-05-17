@@ -78,9 +78,7 @@ def _collect_comment_tokens(path: pathlib.Path) -> list[tokenize.TokenInfo] | No
     return [tok for tok in tokens if tok.type == token.COMMENT]
 
 
-def _has_justification(
-    comments: list[tokenize.TokenInfo], idx: int
-) -> bool:
+def _has_justification(comments: list[tokenize.TokenInfo], idx: int) -> bool:
     """Check the noqa comment itself + comments within LOOKAHEAD_LINES rows."""
     noqa_token = comments[idx]
     inline = _trailing_text_after_noqa(noqa_token.string)

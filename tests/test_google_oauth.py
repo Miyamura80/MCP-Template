@@ -129,9 +129,7 @@ class TestStateSigning(TestTemplate):
         with patch("services.gmail_svc.time.time", return_value=1_000_000.0):
             state = _sign_state("user-42")
         # Now jump forward past the 10-minute window
-        with patch(
-            "services.gmail_svc.time.time", return_value=1_000_000.0 + 11 * 60
-        ):
+        with patch("services.gmail_svc.time.time", return_value=1_000_000.0 + 11 * 60):
             assert _verify_state(state) is None
 
     def test_rejects_malformed(self):
@@ -298,9 +296,7 @@ class TestCallbackRoute(TestTemplate):
             ),
         ):
             client = _client()
-            resp = client.get(
-                f"/api/v1/auth/google/callback?code=abc&state={state}"
-            )
+            resp = client.get(f"/api/v1/auth/google/callback?code=abc&state={state}")
 
             assert resp.status_code == 200, resp.text
             assert "Connected" in resp.text

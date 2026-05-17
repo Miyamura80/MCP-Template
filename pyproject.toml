@@ -171,6 +171,7 @@ exclude = [
     "tests/test_enhancers.py",
     "tests/test_mcp_server.py",
     "tests/test_mcp_remote.py",
+    "tests/test_gmail_services.py",
 ]
 
 [tool.file_length]
@@ -179,6 +180,7 @@ exclude = [
     "init/onboard.py",
     "api_server/routes/payments/webhooks.py",
     "api_server/middleware/rate_limit.py",
+    "tests/test_gmail_services.py",
 ]
 
 [tool.coverage.run]

@@ -1,7 +1,9 @@
 """Gmail OAuth services - pure business logic.
 
-Phase 3: connect / status / disconnect. Later phases extend this module
-with the actual Gmail-API-backed services (compose/send/inbox/curate).
+Phase 3: connect / status / disconnect + shared helpers.
+Phase 4: drafts / inbox / threads / curate services live in sibling modules
+(``gmail_drafts_svc`` and ``gmail_messages_svc``) which import the helpers
+defined here. All three modules participate in service discovery.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from email.message import EmailMessage
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -34,6 +38,15 @@ from models.gmail import (
     GmailStatusResult,
 )
 from services import service
+
+# ---------------------------------------------------------------------------
+# Domain errors
+# ---------------------------------------------------------------------------
+
+
+class GmailNotConnectedError(Exception):
+    """Raised when a Gmail-API service is invoked for a user with no active token row."""
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -233,3 +246,164 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
         row.revoked_at = datetime.now(UTC)
         session.commit()
         return GmailDisconnectResult(revoked=True)
+
+
+# ---------------------------------------------------------------------------
+# Gmail-API client + MIME helpers (shared by drafts / inbox / threads svcs)
+# ---------------------------------------------------------------------------
+
+
+def _mint_access_token(refresh_token: str) -> str:
+    """Exchange a refresh token for a short-lived access token via Google.
+
+    Pure-sync ``httpx.Client`` keeps the helper callable from sync services.
+    """
+    client_id = global_config.GOOGLE_CLIENT_ID
+    client_secret = global_config.GOOGLE_CLIENT_SECRET
+    if not client_id or not client_secret:
+        raise RuntimeError("Google OAuth not configured")
+
+    with httpx.Client(timeout=20.0) as client:
+        resp = client.post(
+            GOOGLE_TOKEN_ENDPOINT,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+        )
+    resp.raise_for_status()
+    body = resp.json()
+    access_token = body.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise RuntimeError("Google token endpoint returned no access_token")
+    return access_token
+
+
+def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource is dynamic
+    """Return an authorized ``googleapiclient`` Gmail v1 service for ``user_id``.
+
+    Raises ``GmailNotConnectedError`` if no active token row exists. Network
+    or Google-side errors propagate so the caller can decide how to surface them.
+    """
+    # Lazy import: keep module-level cost low; googleapiclient pulls in httplib2.
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    from common.token_encryption import require_encryption
+
+    with _get_db_session() as session:
+        row = _load_token_row(session, user_id)
+        if row is None:
+            raise GmailNotConnectedError(
+                f"No active Gmail connection for user_id={user_id!r}"
+            )
+        encrypted = row.refresh_token_enc
+
+    refresh_token = require_encryption().decrypt(encrypted)
+    access_token = _mint_access_token(refresh_token)
+    creds = Credentials(token=access_token)
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+def _build_raw_message(
+    *,
+    to: str,
+    subject: str,
+    body: str,
+    cc: str | None = None,
+    bcc: str | None = None,
+    in_reply_to_thread_id: str | None = None,  # noqa: ARG001 - threadId travels on the wrapper, not headers
+) -> str:
+    """Return a base64-url-encoded MIME message for ``drafts.create`` / ``messages.send``."""
+    msg = EmailMessage()
+    msg["To"] = to
+    if cc:
+        msg["Cc"] = cc
+    if bcc:
+        msg["Bcc"] = bcc
+    msg["Subject"] = subject
+    msg.set_content(body, subtype="plain", charset="utf-8")
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+    return raw
+
+
+def _headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:
+    """Flatten Gmail's ``[{name, value}, ...]`` header list to a lower-cased dict."""
+    out: dict[str, str] = {}
+    for h in headers or []:
+        name = h.get("name")
+        value = h.get("value")
+        if isinstance(name, str) and isinstance(value, str):
+            out[name.lower()] = value
+    return out
+
+
+def _decode_body_data(data: str | None) -> str | None:
+    if not data:
+        return None
+    try:
+        return base64.urlsafe_b64decode(data.encode("ascii")).decode("utf-8", "replace")
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _walk_parts(part: dict[str, Any], out: dict[str, Any]) -> None:
+    """Recursively visit a Gmail payload tree, populating ``out`` in place."""
+    mime_type = part.get("mimeType", "")
+    body = part.get("body", {}) or {}
+    filename = part.get("filename") or ""
+
+    if filename and (body.get("attachmentId") or body.get("size")):
+        out["attachments"].append(
+            {
+                "filename": filename or None,
+                "mime_type": mime_type or None,
+                "size": body.get("size"),
+                "attachment_id": body.get("attachmentId"),
+            }
+        )
+    elif mime_type == "text/plain" and out["body_text"] is None:
+        out["body_text"] = _decode_body_data(body.get("data"))
+    elif mime_type == "text/html" and out["body_html"] is None:
+        out["body_html"] = _decode_body_data(body.get("data"))
+
+    for child in part.get("parts", []) or []:
+        _walk_parts(child, out)
+
+
+def _parse_message_resource(msg: dict[str, Any]) -> dict[str, Any]:
+    """Extract a normalized dict from a Gmail ``messages.get`` / ``drafts.get`` body.
+
+    Returns a dict with keys: ``message_id``, ``thread_id``, ``snippet``,
+    ``from``, ``to``, ``cc``, ``subject``, ``date`` (datetime|None),
+    ``body_text``, ``body_html``, ``attachments`` (list[dict]).
+    """
+    payload = msg.get("payload") or {}
+    headers = _headers_to_dict(payload.get("headers"))
+
+    out: dict[str, Any] = {
+        "message_id": msg.get("id"),
+        "thread_id": msg.get("threadId"),
+        "snippet": msg.get("snippet"),
+        "from": headers.get("from"),
+        "to": headers.get("to"),
+        "cc": headers.get("cc"),
+        "subject": headers.get("subject"),
+        "date": None,
+        "body_text": None,
+        "body_html": None,
+        "attachments": [],
+    }
+
+    internal_date = msg.get("internalDate")
+    if internal_date is not None:
+        try:
+            ts_ms = int(internal_date)
+            out["date"] = datetime.fromtimestamp(ts_ms / 1000.0, tz=UTC)
+        except (TypeError, ValueError):
+            out["date"] = None
+
+    _walk_parts(payload, out)
+    return out

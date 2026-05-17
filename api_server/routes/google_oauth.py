@@ -86,7 +86,9 @@ def _success_page(email: str) -> HTMLResponse:
 
 
 @router.get("/start")
-def start(user: AuthenticatedUser = Depends(get_authenticated_user)) -> RedirectResponse:
+def start(
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> RedirectResponse:
     """Kick off the OAuth flow: redirect the user to Google's consent screen."""
     try:
         result = gmail_connect(GmailConnectInput(user_id=user.user_id))

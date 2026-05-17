@@ -20,9 +20,7 @@ class GoogleToken(Base):
     user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     refresh_token_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    key_id: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="v1"
-    )
+    key_id: Mapped[str] = mapped_column(String(32), nullable=False, default="v1")
     scopes: Mapped[list[str] | None] = mapped_column(JSON, nullable=True, default=None)
     granted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
