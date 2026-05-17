@@ -1,6 +1,6 @@
 """Pydantic input/output schemas for the Gmail integration.
 
-Every input model carries ``user_id`` explicitly — the MCP tool factory
+Every input model carries ``user_id`` explicitly - the MCP tool factory
 and FastAPI dependencies inject it from the authenticated principal in
 a later wiring step (we deliberately do not use ContextVars).
 """

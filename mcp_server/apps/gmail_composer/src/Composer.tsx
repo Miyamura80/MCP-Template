@@ -198,7 +198,7 @@ export function Composer({ mcpApp }: ComposerProps) {
   if (sent) {
     return (
       <div style={containerStyle}>
-        <div style={successStyle}>Sent &#10003; — message_id: {sent.message_id}</div>
+        <div style={successStyle}>Sent &#10003; - message_id: {sent.message_id}</div>
       </div>
     );
   }

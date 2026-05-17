@@ -139,7 +139,7 @@ export function Inbox({ mcpApp }: InboxProps) {
         name: "gmail_inbox.reply",
         arguments: { thread_id: selectedId },
       });
-      setStatus("Reply draft created — switch to composer");
+      setStatus("Reply draft created - switch to composer");
       setTimeout(() => setStatus(null), 3000);
     } catch (err) {
       setError(errMsg(err));

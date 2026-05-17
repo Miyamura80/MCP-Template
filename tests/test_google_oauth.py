@@ -305,7 +305,7 @@ class TestCallbackRoute(TestTemplate):
             s = factory()
             row = s.query(GoogleToken).filter_by(user_id="dave").one()
             # Refresh token is stored encrypted (or, in dev fallback, as bytes
-            # of the plaintext — the contract is "stored via the encryption
+            # of the plaintext - the contract is "stored via the encryption
             # backend", so we only assert it went through the layer).
             assert row.refresh_token_enc != b"RT-secret" or row.key_id == "plaintext"
             # Decoding it back must yield the original

@@ -223,7 +223,7 @@ class Config(BaseSettings):
     # Redis
     REDIS_URL: str | None = None
 
-    # Google OAuth (Gmail integration) — fill in real values in .env
+    # Google OAuth (Gmail integration) - fill in real values in .env
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str | None = None
