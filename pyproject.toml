@@ -63,6 +63,8 @@ dependencies = [
     "redis>=5.0.0",
     "x402[fastapi,httpx]>=2.5.0",
     "starlette>=0.40.0",
+    "google-api-python-client>=2.196.0",
+    "google-auth>=2.53.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
