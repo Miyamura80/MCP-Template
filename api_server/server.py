@@ -11,7 +11,7 @@ from api_server.middleware.error_handler import (
 )
 from api_server.middleware.mcp_auth import MCPAuthMiddleware
 from api_server.middleware.rate_limit import RateLimitMiddleware
-from api_server.routes import agentic_payments, auth, health, services
+from api_server.routes import agentic_payments, auth, google_oauth, health, services
 from api_server.routes.payments import checkout, metering, subscription, webhooks
 from common import global_config
 from mcp_server.server import lifespan as mcp_lifespan
@@ -47,6 +47,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(services.router)
 app.include_router(auth.router)
+app.include_router(google_oauth.router)
 app.include_router(checkout.router)
 app.include_router(metering.router)
 app.include_router(subscription.router)
