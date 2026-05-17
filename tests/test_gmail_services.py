@@ -793,3 +793,180 @@ class TestDraftRoundTrip(TestTemplate):
         assert fetched.draft_id == "d-new"
         assert updated.body == "B-updated"
         assert sent.message_id == "msg-final"
+
+
+# ---------------------------------------------------------------------------
+# Mark-read / Archive / Reply (Phase 6 additions)
+# ---------------------------------------------------------------------------
+
+
+class TestGmailMarkThreadRead(TestTemplate):
+    def test_calls_threads_modify_with_remove_unread_label(self):
+        from services.gmail_messages_svc import (
+            GmailThreadModifyInput,
+            gmail_mark_thread_read,
+        )
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().threads().modify().execute.return_value = {"id": "t-1"}
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_mark_thread_read(
+                    GmailThreadModifyInput(user_id="alice", thread_id="t-1")
+                )
+            finally:
+                _stop(patches)
+
+        assert result.marked_read is True
+        modify_calls = [
+            c for c in mock.users().threads().modify.call_args_list if c.kwargs
+        ]
+        assert modify_calls, "threads().modify() was not called with kwargs"
+        last = modify_calls[-1]
+        assert last.kwargs["id"] == "t-1"
+        assert last.kwargs["body"] == {"removeLabelIds": ["UNREAD"]}
+
+
+class TestGmailArchiveThread(TestTemplate):
+    def test_calls_threads_modify_with_remove_inbox_label(self):
+        from services.gmail_messages_svc import (
+            GmailThreadModifyInput,
+            gmail_archive_thread,
+        )
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().threads().modify().execute.return_value = {"id": "t-2"}
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_archive_thread(
+                    GmailThreadModifyInput(user_id="alice", thread_id="t-2")
+                )
+            finally:
+                _stop(patches)
+
+        assert result.archived is True
+        modify_calls = [
+            c for c in mock.users().threads().modify.call_args_list if c.kwargs
+        ]
+        assert modify_calls
+        last = modify_calls[-1]
+        assert last.kwargs["id"] == "t-2"
+        assert last.kwargs["body"] == {"removeLabelIds": ["INBOX"]}
+
+
+class TestGmailReplyToThread(TestTemplate):
+    def _patch_reply(self, *, last_msg_headers: dict[str, str], created_draft: dict):
+        mock = _make_mock_service()
+        thread_payload = {
+            "id": "t-rep",
+            "messages": [
+                {
+                    "id": "m-last",
+                    "internalDate": "1700000000000",
+                    "payload": {"headers": _headers(last_msg_headers)},
+                }
+            ],
+        }
+        mock.users().threads().get().execute.return_value = thread_payload
+        mock.users().drafts().create().execute.return_value = created_draft
+        return mock
+
+    def test_derives_to_and_subject_from_last_message(self):
+        from services.gmail_drafts_svc import GmailReplyInput, gmail_reply_to_thread
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Original Subject",
+                },
+                created_draft=_draft_resource(
+                    draft_id="d-rep",
+                    to="sender@example.com",
+                    subject="Re: Original Subject",
+                    body="",
+                    thread_id="t-rep",
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                draft = gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        assert draft.draft_id == "d-rep"
+        # Verify the MIME built carried derived To/Subject + the threadId was
+        # threaded onto drafts().create.
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        assert create_calls
+        body = create_calls[-1].kwargs["body"]
+        assert body["message"]["threadId"] == "t-rep"
+        raw_b64 = body["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "sender@example.com"
+        assert mime["Subject"] == "Re: Original Subject"
+
+    def test_does_not_double_prefix_re_when_already_present(self):
+        from services.gmail_drafts_svc import GmailReplyInput, gmail_reply_to_thread
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Re: already a reply",
+                },
+                created_draft=_draft_resource(
+                    draft_id="d-rep2",
+                    to="sender@example.com",
+                    subject="Re: already a reply",
+                    body="",
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["Subject"] == "Re: already a reply"
+
+    def test_raises_when_thread_has_no_messages(self):
+        from services.gmail_drafts_svc import GmailReplyInput, gmail_reply_to_thread
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().threads().get().execute.return_value = {
+                "id": "t-empty",
+                "messages": [],
+            }
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="no messages"):
+                    gmail_reply_to_thread(
+                        GmailReplyInput(user_id="alice", thread_id="t-empty")
+                    )
+            finally:
+                _stop(patches)

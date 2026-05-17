@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger as log
+from pydantic import BaseModel
 
 from models.gmail import (
     GmailCuratedThread,
@@ -39,6 +40,23 @@ from services.gmail_svc import (
     _headers_to_dict,
     _parse_message_resource,
 )
+
+
+# Inputs/outputs for thread-modify services kept inline (small,
+# transport-agnostic) so models/gmail.py doesn't need to grow for these
+# small toggles. Promote to models/gmail.py if reused elsewhere.
+class GmailThreadModifyInput(BaseModel):
+    user_id: str
+    thread_id: str
+
+
+class GmailMarkReadResult(BaseModel):
+    marked_read: bool
+
+
+class GmailArchiveResult(BaseModel):
+    archived: bool
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -245,3 +263,35 @@ def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
 
     curated.sort(key=lambda t: t.importance_score, reverse=True)
     return GmailCurateInboxResult(threads=curated[: input.limit])
+
+
+@service(
+    name="gmail_mark_thread_read",
+    description="Mark a Gmail thread as read by removing the UNREAD label",
+    input_model=GmailThreadModifyInput,
+    output_model=GmailMarkReadResult,
+)
+def gmail_mark_thread_read(input: GmailThreadModifyInput) -> GmailMarkReadResult:
+    svc = _get_gmail_client(input.user_id)
+    svc.users().threads().modify(
+        userId="me",
+        id=input.thread_id,
+        body={"removeLabelIds": ["UNREAD"]},
+    ).execute()
+    return GmailMarkReadResult(marked_read=True)
+
+
+@service(
+    name="gmail_archive_thread",
+    description="Archive a Gmail thread by removing the INBOX label",
+    input_model=GmailThreadModifyInput,
+    output_model=GmailArchiveResult,
+)
+def gmail_archive_thread(input: GmailThreadModifyInput) -> GmailArchiveResult:
+    svc = _get_gmail_client(input.user_id)
+    svc.users().threads().modify(
+        userId="me",
+        id=input.thread_id,
+        body={"removeLabelIds": ["INBOX"]},
+    ).execute()
+    return GmailArchiveResult(archived=True)
