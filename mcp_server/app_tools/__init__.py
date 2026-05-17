@@ -19,5 +19,5 @@ def discover_app_tools() -> None:
     import mcp_server.app_tools as _pkg
 
     for module_info in pkgutil.iter_modules(_pkg.__path__):
-        importlib.import_module(f"mcp_server.app_tools.{module_info.name}")
+        importlib.import_module(f"mcp_server.app_tools.{module_info.name}")  # noqa: TID251 - app-tools auto-discovery so module-level registrations run
     _discovered = True
