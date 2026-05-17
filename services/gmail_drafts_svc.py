@@ -16,9 +16,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger as log
+from pydantic import BaseModel
 
 from models.gmail import (
     GmailComposeInput,
+    GmailDiscardDraftInput,
+    GmailDiscardDraftResult,
     GmailDraft,
     GmailGetDraftInput,
     GmailListDraftsInput,
@@ -209,3 +212,92 @@ def gmail_send(input: GmailSendInput) -> GmailSendResult:
         thread_id=sent.get("threadId"),
         sent_at=datetime.now(UTC),
     )
+
+
+@service(
+    name="gmail_discard_draft",
+    description="Delete a Gmail draft by id",
+    input_model=GmailDiscardDraftInput,
+    output_model=GmailDiscardDraftResult,
+)
+def gmail_discard_draft(input: GmailDiscardDraftInput) -> GmailDiscardDraftResult:
+    """Delete a draft. Gmail's ``drafts().delete`` returns no body on success."""
+    svc = _get_gmail_client(input.user_id)
+    svc.users().drafts().delete(userId="me", id=input.draft_id).execute()
+    log.debug("Discarded Gmail draft id={}", input.draft_id)
+    return GmailDiscardDraftResult(discarded=True)
+
+
+# ---------------------------------------------------------------------------
+# Reply helper (creates a draft for an existing thread)
+# ---------------------------------------------------------------------------
+
+
+class GmailReplyInput(BaseModel):
+    """Input for ``gmail_reply_to_thread``: create a reply draft on a thread.
+
+    ``body`` defaults to an empty placeholder so the composer UI can populate
+    it on the next turn. ``subject`` defaults to ``Re: <orig>`` derived from
+    the thread's last message.
+    """
+
+    user_id: str
+    thread_id: str
+    body: str | None = None
+    subject: str | None = None
+
+
+@service(
+    name="gmail_reply_to_thread",
+    description="Create a reply draft on an existing Gmail thread",
+    input_model=GmailReplyInput,
+    output_model=GmailDraft,
+)
+def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
+    """Create a reply draft attached to the given thread.
+
+    Derives ``To`` from the last message's ``From`` header and prefixes the
+    subject with ``Re:`` unless the originating subject already starts with
+    ``Re:`` (case-insensitive). The draft is created via the same
+    ``drafts().create`` call as ``gmail_compose`` but with ``threadId`` set
+    so Gmail threads the reply correctly.
+    """
+    svc = _get_gmail_client(input.user_id)
+    thread = (
+        svc.users()
+        .threads()
+        .get(userId="me", id=input.thread_id, format="metadata")
+        .execute()
+    )
+    messages = thread.get("messages") or []
+    if not messages:
+        raise ValueError(f"Thread {input.thread_id!r} has no messages to reply to")
+    last_msg = messages[-1]
+    headers = _headers_to_dict((last_msg.get("payload") or {}).get("headers"))
+    to = headers.get("from") or ""
+    orig_subject = headers.get("subject") or ""
+    if input.subject is not None:
+        subject = input.subject
+    elif orig_subject.lower().startswith("re:"):
+        subject = orig_subject
+    else:
+        subject = f"Re: {orig_subject}" if orig_subject else "Re:"
+    body = input.body if input.body is not None else ""
+
+    raw = _build_raw_message(
+        to=to,
+        subject=subject,
+        body=body,
+        in_reply_to_thread_id=input.thread_id,
+    )
+    created = (
+        svc.users()
+        .drafts()
+        .create(
+            userId="me",
+            body={"message": {"raw": raw, "threadId": input.thread_id}},
+        )
+        .execute()
+    )
+    log.debug("Created Gmail reply draft id={}", created.get("id"))
+    return _draft_resource_to_model(created)

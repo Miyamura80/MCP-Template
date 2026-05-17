@@ -26,6 +26,7 @@ from db.models.google_tokens import GoogleToken
 from models.gmail import (
     GmailComposeInput,
     GmailCurateInboxInput,
+    GmailDiscardDraftInput,
     GmailGetDraftInput,
     GmailGetThreadInput,
     GmailListDraftsInput,
@@ -35,6 +36,7 @@ from models.gmail import (
 )
 from services.gmail_drafts_svc import (
     gmail_compose,
+    gmail_discard_draft,
     gmail_get_draft,
     gmail_list_drafts,
     gmail_send,
@@ -455,6 +457,24 @@ class TestGmailSend(TestTemplate):
         assert result.message_id == "msg-123"
         assert result.thread_id == "thr-7"
         assert before <= result.sent_at <= after
+
+
+class TestGmailDiscardDraft(TestTemplate):
+    def test_happy_path(self):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().delete().execute.return_value = {}
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_discard_draft(
+                    GmailDiscardDraftInput(user_id="alice", draft_id="d-1")
+                )
+            finally:
+                _stop(patches)
+
+        assert result.discarded is True
 
 
 # ---------------------------------------------------------------------------

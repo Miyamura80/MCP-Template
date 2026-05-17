@@ -110,6 +110,15 @@ class GmailSendResult(BaseModel):
     sent_at: datetime
 
 
+class GmailDiscardDraftInput(BaseModel):
+    user_id: str
+    draft_id: str
+
+
+class GmailDiscardDraftResult(BaseModel):
+    discarded: bool
+
+
 # ---------------------------------------------------------------------------
 # Inbox / threads
 # ---------------------------------------------------------------------------
