@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from mcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
+from mcp.server.elicitation import AcceptedElicitation
 from pydantic import BaseModel
 
 from mcp_server.enhancers import enhance, get_enhancer
@@ -108,10 +108,10 @@ class TestEnhancedTool(TestTemplate):
 
 class TestEnhancerRegistry(TestTemplate):
     def test_get_enhancer_returns_registered(self):
-        # Importing mcp_server.enhancers.doctor registers the doctor enhancer.
-        import mcp_server.enhancers.doctor  # noqa: F401
+        # Importing mcp_server.enhancers.config registers the config_show enhancer.
+        import mcp_server.enhancers.config  # noqa: F401
 
-        entry = get_enhancer("doctor")
+        entry = get_enhancer("config_show")
         assert entry is not None
         assert entry.fallback == "headless"
 
@@ -138,121 +138,6 @@ class TestEnhancerRegistry(TestTemplate):
 
     def test_get_enhancer_unknown_returns_none(self):
         assert get_enhancer("__definitely_not_a_real_service__") is None
-
-
-class TestDoctorEnhancerFlows(TestTemplate):
-    """Tests the doctor enhancer's elicitation flow at the unit level."""
-
-    @staticmethod
-    def _failing_result():
-        from models.doctor import CheckResultModel, DoctorResult
-
-        return DoctorResult(
-            checks=[
-                CheckResultModel(name="test", status="fail", message="x", fixable=True)
-            ],
-            has_failures=True,
-        )
-
-    @staticmethod
-    def _passing_result():
-        from models.doctor import DoctorResult
-
-        return DoctorResult(checks=[], has_failures=False)
-
-    def test_declined_elicit_does_not_set_fix(self):
-        from mcp_server.enhancers.doctor import doctor_enhanced
-        from models.doctor import DoctorInput, DoctorResult
-
-        failing_result = self._failing_result()
-        call_count = 0
-
-        def fake_service(_input: DoctorInput) -> DoctorResult:
-            nonlocal call_count
-            call_count += 1
-            return failing_result
-
-        ctx = _make_mock_ctx(elicit_result=DeclinedElicitation(action="decline"))
-        tool: EnhancedTool[DoctorInput, DoctorResult] = EnhancedTool(
-            ctx=ctx, input=DoctorInput(fix=False), service_fn=fake_service
-        )
-        result = asyncio.run(doctor_enhanced(tool))
-
-        assert result.has_failures is True
-        # Service called once (initial check) - no second call after decline.
-        assert call_count == 1
-
-    def test_accepted_elicit_re_runs_service_with_fix_true(self):
-        from mcp_server.enhancers.doctor import doctor_enhanced
-        from mcp_server.enhancers.schemas import ConfirmFix
-        from models.doctor import DoctorInput, DoctorResult
-
-        failing_result = self._failing_result()
-        passing_result = self._passing_result()
-        calls: list[DoctorInput] = []
-
-        def fake_service(input_obj: DoctorInput) -> DoctorResult:
-            calls.append(input_obj)
-            return passing_result if input_obj.fix else failing_result
-
-        ctx = _make_mock_ctx(
-            elicit_result=AcceptedElicitation(
-                action="accept", data=ConfirmFix(fix=True)
-            )
-        )
-        tool: EnhancedTool[DoctorInput, DoctorResult] = EnhancedTool(
-            ctx=ctx, input=DoctorInput(fix=False), service_fn=fake_service
-        )
-        result = asyncio.run(doctor_enhanced(tool))
-
-        assert len(calls) == 2
-        assert calls[0].fix is False
-        assert calls[1].fix is True
-        assert result.has_failures is False
-
-    def test_accepted_elicit_with_fix_false_does_not_re_run(self):
-        """User accepted the dialog but unchecked the box - should not re-run."""
-        from mcp_server.enhancers.doctor import doctor_enhanced
-        from mcp_server.enhancers.schemas import ConfirmFix
-        from models.doctor import DoctorInput, DoctorResult
-
-        failing_result = self._failing_result()
-        call_count = 0
-
-        def fake_service(_input: DoctorInput) -> DoctorResult:
-            nonlocal call_count
-            call_count += 1
-            return failing_result
-
-        ctx = _make_mock_ctx(
-            elicit_result=AcceptedElicitation(
-                action="accept", data=ConfirmFix(fix=False)
-            )
-        )
-        tool: EnhancedTool[DoctorInput, DoctorResult] = EnhancedTool(
-            ctx=ctx, input=DoctorInput(fix=False), service_fn=fake_service
-        )
-        result = asyncio.run(doctor_enhanced(tool))
-
-        assert call_count == 1
-        assert result.has_failures is True
-
-    def test_does_not_elicit_when_input_already_has_fix_true(self):
-        from mcp_server.enhancers.doctor import doctor_enhanced
-        from models.doctor import DoctorInput, DoctorResult
-
-        failing_result = self._failing_result()
-
-        def fake_service(_input: DoctorInput) -> DoctorResult:
-            return failing_result
-
-        ctx = _make_mock_ctx()
-        tool: EnhancedTool[DoctorInput, DoctorResult] = EnhancedTool(
-            ctx=ctx, input=DoctorInput(fix=True), service_fn=fake_service
-        )
-        asyncio.run(doctor_enhanced(tool))
-
-        ctx.elicit.assert_not_called()
 
 
 class TestEnhancerCrashFallback(TestTemplate):

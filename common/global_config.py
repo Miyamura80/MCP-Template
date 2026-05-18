@@ -223,6 +223,13 @@ class Config(BaseSettings):
     # Redis
     REDIS_URL: str | None = None
 
+    # Google OAuth (Gmail integration) - fill in real values in .env
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
+    # Base64-url Fernet key used to encrypt stored refresh tokens
+    GOOGLE_TOKEN_ENC_KEY: str | None = None
+
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(
         default_factory=lambda: os.getenv("GITHUB_ACTIONS") != "true"

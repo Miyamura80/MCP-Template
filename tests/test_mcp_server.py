@@ -53,44 +53,20 @@ def _mock_ctx():
 class TestMCPServerIntegration(TestTemplate):
     """End-to-end integration tests calling tools through the registered FastMCP wrapper."""
 
-    def test_app_resource_registered_and_serves_html(self):
+    def test_app_resources_registered_and_serve_html(self):
         from mcp_server.server import mcp
 
         resources = asyncio.run(mcp.list_resources())
         uris = {str(r.uri) for r in resources}
-        assert "ui://mymcp/doctor_dashboard" in uris
-
-        contents = list(asyncio.run(mcp.read_resource("ui://mymcp/doctor_dashboard")))
-        assert len(contents) == 1
-        text = str(contents[0].content)
-        assert text.lstrip().lower().startswith("<!doctype html>")
-
-    def test_app_only_tool_has_visibility_meta(self):
-        from mcp_server.server import mcp
-
-        tools = asyncio.run(mcp.list_tools())
-        dash = next(t for t in tools if t.name == "doctor_dashboard.refresh")
-        meta = getattr(dash, "meta", None) or getattr(dash, "_meta", None)
-        assert meta == {"ui": {"visibility": ["app"]}}
-
-    def test_doctor_returns_call_tool_result_with_app_meta(self):
-        from mcp_server.server import mcp
-
-        tool_fn = mcp._tool_manager._tools["doctor"].fn
-        result = asyncio.run(tool_fn(ctx=_mock_ctx(), fix=True))
-
-        assert result.meta is not None
-        assert result.meta["ui"]["resourceUri"] == "ui://mymcp/doctor_dashboard"
-        assert result.meta["ui/resourceUri"] == "ui://mymcp/doctor_dashboard"
-        assert "has_failures" in (result.structuredContent or {})
-
-    def test_doctor_omits_app_meta_when_disabled_via_env(self, monkeypatch):
-        from mcp_server.server import mcp
-
-        monkeypatch.setenv("MCP_DISABLE_APPS", "1")
-        tool_fn = mcp._tool_manager._tools["doctor"].fn
-        result = asyncio.run(tool_fn(ctx=_mock_ctx(), fix=True))
-        assert result.meta is None
+        # gmail_composer / gmail_inbox apps are added in later phases; here we
+        # only assert that whatever ui:// resources are registered serve HTML.
+        ui_uris = [u for u in uris if u.startswith("ui://mymcp/")]
+        assert ui_uris, "expected at least one ui://mymcp/ resource registered"
+        for uri in ui_uris:
+            contents = list(asyncio.run(mcp.read_resource(uri)))
+            assert len(contents) == 1
+            text = str(contents[0].content)
+            assert text.lstrip().lower().startswith("<!doctype html>")
 
     def test_config_show_attaches_image_content_block(self):
         from mcp_server.server import mcp
