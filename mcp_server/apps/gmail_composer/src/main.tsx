@@ -5,10 +5,16 @@ import { Composer } from "./Composer";
 
 const mcpApp = new McpApp({ name: "gmail-composer", version: "0.1.0" });
 
-mcpApp.connect().then(() => {
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <Composer mcpApp={mcpApp} />
-    </StrictMode>
-  );
-});
+mcpApp
+  .connect()
+  .then(() => {
+    createRoot(document.getElementById("root")!).render(
+      <StrictMode>
+        <Composer mcpApp={mcpApp} />
+      </StrictMode>
+    );
+  })
+  .catch((err) => {
+    const root = document.getElementById("root");
+    if (root) root.textContent = `Connection failed: ${err}`;
+  });

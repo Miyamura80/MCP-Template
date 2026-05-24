@@ -5,10 +5,16 @@ import { Inbox } from "./Inbox";
 
 const mcpApp = new McpApp({ name: "gmail-inbox", version: "0.1.0" });
 
-mcpApp.connect().then(() => {
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <Inbox mcpApp={mcpApp} />
-    </StrictMode>
-  );
-});
+mcpApp
+  .connect()
+  .then(() => {
+    createRoot(document.getElementById("root")!).render(
+      <StrictMode>
+        <Inbox mcpApp={mcpApp} />
+      </StrictMode>
+    );
+  })
+  .catch((err) => {
+    const root = document.getElementById("root");
+    if (root) root.textContent = `Connection failed: ${err}`;
+  });

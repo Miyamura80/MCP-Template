@@ -85,7 +85,7 @@ def _make_headless_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
             if user is not None:
                 kwargs["user_id"] = user.user_id
             elif not kwargs.get("user_id"):
-                kwargs.setdefault("user_id", "default")
+                kwargs.setdefault("user_id", "")
         input_obj = input_model(**kwargs)
         _check_quota()
         return func(input_obj)
@@ -111,7 +111,7 @@ def _make_enhanced_tool(
             if user is not None:
                 kwargs["user_id"] = user.user_id
             elif not kwargs.get("user_id"):
-                kwargs.setdefault("user_id", "default")
+                kwargs.setdefault("user_id", "")
         input_obj = input_model(**kwargs)
         _check_quota()
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
