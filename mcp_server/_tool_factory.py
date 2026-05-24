@@ -78,6 +78,14 @@ def _make_headless_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
 
     def tool_fn(**kwargs):
         _check_scopes()
+        if "user_id" in input_model.model_fields:  # ty: ignore[unresolved-attribute]
+            from src.utils.current_user import current_user
+
+            user = current_user()
+            if user is not None:
+                kwargs["user_id"] = user.user_id
+            elif not kwargs.get("user_id"):
+                kwargs.setdefault("user_id", "")
         input_obj = input_model(**kwargs)
         _check_quota()
         return func(input_obj)
@@ -96,6 +104,14 @@ def _make_enhanced_tool(
 
     async def tool_fn(ctx: Context, **kwargs) -> CallToolResult:
         _check_scopes()
+        if "user_id" in input_model.model_fields:  # ty: ignore[unresolved-attribute]
+            from src.utils.current_user import current_user
+
+            user = current_user()
+            if user is not None:
+                kwargs["user_id"] = user.user_id
+            elif not kwargs.get("user_id"):
+                kwargs.setdefault("user_id", "")
         input_obj = input_model(**kwargs)
         _check_quota()
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)

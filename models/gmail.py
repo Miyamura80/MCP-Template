@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 
 class GmailConnectInput(BaseModel):
-    user_id: str = Field(..., description="The MCP user id starting the flow")
+    user_id: str = Field(default="", description="The MCP user id starting the flow")
 
 
 class GmailConnectResult(BaseModel):
@@ -24,7 +24,7 @@ class GmailConnectResult(BaseModel):
 
 
 class GmailStatusInput(BaseModel):
-    user_id: str
+    user_id: str = ""
 
 
 class GmailStatusResult(BaseModel):
@@ -35,7 +35,7 @@ class GmailStatusResult(BaseModel):
 
 
 class GmailDisconnectInput(BaseModel):
-    user_id: str
+    user_id: str = ""
 
 
 class GmailDisconnectResult(BaseModel):
@@ -48,7 +48,7 @@ class GmailDisconnectResult(BaseModel):
 
 
 class GmailListDraftsInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     limit: int = Field(default=20, ge=1, le=500)
 
 
@@ -65,7 +65,7 @@ class GmailListDraftsResult(BaseModel):
 
 
 class GmailGetDraftInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     draft_id: str
 
 
@@ -80,7 +80,7 @@ class GmailDraft(BaseModel):
 
 
 class GmailUpdateDraftInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     draft_id: str
     to: str | None = None
     subject: str | None = None
@@ -90,7 +90,7 @@ class GmailUpdateDraftInput(BaseModel):
 
 
 class GmailComposeInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     to: str
     subject: str
     body: str
@@ -100,7 +100,7 @@ class GmailComposeInput(BaseModel):
 
 
 class GmailSendInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     draft_id: str
 
 
@@ -111,7 +111,7 @@ class GmailSendResult(BaseModel):
 
 
 class GmailDiscardDraftInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     draft_id: str
 
 
@@ -125,7 +125,7 @@ class GmailDiscardDraftResult(BaseModel):
 
 
 class GmailListInboxInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     query: str | None = None
     limit: int = Field(default=25, ge=1, le=500)
 
@@ -138,7 +138,7 @@ class GmailMessageSummary(BaseModel):
     snippet: str | None = None
     date: datetime | None = None
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "serialize_by_alias": True}
 
 
 class GmailListInboxResult(BaseModel):
@@ -146,7 +146,7 @@ class GmailListInboxResult(BaseModel):
 
 
 class GmailGetThreadInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     thread_id: str
 
 
@@ -168,7 +168,7 @@ class GmailThreadMessage(BaseModel):
     body_html: str | None = None
     attachments: list[GmailAttachment] = Field(default_factory=list)
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "serialize_by_alias": True}
 
 
 class GmailThread(BaseModel):
@@ -182,7 +182,7 @@ class GmailThread(BaseModel):
 
 
 class GmailCurateInboxInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     query: str | None = None
     limit: int = Field(default=10, ge=1, le=100)
 
@@ -196,7 +196,7 @@ class GmailCuratedThread(BaseModel):
     importance_score: float
     reasons: list[str] = Field(default_factory=list)
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "serialize_by_alias": True}
 
 
 class GmailCurateInboxResult(BaseModel):

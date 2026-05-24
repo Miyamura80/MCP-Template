@@ -24,7 +24,8 @@ from starlette.responses import JSONResponse
 # Paths that bypass rate limiting.
 from api_server.billing.stripe_config import STRIPE_WEBHOOK_PATH
 
-_EXEMPT_PATHS = frozenset({"/health", STRIPE_WEBHOOK_PATH})
+_EXEMPT_PATHS = frozenset({"/health", "/mcp", STRIPE_WEBHOOK_PATH})
+_EXEMPT_PREFIXES = ("/mcp/",)
 
 # TTL cache for API key hash → subscription tier (avoids DB hit on every request)
 _tier_cache: dict[str, tuple[str, float]] = {}
@@ -377,6 +378,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _should_skip(self, request: Request) -> bool:
         """Return True if this request should bypass rate limiting."""
         if request.url.path in _EXEMPT_PATHS:
+            return True
+        if any(request.url.path.startswith(p) for p in _EXEMPT_PREFIXES):
             return True
         if self._testing:
             return True

@@ -212,6 +212,43 @@ describe("Inbox", () => {
     ).toBeInTheDocument();
   });
 
+  it("mark-done calls gmail_inbox.mark_done and removes the row", async () => {
+    const { app, calls } = makeMcpApp({
+      threadResults: { tA: plainThread },
+    });
+    render(<Inbox mcpApp={app} />);
+    app.ontoolresult?.({ structuredContent: sampleResult });
+    fireEvent.click(await screen.findByTestId("row-tA"));
+    await screen.findByTestId("msg-m1");
+    const doneBtns = screen.getAllByRole("button", { name: /mark done/i });
+    const actionBarBtn = doneBtns.find(
+      (b) => !b.closest('[data-testid^="row-"]')
+    )!;
+    fireEvent.click(actionBarBtn);
+    await waitFor(() => {
+      expect(screen.queryByTestId("row-tA")).not.toBeInTheDocument();
+    });
+    expect(
+      calls.some((c) => c.name === "gmail_inbox.mark_done")
+    ).toBe(true);
+    expect(screen.getByText(/select a thread/i)).toBeInTheDocument();
+  });
+
+  it("mark-done from sidebar row button removes without opening", async () => {
+    const { app, calls } = makeMcpApp();
+    render(<Inbox mcpApp={app} />);
+    app.ontoolresult?.({ structuredContent: sampleResult });
+    const row = await screen.findByTestId("row-tA");
+    const doneBtn = row.querySelector('button[title="Mark done"]') as HTMLElement;
+    fireEvent.click(doneBtn);
+    await waitFor(() => {
+      expect(screen.queryByTestId("row-tA")).not.toBeInTheDocument();
+    });
+    expect(
+      calls.some((c) => c.name === "gmail_inbox.mark_done" && c.arguments.thread_id === "tA")
+    ).toBe(true);
+  });
+
   it("clears the ontoolresult handler on unmount", () => {
     const { app } = makeMcpApp();
     const { unmount } = render(<Inbox mcpApp={app} />);

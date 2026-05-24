@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  ArrowCounterClockwise,
+  EnvelopeOpen,
+  Archive,
+  ArrowBendUpLeft,
+  CheckCircle,
+} from "@phosphor-icons/react";
 
 export type CuratedThread = {
   thread_id: string;
@@ -52,18 +59,29 @@ export function Inbox({ mcpApp }: InboxProps) {
   const [thread, setThread] = useState<Thread | null>(null);
   const [loadingThread, setLoadingThread] = useState(false);
   const [unreadRemoved, setUnreadRemoved] = useState<Set<string>>(new Set());
+  const [markingDone, setMarkingDone] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Monotonic id for openThread; only the most-recent request may mutate state.
   const openSeqRef = useRef(0);
 
   useEffect(() => {
+    let received = false;
     const handler = (raw: unknown) => {
       const data = extractStructuredContent<CurateResult>(raw);
-      if (data && Array.isArray(data.threads)) setThreads(data.threads);
+      if (data && Array.isArray(data.threads)) {
+        received = true;
+        setThreads(data.threads);
+      }
     };
     mcpApp.ontoolresult = handler;
+    // Fallback: if the host delivered the tool result before the iframe
+    // mounted (race condition), proactively fetch after a short delay.
+    const timer = setTimeout(() => {
+      if (!received) refresh();
+    }, 800);
     return () => {
+      clearTimeout(timer);
       if (mcpApp.ontoolresult === handler) mcpApp.ontoolresult = undefined;
     };
   }, [mcpApp]);
@@ -152,22 +170,50 @@ export function Inbox({ mcpApp }: InboxProps) {
     }
   };
 
+  const markDone = async (threadId?: string) => {
+    const id = threadId || selectedId;
+    if (!id) return;
+    setMarkingDone((s) => new Set(s).add(id));
+    setThreads((cur) => (cur ? cur.filter((t) => t.thread_id !== id) : cur));
+    if (id === selectedId) {
+      setSelectedId(null);
+      setThread(null);
+    }
+    try {
+      await mcpApp.callServerTool({
+        name: "gmail_inbox.mark_done",
+        arguments: { thread_id: id },
+      });
+    } catch (err) {
+      setError(errMsg(err));
+      refresh();
+    } finally {
+      setMarkingDone((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const visibleThreads = threads;
+
   return (
     <div style={appStyle}>
       <aside style={listPaneStyle}>
         <header style={listHeaderStyle}>
           <strong style={{ fontSize: 14 }}>Curated inbox</strong>
-          <button onClick={refresh} style={smallBtnStyle}>
-            Refresh
+          <button onClick={refresh} style={iconBtnStyle} title="Refresh">
+            <ArrowCounterClockwise size={16} />
           </button>
         </header>
-        {threads === null ? (
+        {visibleThreads === null ? (
           <div style={mutedStyle}>Loading inbox…</div>
-        ) : threads.length === 0 ? (
+        ) : visibleThreads.length === 0 ? (
           <div style={mutedStyle}>No threads.</div>
         ) : (
           <ul style={listStyle}>
-            {threads.map((t) => {
+            {visibleThreads.map((t) => {
               const isSelected = t.thread_id === selectedId;
               const showUnread =
                 t.reasons.some((r) => r.toLowerCase().includes("unread")) &&
@@ -182,25 +228,37 @@ export function Inbox({ mcpApp }: InboxProps) {
                   }}
                   data-testid={`row-${t.thread_id}`}
                 >
-                  <div style={rowTopStyle}>
-                    <span
-                      style={{
-                        fontWeight: showUnread ? 700 : 500,
-                        flex: 1,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {t.subject || "(no subject)"}
-                    </span>
-                    <span style={chipStyle} title={t.reasons.join(", ")}>
-                      {t.importance_score.toFixed(2)}
-                    </span>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <SenderAvatar from={t.from} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={rowTopStyle}>
+                        <span
+                          style={{
+                            fontWeight: showUnread ? 700 : 500,
+                            flex: 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {t.subject || "(no subject)"}
+                        </span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); markDone(t.thread_id); }}
+                          style={dismissRowBtnStyle}
+                          title="Mark done"
+                        >
+                          <CheckCircle size={14} />
+                        </button>
+                        <span style={chipStyle} title={t.reasons.join(", ")}>
+                          {t.importance_score.toFixed(2)}
+                        </span>
+                      </div>
+                      <div style={rowMidStyle}>{t.from || "(unknown)"}</div>
+                      <div style={rowSnippetStyle}>{t.snippet || ""}</div>
+                      <div style={rowFootStyle}>{relativeTime(t.last_message_at)}</div>
+                    </div>
                   </div>
-                  <div style={rowMidStyle}>{t.from || "(unknown)"}</div>
-                  <div style={rowSnippetStyle}>{t.snippet || ""}</div>
-                  <div style={rowFootStyle}>{relativeTime(t.last_message_at)}</div>
                 </li>
               );
             })}
@@ -220,6 +278,7 @@ export function Inbox({ mcpApp }: InboxProps) {
             onRefresh={refresh}
             onMarkRead={markRead}
             onArchive={archive}
+            onDismiss={() => markDone()}
             onReply={reply}
           />
         )}
@@ -239,12 +298,14 @@ function ThreadReader({
   onRefresh,
   onMarkRead,
   onArchive,
+  onDismiss,
   onReply,
 }: {
   thread: Thread;
   onRefresh: () => void;
   onMarkRead: () => void;
   onArchive: () => void;
+  onDismiss: () => void;
   onReply: () => void;
 }) {
   const first = thread.messages[0];
@@ -252,17 +313,20 @@ function ThreadReader({
   return (
     <>
       <div style={actionsStyle}>
-        <button onClick={onRefresh} style={smallBtnStyle}>
-          Refresh
+        <button onClick={onRefresh} style={iconBtnStyle} title="Refresh">
+          <ArrowCounterClockwise size={16} />
         </button>
-        <button onClick={onMarkRead} style={smallBtnStyle}>
-          Mark read
+        <button onClick={onMarkRead} style={iconBtnStyle} title="Mark read">
+          <EnvelopeOpen size={16} />
         </button>
-        <button onClick={onArchive} style={smallBtnStyle}>
-          Archive
+        <button onClick={onArchive} style={iconBtnStyle} title="Archive">
+          <Archive size={16} />
         </button>
-        <button onClick={onReply} style={primaryBtnStyle}>
-          Reply
+        <button onClick={onDismiss} style={iconBtnStyle} title="Mark done">
+          <CheckCircle size={16} />
+        </button>
+        <button onClick={onReply} style={primaryIconBtnStyle} title="Reply">
+          <ArrowBendUpLeft size={16} weight="bold" />
         </button>
       </div>
       <h3 style={{ margin: "8px 0 4px 0" }}>{subject}</h3>
@@ -278,25 +342,91 @@ function ThreadReader({
   );
 }
 
+function SenderAvatar({ from }: { from: string | undefined }) {
+  const name = from || "";
+  const match = name.match(/^([^<]*)/);
+  const display = (match?.[1] || name).trim();
+  const initials = display
+    ? display
+        .split(/[\s.]+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0].toUpperCase())
+        .join("")
+    : "?";
+  const hue = [...(display || "?")].reduce((h, c) => h + c.charCodeAt(0), 0) % 360;
+  return (
+    <div
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        background: `hsl(${hue}, 55%, 55%)`,
+        color: "#fff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 12,
+        fontWeight: 600,
+        flexShrink: 0,
+        letterSpacing: 0.5,
+      }}
+      title={from || "(unknown)"}
+    >
+      {initials}
+    </div>
+  );
+}
+
 function MessageView({ message }: { message: ThreadMessage }) {
+  const imageAttachments = message.attachments.filter(
+    (a) => a.mime_type?.startsWith("image/")
+  );
+  const otherAttachments = message.attachments.filter(
+    (a) => !a.mime_type?.startsWith("image/")
+  );
+
   return (
     <article style={messageStyle} data-testid={`msg-${message.message_id}`}>
       <header style={messageHeaderStyle}>
-        <div>
-          <strong>{message.from || "(unknown)"}</strong>
-          {message.to && (
-            <span style={mutedStyle}> to {message.to}</span>
-          )}
-          {message.cc && <span style={mutedStyle}> cc {message.cc}</span>}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <SenderAvatar from={message.from} />
+          <div>
+            <strong>{message.from || "(unknown)"}</strong>
+            {message.to && (
+              <div style={{ fontSize: 12, color: "#666" }}>to {message.to}</div>
+            )}
+            {message.cc && (
+              <div style={{ fontSize: 12, color: "#666" }}>cc {message.cc}</div>
+            )}
+          </div>
         </div>
-        <div style={{ color: "#666", fontSize: 12 }}>
+        <div style={{ color: "#666", fontSize: 12, flexShrink: 0 }}>
           {formatDate(message.date)}
         </div>
       </header>
       <MessageBody message={message} />
-      {message.attachments.length > 0 && (
+      {imageAttachments.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {imageAttachments.map((a, i) => (
+            <div
+              key={a.attachment_id || `${message.message_id}-img-${i}`}
+              style={imageAttachmentStyle}
+              data-testid="image-attachment"
+            >
+              <div style={{ fontSize: 11, color: "#555", marginBottom: 4 }}>
+                {a.filename || "image"}
+              </div>
+              <div style={{ fontSize: 11, color: "#999" }}>
+                {a.mime_type}{typeof a.size === "number" && ` · ${formatSize(a.size)}`}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {otherAttachments.length > 0 && (
         <div style={attachmentsRowStyle}>
-          {message.attachments.map((a, i) => (
+          {otherAttachments.map((a, i) => (
             <span
               key={a.attachment_id || `${message.message_id}-att-${i}`}
               style={attachmentChipStyle}
@@ -317,12 +447,7 @@ function MessageView({ message }: { message: ThreadMessage }) {
 }
 
 function MessageBody({ message }: { message: ThreadMessage }) {
-  if (message.body_text) {
-    return <pre style={bodyTextStyle}>{message.body_text}</pre>;
-  }
   if (message.body_html) {
-    // Rendered inside an MCP-Apps iframe sandboxed by the host; XSS surface is
-    // contained but still annotate this site as a known unsafe-HTML sink.
     return (
       <div
         style={bodyHtmlStyle}
@@ -330,14 +455,28 @@ function MessageBody({ message }: { message: ThreadMessage }) {
       />
     );
   }
+  if (message.body_text) {
+    return <pre style={bodyTextStyle}>{message.body_text}</pre>;
+  }
   return <div style={mutedStyle}>(no body)</div>;
 }
 
 function extractStructuredContent<T>(raw: unknown): T | null {
   if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = wrapper.structuredContent ?? raw;
-  if (data && typeof data === "object") return data as T;
+  const obj = raw as Record<string, unknown>;
+  if (obj.structuredContent && typeof obj.structuredContent === "object") {
+    return obj.structuredContent as T;
+  }
+  if (Array.isArray(obj.content)) {
+    for (const item of obj.content) {
+      if (item && typeof item === "object" && "text" in (item as Record<string, unknown>)) {
+        try {
+          const parsed = JSON.parse((item as { text: string }).text);
+          if (parsed && typeof parsed === "object") return parsed as T;
+        } catch { /* not JSON text content */ }
+      }
+    }
+  }
   return null;
 }
 
@@ -378,10 +517,14 @@ function formatSize(bytes: number): string {
 const appStyle: React.CSSProperties = {
   fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   display: "flex",
-  height: "100vh",
+  height: "min(100vh, 480px)",
+  maxHeight: 480,
   width: "100%",
   color: "#202124",
   background: "#fff",
+  borderRadius: 8,
+  overflow: "hidden",
+  colorScheme: "light",
 };
 
 const listPaneStyle: React.CSSProperties = {
@@ -398,6 +541,7 @@ const listHeaderStyle: React.CSSProperties = {
   justifyContent: "space-between",
   padding: "10px 12px",
   borderBottom: "1px solid #eee",
+  color: "#202124",
 };
 
 const listStyle: React.CSSProperties = {
@@ -412,6 +556,7 @@ const rowStyle: React.CSSProperties = {
   padding: "10px 12px",
   borderBottom: "1px solid #f0f0f0",
   cursor: "pointer",
+  color: "#202124",
 };
 
 const rowTopStyle: React.CSSProperties = {
@@ -457,6 +602,7 @@ const readerPaneStyle: React.CSSProperties = {
   flex: 1,
   padding: 16,
   overflowY: "auto",
+  color: "#202124",
 };
 
 const actionsStyle: React.CSSProperties = {
@@ -476,6 +622,38 @@ const smallBtnStyle: React.CSSProperties = {
   fontSize: 12,
 };
 
+const iconBtnStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #dadce0",
+  color: "#5f6368",
+  padding: 6,
+  borderRadius: 8,
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  lineHeight: 1,
+};
+
+const dismissRowBtnStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  color: "#aaa",
+  padding: 2,
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  flexShrink: 0,
+  borderRadius: 4,
+};
+
+const primaryIconBtnStyle: React.CSSProperties = {
+  ...iconBtnStyle,
+  background: "#1a73e8",
+  borderColor: "#1a73e8",
+  color: "#fff",
+};
+
 const primaryBtnStyle: React.CSSProperties = {
   ...smallBtnStyle,
   background: "#1a73e8",
@@ -489,6 +667,7 @@ const messageStyle: React.CSSProperties = {
   padding: 12,
   marginBottom: 10,
   background: "#fafbfc",
+  color: "#202124",
 };
 
 const messageHeaderStyle: React.CSSProperties = {
@@ -510,6 +689,16 @@ const bodyHtmlStyle: React.CSSProperties = {
   fontSize: 13,
   color: "#222",
   overflowX: "auto",
+  lineHeight: 1.5,
+  wordBreak: "break-word",
+};
+
+const imageAttachmentStyle: React.CSSProperties = {
+  background: "#f8f9fa",
+  border: "1px solid #e0e0e0",
+  borderRadius: 8,
+  padding: "8px 12px",
+  minWidth: 120,
 };
 
 const attachmentsRowStyle: React.CSSProperties = {

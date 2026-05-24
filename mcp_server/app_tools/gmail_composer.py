@@ -39,8 +39,8 @@ _APP_META = {"ui": {"visibility": ["app"]}}
     meta=_APP_META,
 )
 def save_draft(
-    user_id: str,
     draft_id: str,
+    user_id: str = "",
     to: str | None = None,
     subject: str | None = None,
     body: str | None = None,
@@ -67,8 +67,8 @@ def save_draft(
     meta=_APP_META,
 )
 def send(
-    user_id: str,
     draft_id: str,
+    user_id: str = "",
     to: str | None = None,
     subject: str | None = None,
     body: str | None = None,
@@ -95,11 +95,9 @@ def send(
     description="Delete the current draft.",
     meta=_APP_META,
 )
-def discard(user_id: str, draft_id: str) -> GmailDiscardDraftResult:
+def discard(draft_id: str, user_id: str = "") -> GmailDiscardDraftResult:
     uid = guard_user_id(user_id)
-    return _gmail_discard_draft(
-        GmailDiscardDraftInput(user_id=uid, draft_id=draft_id)
-    )
+    return _gmail_discard_draft(GmailDiscardDraftInput(user_id=uid, draft_id=draft_id))
 
 
 @mcp.tool(
@@ -107,6 +105,6 @@ def discard(user_id: str, draft_id: str) -> GmailDiscardDraftResult:
     description="Re-fetch the current draft (used by the composer to poll for agent edits).",
     meta=_APP_META,
 )
-def refresh(user_id: str, draft_id: str) -> GmailDraft:
+def refresh(draft_id: str, user_id: str = "") -> GmailDraft:
     uid = guard_user_id(user_id)
     return _gmail_get_draft(GmailGetDraftInput(user_id=uid, draft_id=draft_id))

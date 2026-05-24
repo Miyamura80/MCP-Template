@@ -63,7 +63,7 @@ class TestEnsureDailyLimit(TestTemplate):
         sub = UserSubscription(
             user_id="limit-user",
             subscription_tier=SubscriptionTier.FREE.value,
-            current_period_usage=100,
+            current_period_usage=10000,
             current_period_start=datetime.now(UTC),
         )
         session.add(sub)

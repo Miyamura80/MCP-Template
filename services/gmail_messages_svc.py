@@ -46,7 +46,7 @@ from services.gmail_svc import (
 # transport-agnostic) so models/gmail.py doesn't need to grow for these
 # small toggles. Promote to models/gmail.py if reused elsewhere.
 class GmailThreadModifyInput(BaseModel):
-    user_id: str
+    user_id: str = ""
     thread_id: str
 
 
@@ -56,6 +56,15 @@ class GmailMarkReadResult(BaseModel):
 
 class GmailArchiveResult(BaseModel):
     archived: bool
+
+
+class GmailMarkDoneResult(BaseModel):
+    marked_done: bool
+    label_id: str | None = None
+
+
+class GmailUnmarkDoneResult(BaseModel):
+    unmarked_done: bool
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +139,49 @@ def _score_thread(
     return score, reasons
 
 
+_MCP_DONE_LABEL_NAME = "MCP/Done"
+
+
+def _find_mcp_done_label(svc: Any) -> str | None:
+    """Return the label ID for ``MCP/Done`` if it exists, else ``None``."""
+    labels_response = svc.users().labels().list(userId="me").execute()
+    for label in labels_response.get("labels", []):
+        if label.get("name") == _MCP_DONE_LABEL_NAME:
+            return label["id"]
+    return None
+
+
+def _get_or_create_mcp_done_label(svc: Any) -> str:
+    """Return the label ID for ``MCP/Done``, creating it if absent."""
+    from googleapiclient.errors import HttpError
+
+    existing = _find_mcp_done_label(svc)
+    if existing is not None:
+        return existing
+
+    try:
+        created = (
+            svc.users()
+            .labels()
+            .create(
+                userId="me",
+                body={
+                    "name": _MCP_DONE_LABEL_NAME,
+                    "labelListVisibility": "labelHide",
+                    "messageListVisibility": "hide",
+                },
+            )
+            .execute()
+        )
+        return created["id"]
+    except HttpError as exc:
+        if exc.resp.status == 409:
+            existing = _find_mcp_done_label(svc)
+            if existing is not None:
+                return existing
+        raise
+
+
 # ---------------------------------------------------------------------------
 # Services
 # ---------------------------------------------------------------------------
@@ -192,7 +244,7 @@ def gmail_get_thread(input: GmailGetThreadInput) -> GmailThread:
 
 @service(
     name="gmail_curate_inbox",
-    description="Rank recent inbox threads by a deterministic importance score (v1 heuristic; DSPY upgrade path documented in source)",
+    description="Rank recent inbox threads by a deterministic importance score. When an interactive UI is rendered alongside the result, keep your text response brief (a one-line summary) since the user can browse details in the UI. Only elaborate if the user asks.",
     input_model=GmailCurateInboxInput,
     output_model=GmailCurateInboxResult,
 )
@@ -202,9 +254,8 @@ def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
     from googleapiclient.errors import HttpError
 
     svc = _get_gmail_client(input.user_id)
-    # Curation is inbox-scoped; AND the caller query inside its own group so
-    # a top-level OR in the user query can't escape the in:inbox restriction.
-    q = f"in:inbox ({input.query})" if input.query else "in:inbox"
+    base = "in:inbox -label:MCP-Done"
+    q = f"{base} ({input.query})" if input.query else base
     over_fetch = max(input.limit * 3, 30)
     listing = (
         svc.users().threads().list(userId="me", q=q, maxResults=over_fetch).execute()
@@ -299,3 +350,39 @@ def gmail_archive_thread(input: GmailThreadModifyInput) -> GmailArchiveResult:
         body={"removeLabelIds": ["INBOX"]},
     ).execute()
     return GmailArchiveResult(archived=True)
+
+
+@service(
+    name="gmail_mark_thread_done",
+    description="Mark a Gmail thread as done by applying the MCP/Done label (hides from curated inbox)",
+    input_model=GmailThreadModifyInput,
+    output_model=GmailMarkDoneResult,
+)
+def gmail_mark_thread_done(input: GmailThreadModifyInput) -> GmailMarkDoneResult:
+    svc = _get_gmail_client(input.user_id)
+    label_id = _get_or_create_mcp_done_label(svc)
+    svc.users().threads().modify(
+        userId="me",
+        id=input.thread_id,
+        body={"addLabelIds": [label_id]},
+    ).execute()
+    return GmailMarkDoneResult(marked_done=True, label_id=label_id)
+
+
+@service(
+    name="gmail_unmark_thread_done",
+    description="Remove the MCP/Done label from a thread (undo mark-done)",
+    input_model=GmailThreadModifyInput,
+    output_model=GmailUnmarkDoneResult,
+)
+def gmail_unmark_thread_done(input: GmailThreadModifyInput) -> GmailUnmarkDoneResult:
+    svc = _get_gmail_client(input.user_id)
+    label_id = _find_mcp_done_label(svc)
+    if label_id is None:
+        return GmailUnmarkDoneResult(unmarked_done=True)
+    svc.users().threads().modify(
+        userId="me",
+        id=input.thread_id,
+        body={"removeLabelIds": [label_id]},
+    ).execute()
+    return GmailUnmarkDoneResult(unmarked_done=True)
