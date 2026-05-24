@@ -35,8 +35,8 @@ def _make_route(entry: ServiceEntry) -> None:
         body: input_model,  # ty: ignore[invalid-type-form]
         _user: AuthenticatedUser = Depends(require_scopes(SERVICES_EXECUTE)),
     ):
-        # Quota is consumed before execution (charges for attempts, not
-        # results) to prevent abuse via intentional error-triggering.
+        if "user_id" in input_model.model_fields:  # ty: ignore[unresolved-attribute]
+            body = body.model_copy(update={"user_id": _user.user_id})
         ensure_daily_limit(_user.user_id)
         return func(body)
 

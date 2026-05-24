@@ -134,7 +134,7 @@ def gmail_get_draft(input: GmailGetDraftInput) -> GmailDraft:
 
 @service(
     name="gmail_update_draft",
-    description="Patch fields on an existing Gmail draft",
+    description="Patch fields on an existing Gmail draft. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
     input_model=GmailUpdateDraftInput,
     output_model=GmailDraft,
 )
@@ -175,7 +175,7 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
 
 @service(
     name="gmail_compose",
-    description="Create a new Gmail draft from the given fields",
+    description="Create a new Gmail draft from the given fields. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
     input_model=GmailComposeInput,
     output_model=GmailDraft,
 )
@@ -241,7 +241,7 @@ class GmailReplyInput(BaseModel):
     the thread's last message.
     """
 
-    user_id: str
+    user_id: str = ""
     thread_id: str
     body: str | None = None
     subject: str | None = None

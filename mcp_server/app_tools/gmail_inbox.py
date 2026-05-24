@@ -23,8 +23,10 @@ from services.gmail_drafts_svc import (
 )
 from services.gmail_messages_svc import (
     GmailArchiveResult,
+    GmailMarkDoneResult,
     GmailMarkReadResult,
     GmailThreadModifyInput,
+    GmailUnmarkDoneResult,
 )
 from services.gmail_messages_svc import (
     gmail_archive_thread as _gmail_archive_thread,
@@ -36,7 +38,13 @@ from services.gmail_messages_svc import (
     gmail_get_thread as _gmail_get_thread,
 )
 from services.gmail_messages_svc import (
+    gmail_mark_thread_done as _gmail_mark_thread_done,
+)
+from services.gmail_messages_svc import (
     gmail_mark_thread_read as _gmail_mark_thread_read,
+)
+from services.gmail_messages_svc import (
+    gmail_unmark_thread_done as _gmail_unmark_thread_done,
 )
 
 _APP_META = {"ui": {"visibility": ["app"]}}
@@ -48,7 +56,7 @@ _APP_META = {"ui": {"visibility": ["app"]}}
     meta=_APP_META,
 )
 def refresh(
-    user_id: str,
+    user_id: str = "",
     query: str | None = None,
     limit: int = 10,
 ) -> GmailCurateInboxResult:
@@ -63,7 +71,7 @@ def refresh(
     description="Fetch a single thread for the inbox reader app.",
     meta=_APP_META,
 )
-def open_thread(user_id: str, thread_id: str) -> GmailThread:
+def open_thread(thread_id: str, user_id: str = "") -> GmailThread:
     uid = guard_user_id(user_id)
     return _gmail_get_thread(GmailGetThreadInput(user_id=uid, thread_id=thread_id))
 
@@ -73,7 +81,7 @@ def open_thread(user_id: str, thread_id: str) -> GmailThread:
     description="Mark a thread as read (removes the UNREAD label).",
     meta=_APP_META,
 )
-def mark_read(user_id: str, thread_id: str) -> GmailMarkReadResult:
+def mark_read(thread_id: str, user_id: str = "") -> GmailMarkReadResult:
     uid = guard_user_id(user_id)
     return _gmail_mark_thread_read(
         GmailThreadModifyInput(user_id=uid, thread_id=thread_id)
@@ -85,7 +93,7 @@ def mark_read(user_id: str, thread_id: str) -> GmailMarkReadResult:
     description="Archive a thread (removes the INBOX label).",
     meta=_APP_META,
 )
-def archive(user_id: str, thread_id: str) -> GmailArchiveResult:
+def archive(thread_id: str, user_id: str = "") -> GmailArchiveResult:
     uid = guard_user_id(user_id)
     return _gmail_archive_thread(
         GmailThreadModifyInput(user_id=uid, thread_id=thread_id)
@@ -98,14 +106,36 @@ def archive(user_id: str, thread_id: str) -> GmailArchiveResult:
     meta=_APP_META,
 )
 def reply(
-    user_id: str,
     thread_id: str,
+    user_id: str = "",
     body: str | None = None,
     subject: str | None = None,
 ) -> GmailDraft:
     uid = guard_user_id(user_id)
     return _gmail_reply_to_thread(
-        GmailReplyInput(
-            user_id=uid, thread_id=thread_id, body=body, subject=subject
-        )
+        GmailReplyInput(user_id=uid, thread_id=thread_id, body=body, subject=subject)
+    )
+
+
+@mcp.tool(
+    name="gmail_inbox.mark_done",
+    description="Mark a thread as done (applies MCP/Done label, hides from curated inbox).",
+    meta=_APP_META,
+)
+def mark_done(thread_id: str, user_id: str = "") -> GmailMarkDoneResult:
+    uid = guard_user_id(user_id)
+    return _gmail_mark_thread_done(
+        GmailThreadModifyInput(user_id=uid, thread_id=thread_id)
+    )
+
+
+@mcp.tool(
+    name="gmail_inbox.unmark_done",
+    description="Remove the done marker from a thread (undo mark-done).",
+    meta=_APP_META,
+)
+def unmark_done(thread_id: str, user_id: str = "") -> GmailUnmarkDoneResult:
+    uid = guard_user_id(user_id)
+    return _gmail_unmark_thread_done(
+        GmailThreadModifyInput(user_id=uid, thread_id=thread_id)
     )
