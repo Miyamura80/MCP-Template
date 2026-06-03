@@ -27,7 +27,16 @@ _APP_MIME_TYPE = "text/html;profile=mcp-app"
 
 # Module-level singleton: app_tools / enhancers may import this at module-load
 # time (e.g. ``@mcp.tool``), so it must exist before discovery runs.
-mcp: FastMCP = FastMCP("mymcp")
+_MCP_INSTRUCTIONS = (
+    "When the user asks to draft, edit, reply to, or compose an email, "
+    "ALWAYS use the gmail_reply_to_thread, gmail_compose, or gmail_update_draft tools. "
+    "NEVER write email draft text as plain chat text - the tools render an interactive "
+    "composer UI where the user can review, edit, and send. "
+    "Pass your composed text in the tool's 'body' parameter and keep your chat response "
+    "to one brief sentence."
+)
+
+mcp: FastMCP = FastMCP("mymcp", instructions=_MCP_INSTRUCTIONS)
 
 _populated: bool = False
 

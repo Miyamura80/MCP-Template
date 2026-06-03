@@ -16,13 +16,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger as log
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from models.gmail import (
+    AttachmentInput,
     GmailComposeInput,
     GmailDiscardDraftInput,
     GmailDiscardDraftResult,
     GmailDraft,
+    GmailDraftAttachment,
     GmailGetDraftInput,
     GmailListDraftsInput,
     GmailListDraftsResult,
@@ -50,6 +52,18 @@ def _draft_resource_to_model(draft: dict[str, Any]) -> GmailDraft:
     """Map a Gmail ``drafts.get(format=full)`` payload to ``GmailDraft``."""
     msg = draft.get("message") or {}
     parsed = _parse_message_resource(msg)
+    msg_id = parsed.get("message_id") or ""
+    atts = [
+        GmailDraftAttachment(
+            filename=a.get("filename"),
+            mime_type=a.get("mime_type"),
+            size=a.get("size"),
+            attachment_id=a.get("attachment_id"),
+            message_id=msg_id,
+        )
+        for a in parsed.get("attachments") or []
+        if a.get("filename")
+    ]
     return GmailDraft(
         draft_id=draft.get("id") or "",
         thread_id=parsed.get("thread_id"),
@@ -58,6 +72,7 @@ def _draft_resource_to_model(draft: dict[str, Any]) -> GmailDraft:
         bcc=None,  # Gmail does not echo Bcc back to the sender
         subject=parsed.get("subject"),
         body=parsed.get("body_text"),
+        attachments=atts,
     )
 
 
@@ -95,23 +110,40 @@ def gmail_list_drafts(input: GmailListDraftsInput) -> GmailListDraftsResult:
     """Return up to ``input.limit`` drafts with To/Subject metadata."""
     svc = _get_gmail_client(input.user_id)
     listing = svc.users().drafts().list(userId="me", maxResults=input.limit).execute()
-    summaries: list[_DraftSummary] = []
-    for stub in listing.get("drafts", []) or []:
-        draft_id = stub.get("id")
-        if not draft_id:
-            continue
-        meta = (
+    draft_ids = [
+        stub["id"] for stub in (listing.get("drafts", []) or []) if stub.get("id")
+    ]
+    if not draft_ids:
+        return GmailListDraftsResult(drafts=[])
+
+    fetched: dict[str, dict] = {}
+    batch = svc.new_batch_http_request()
+    for did in draft_ids:
+        req = (
             svc.users()
             .drafts()
             .get(
                 userId="me",
-                id=draft_id,
+                id=did,
                 format="metadata",
                 metadataHeaders=["To", "Subject"],
             )
-            .execute()
         )
-        summaries.append(_draft_summary_from_metadata(meta))
+
+        def _cb(
+            request_id: str, response: Any, exception: Any, _did: str = did
+        ) -> None:
+            if exception is None:
+                fetched[_did] = response
+
+        batch.add(req, callback=_cb)
+    batch.execute()
+
+    summaries: list[_DraftSummary] = []
+    for did in draft_ids:
+        meta = fetched.get(did)
+        if meta:
+            summaries.append(_draft_summary_from_metadata(meta))
     return GmailListDraftsResult(drafts=summaries)
 
 
@@ -134,7 +166,7 @@ def gmail_get_draft(input: GmailGetDraftInput) -> GmailDraft:
 
 @service(
     name="gmail_update_draft",
-    description="Patch fields on an existing Gmail draft. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
+    description="Patch fields on an existing Gmail draft and open an interactive composer UI. ALWAYS call this tool to write or edit draft content - NEVER compose email text as plain chat text. The tool renders an interactive composer where the user can review, edit, and send. Pass your composed text in the 'body' parameter. Keep your chat response to one brief sentence since the user can edit in the UI.",
     input_model=GmailUpdateDraftInput,
     output_model=GmailDraft,
 )
@@ -157,7 +189,14 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
     cc = input.cc if input.cc is not None else parsed.get("cc")
     bcc = input.bcc  # Gmail never echoes Bcc; only update when explicitly set
 
-    raw = _build_raw_message(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
+    raw = _build_raw_message(
+        to=to,
+        subject=subject,
+        body=body,
+        cc=cc,
+        bcc=bcc,
+        attachments=input.attachments if input.attachments is not None else None,
+    )
 
     body_dict: dict[str, Any] = {"message": {"raw": raw}}
     thread_id = parsed.get("thread_id")
@@ -175,7 +214,7 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
 
 @service(
     name="gmail_compose",
-    description="Create a new Gmail draft from the given fields. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
+    description="Create a new Gmail draft from the given fields. ALWAYS use this tool instead of composing email text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
     input_model=GmailComposeInput,
     output_model=GmailDraft,
 )
@@ -188,6 +227,7 @@ def gmail_compose(input: GmailComposeInput) -> GmailDraft:
         cc=input.cc,
         bcc=input.bcc,
         in_reply_to_thread_id=input.in_reply_to_thread_id,
+        attachments=input.attachments or None,
     )
     body_dict: dict[str, Any] = {"message": {"raw": raw}}
     if input.in_reply_to_thread_id:
@@ -245,11 +285,12 @@ class GmailReplyInput(BaseModel):
     thread_id: str
     body: str | None = None
     subject: str | None = None
+    attachments: list[AttachmentInput] = Field(default_factory=list)
 
 
 @service(
     name="gmail_reply_to_thread",
-    description="Create a reply draft on an existing Gmail thread",
+    description="Create a reply draft on an existing Gmail thread. ALWAYS use this tool instead of composing reply text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. Pass your drafted reply in the 'body' parameter. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
     input_model=GmailReplyInput,
     output_model=GmailDraft,
 )
@@ -300,6 +341,7 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         in_reply_to_thread_id=input.thread_id,
         in_reply_to=in_reply_to,
         references=references,
+        attachments=input.attachments or None,
     )
     created = (
         svc.users()

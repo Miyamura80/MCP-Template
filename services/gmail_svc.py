@@ -246,6 +246,7 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
 
         row.revoked_at = datetime.now(UTC)
         session.commit()
+        _invalidate_gmail_client(input.user_id)
         return GmailDisconnectResult(revoked=True)
 
 
@@ -282,13 +283,26 @@ def _mint_access_token(refresh_token: str) -> str:
     return access_token
 
 
+_client_cache: dict[str, tuple[float, Any]] = {}
+_CLIENT_TTL_S = 50 * 60  # 50 min; access tokens live ~60 min
+
+
 def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource is dynamic
     """Return an authorized ``googleapiclient`` Gmail v1 service for ``user_id``.
+
+    Caches the built client per user for ``_CLIENT_TTL_S`` seconds to avoid
+    repeated token-mint + discovery-build overhead (~200-500ms each).
 
     Raises ``GmailNotConnectedError`` if no active token row exists. Network
     or Google-side errors propagate so the caller can decide how to surface them.
     """
-    # Lazy import: keep module-level cost low; googleapiclient pulls in httplib2.
+    now = time.time()
+    cached = _client_cache.get(user_id)
+    if cached is not None:
+        expires_at, client = cached
+        if now < expires_at:
+            return client
+
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
@@ -305,7 +319,14 @@ def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource 
     refresh_token = require_encryption().decrypt(encrypted)
     access_token = _mint_access_token(refresh_token)
     creds = Credentials(token=access_token)
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    client = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    _client_cache[user_id] = (now + _CLIENT_TTL_S, client)
+    return client
+
+
+def _invalidate_gmail_client(user_id: str) -> None:
+    """Remove a cached client (call after disconnect or token revocation)."""
+    _client_cache.pop(user_id, None)
 
 
 def _build_raw_message(
@@ -318,6 +339,7 @@ def _build_raw_message(
     in_reply_to_thread_id: str | None = None,  # noqa: ARG001 - threadId travels on the wrapper, not headers
     in_reply_to: str | None = None,
     references: str | None = None,
+    attachments: list[Any] | None = None,
 ) -> str:
     """Return a base64-url-encoded MIME message for ``drafts.create`` / ``messages.send``.
 
@@ -325,7 +347,13 @@ def _build_raw_message(
     (the parent's existing ``References`` plus its ``Message-ID``) so MUAs other
     than Gmail also thread the conversation. Gmail itself uses ``threadId`` on
     the API wrapper; these headers are belt-and-braces for the recipient.
+
+    When ``attachments`` is non-empty the message becomes multipart/mixed with
+    the text body as the first part and each attachment as a subsequent part.
+    Each attachment object must have ``filename``, ``mime_type``, and ``data_base64``.
     """
+    from models.gmail import AttachmentInput
+
     msg = EmailMessage()
     msg["To"] = to
     if cc:
@@ -338,6 +366,25 @@ def _build_raw_message(
     if references:
         msg["References"] = references
     msg.set_content(body, subtype="plain", charset="utf-8")
+
+    for att in attachments or []:
+        if isinstance(att, AttachmentInput):
+            filename = att.filename
+            mime_type = att.mime_type
+            data = base64.urlsafe_b64decode(
+                att.data_base64 + "=" * (-len(att.data_base64) % 4)
+            )
+        else:
+            filename = att.get("filename", "attachment")
+            mime_type = att.get("mime_type", "application/octet-stream")
+            raw_b64 = att.get("data_base64", "")
+            data = base64.urlsafe_b64decode(raw_b64 + "=" * (-len(raw_b64) % 4))
+
+        maintype, _, subtype = mime_type.partition("/")
+        if not subtype:
+            maintype, subtype = "application", "octet-stream"
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
+
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     return raw
 
@@ -371,14 +418,43 @@ def _walk_parts(part: dict[str, Any], out: dict[str, Any]) -> None:
     mime_type = part.get("mimeType", "")
     body = part.get("body", {}) or {}
     filename = part.get("filename") or ""
+    part_headers = _headers_to_dict(part.get("headers"))
+    content_id = part_headers.get("content-id")
+    if content_id:
+        content_id = content_id.strip("<>")
 
-    if filename and (body.get("attachmentId") or body.get("size")):
+    is_inline_image = mime_type.startswith("image/") and content_id and not filename
+
+    if is_inline_image:
+        raw_data = body.get("data")
+        b64_data: str | None = None
+        if raw_data:
+            b64_data = raw_data.replace("-", "+").replace("_", "/")
+            b64_data += "=" * (-len(b64_data) % 4)
+        out["attachments"].append(
+            {
+                "filename": None,
+                "mime_type": mime_type or None,
+                "size": body.get("size"),
+                "attachment_id": body.get("attachmentId"),
+                "content_id": content_id,
+                "data": b64_data,
+            }
+        )
+    elif filename and (body.get("attachmentId") or body.get("size")):
+        raw_data = body.get("data")
+        b64_data = None
+        if raw_data and mime_type.startswith("image/"):
+            b64_data = raw_data.replace("-", "+").replace("_", "/")
+            b64_data += "=" * (-len(b64_data) % 4)
         out["attachments"].append(
             {
                 "filename": filename or None,
                 "mime_type": mime_type or None,
                 "size": body.get("size"),
                 "attachment_id": body.get("attachmentId"),
+                "content_id": content_id,
+                "data": b64_data,
             }
         )
     elif mime_type == "text/plain" and out["body_text"] is None:

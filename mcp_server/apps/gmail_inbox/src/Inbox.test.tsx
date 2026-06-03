@@ -28,11 +28,13 @@ function makeMcpApp(opts?: {
       return null;
     }
   );
+  const openLink = vi.fn(async () => ({}));
   const app: {
     ontoolresult?: (raw: unknown) => void;
     callServerTool: typeof callServerTool;
-  } = { callServerTool };
-  return { app, callServerTool, calls };
+    openLink: typeof openLink;
+  } = { callServerTool, openLink };
+  return { app, callServerTool, openLink, calls };
 }
 
 const threadA: CuratedThread = {
@@ -203,7 +205,8 @@ describe("Inbox", () => {
     app.ontoolresult?.({ structuredContent: sampleResult });
     fireEvent.click(await screen.findByTestId("row-tA"));
     await screen.findByTestId("msg-m1");
-    fireEvent.click(screen.getByRole("button", { name: /reply/i }));
+    const replyBtns = screen.getAllByRole("button", { name: /reply/i });
+    fireEvent.click(replyBtns[0]);
     await waitFor(() => {
       expect(calls.some((c) => c.name === "gmail_inbox.reply")).toBe(true);
     });

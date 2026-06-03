@@ -7,11 +7,15 @@ from mcp_server.enhancers.base import EnhancedTool
 from mcp_server.enhancers.gmail_inbox import (
     APP_URI,
     gmail_curate_inbox_enhanced,
+    gmail_get_thread_enhanced,
 )
 from models.gmail import (
     GmailCuratedThread,
     GmailCurateInboxInput,
     GmailCurateInboxResult,
+    GmailGetThreadInput,
+    GmailThread,
+    GmailThreadMessage,
 )
 from tests.test_template import TestTemplate
 
@@ -80,6 +84,47 @@ class TestGmailInboxEnhancer(TestTemplate):
         result = asyncio.run(gmail_curate_inbox_enhanced(tool))
         assert len(result.threads) == 1
         assert result.threads[0].thread_id == "tA"
+
+
+def _fake_thread(_input: GmailGetThreadInput) -> GmailThread:
+    return GmailThread(
+        thread_id="t1",
+        messages=[
+            GmailThreadMessage(
+                message_id="m1",
+                from_="alice@example.com",
+                subject="Hello",
+                body_text="Hi there",
+                attachments=[],
+            )
+        ],
+    )
+
+
+class TestGmailGetThreadEnhancer(TestTemplate):
+    def test_attaches_app_when_capabilities_allow(self, monkeypatch):
+        monkeypatch.delenv("MCP_DISABLE_APPS", raising=False)
+        tool: EnhancedTool[GmailGetThreadInput, GmailThread] = EnhancedTool(
+            ctx=_make_ctx(),
+            input=GmailGetThreadInput(user_id="alice", thread_id="t1"),
+            service_fn=_fake_thread,
+        )
+        result = asyncio.run(gmail_get_thread_enhanced(tool))
+        assert isinstance(result, GmailThread)
+        assert result.thread_id == "t1"
+        meta = tool.app_meta()
+        assert meta is not None
+        assert meta["ui"]["resourceUri"] == APP_URI
+
+    def test_disabled_via_env_skips_app(self, monkeypatch):
+        monkeypatch.setenv("MCP_DISABLE_APPS", "1")
+        tool: EnhancedTool[GmailGetThreadInput, GmailThread] = EnhancedTool(
+            ctx=_make_ctx(),
+            input=GmailGetThreadInput(user_id="alice", thread_id="t1"),
+            service_fn=_fake_thread,
+        )
+        asyncio.run(gmail_get_thread_enhanced(tool))
+        assert tool.app_meta() is None
 
 
 class TestGmailInboxAppTools(TestTemplate):

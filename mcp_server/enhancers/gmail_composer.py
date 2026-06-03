@@ -1,9 +1,12 @@
-"""Gmail composer enhancers - attach the composer iframe to compose/update results.
+"""Gmail composer enhancers - route draft results to the inbox app's InlineComposer.
 
-Both ``gmail_compose`` and ``gmail_update_draft`` reattach the same
-``ui://mymcp/gmail_composer`` resource so an already-open composer iframe
-re-renders with the agent's server-authoritative draft state. The headless
-service result is returned unchanged so non-UI clients see identical output.
+All draft-producing tools (``gmail_update_draft``, ``gmail_reply_to_thread``,
+and ``gmail_compose``) call ``send_app(INBOX_URI)`` so the host delivers the
+tool result to the inbox app. Its ``ontoolresult`` handler detects the
+``draft_id`` in the payload and activates the InlineComposer view.
+
+The headless service result is returned unchanged so non-UI clients see
+identical output.
 """
 
 from mcp_server.enhancers import enhance
@@ -13,8 +16,9 @@ from models.gmail import (
     GmailDraft,
     GmailUpdateDraftInput,
 )
+from services.gmail_drafts_svc import GmailReplyInput
 
-APP_URI = "ui://mymcp/gmail_composer"
+INBOX_URI = "ui://mymcp/gmail_inbox"
 
 
 @enhance("gmail_compose", fallback="headless")
@@ -23,7 +27,7 @@ async def gmail_compose_enhanced(
 ) -> GmailDraft:
     result = tool.call()
     if tool.can_show_app:
-        tool.send_app(APP_URI)
+        tool.send_app(INBOX_URI)
     return result
 
 
@@ -33,5 +37,15 @@ async def gmail_update_draft_enhanced(
 ) -> GmailDraft:
     result = tool.call()
     if tool.can_show_app:
-        tool.send_app(APP_URI)
+        tool.send_app(INBOX_URI)
+    return result
+
+
+@enhance("gmail_reply_to_thread", fallback="headless")
+async def gmail_reply_to_thread_enhanced(
+    tool: EnhancedTool[GmailReplyInput, GmailDraft],
+) -> GmailDraft:
+    result = tool.call()
+    if tool.can_show_app:
+        tool.send_app(INBOX_URI)
     return result
