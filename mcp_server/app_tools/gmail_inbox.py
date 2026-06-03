@@ -4,11 +4,23 @@ These are visible to the iframe via ``visibility=["app"]`` but should not be
 invoked by the LLM directly - the curated reader UI calls them on user action.
 ``user_id`` arrives on the wire but is overridden by the authenticated
 principal when one is bound; see ``mcp_server/app_tools/_auth_guard.py``.
+
+The ``set_focus`` / ``get_focused_email`` pair bridges the UI and LLM: the
+iframe pushes focus state via an app-only tool, and the LLM reads it with a
+model-visible tool so it can answer questions about the email the user is
+currently viewing.
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel
 
 from mcp_server.app_tools._auth_guard import guard_user_id
 from mcp_server.server import mcp
 from models.gmail import (
+    GmailComposeInput,
     GmailCurateInboxInput,
     GmailCurateInboxResult,
     GmailDraft,
@@ -17,6 +29,9 @@ from models.gmail import (
 )
 from services.gmail_drafts_svc import (
     GmailReplyInput,
+)
+from services.gmail_drafts_svc import (
+    gmail_compose as _gmail_compose,
 )
 from services.gmail_drafts_svc import (
     gmail_reply_to_thread as _gmail_reply_to_thread,
@@ -118,6 +133,30 @@ def reply(
 
 
 @mcp.tool(
+    name="gmail_inbox.forward",
+    description="Create a forward draft for a message in a thread.",
+    meta=_APP_META,
+)
+def forward(
+    thread_id: str,
+    subject: str = "",
+    body: str = "",
+    user_id: str = "",
+) -> GmailDraft:
+    uid = guard_user_id(user_id)
+    fwd_subject = subject if subject.lower().startswith("fwd:") else f"Fwd: {subject}"
+    return _gmail_compose(
+        GmailComposeInput(
+            user_id=uid,
+            to="",
+            subject=fwd_subject,
+            body=body,
+            in_reply_to_thread_id=thread_id,
+        )
+    )
+
+
+@mcp.tool(
     name="gmail_inbox.mark_done",
     description="Mark a thread as done (applies MCP/Done label, hides from curated inbox).",
     meta=_APP_META,
@@ -138,4 +177,70 @@ def unmark_done(thread_id: str, user_id: str = "") -> GmailUnmarkDoneResult:
     uid = guard_user_id(user_id)
     return _gmail_unmark_thread_done(
         GmailThreadModifyInput(user_id=uid, thread_id=thread_id)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Focus state: bridges the iframe UI ↔ LLM
+# ---------------------------------------------------------------------------
+
+_focused_threads: dict[str, dict[str, Any]] = {}
+
+
+class _SetFocusResult(BaseModel):
+    ok: bool = True
+
+
+class _FocusedEmailResult(BaseModel):
+    focused: bool
+    thread_id: str | None = None
+    subject: str | None = None
+    from_: str | None = None
+    message_count: int = 0
+    messages: list[dict[str, Any]] | None = None
+
+
+@mcp.tool(
+    name="gmail_inbox.set_focus",
+    description="Store which thread the user is currently viewing (called by inbox UI).",
+    meta=_APP_META,
+)
+def set_focus(
+    thread_id: str | None = None,
+    subject: str | None = None,
+    from_: str | None = None,
+    message_count: int = 0,
+    messages: list[dict[str, Any]] | None = None,
+    user_id: str = "",
+) -> _SetFocusResult:
+    uid = guard_user_id(user_id)
+    if thread_id is None:
+        _focused_threads.pop(uid, None)
+    else:
+        _focused_threads[uid] = {
+            "thread_id": thread_id,
+            "subject": subject,
+            "from": from_,
+            "message_count": message_count,
+            "messages": messages,
+        }
+    return _SetFocusResult()
+
+
+@mcp.tool(
+    name="gmail_get_focused_email",
+    description="Return the email thread the user is currently viewing in the inbox UI. Call this when the user asks about 'this email', 'the email I'm looking at', or references the currently open thread.",
+)
+def get_focused_email(user_id: str = "") -> _FocusedEmailResult:
+    uid = guard_user_id(user_id)
+    data = _focused_threads.get(uid)
+    if not data:
+        return _FocusedEmailResult(focused=False)
+    return _FocusedEmailResult(
+        focused=True,
+        thread_id=data.get("thread_id"),
+        subject=data.get("subject"),
+        from_=data.get("from"),
+        message_count=data.get("message_count", 0),
+        messages=data.get("messages"),
     )

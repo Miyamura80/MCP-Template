@@ -11,8 +11,24 @@ export type Draft = {
   thread_id?: string;
 };
 
+export type ThreadMessage = {
+  message_id: string;
+  from?: string;
+  to?: string;
+  cc?: string;
+  date?: string;
+  subject?: string;
+  body_text?: string;
+  body_html?: string;
+};
+
+export type Thread = {
+  thread_id: string;
+  messages: ThreadMessage[];
+};
+
 type McpAppLike = {
-  ontoolresult?: (result: unknown) => void;
+  ontoolresult?: (result: any) => void;  // eslint-disable-line @typescript-eslint/no-explicit-any
   callServerTool: (args: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
 };
 
@@ -201,8 +217,6 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   const applyAgentUpdate = () => {
     if (!pendingAgent) return;
-    // Drop any queued local autosave; otherwise the prior local-dirty content
-    // would land on Gmail seconds after the user accepted the agent's update.
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -213,6 +227,35 @@ export function Composer({ mcpApp }: ComposerProps) {
   };
 
   const keepLocal = () => setPendingAgent(null);
+
+  // Thread context: fetch when draft has a thread_id
+  const [thread, setThread] = useState<Thread | null>(null);
+  const [threadCollapsed, setThreadCollapsed] = useState(false);
+  const fetchedThreadRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!draft?.thread_id) {
+      setThread(null);
+      fetchedThreadRef.current = null;
+      return;
+    }
+    if (draft.thread_id === fetchedThreadRef.current) return;
+    const tid = draft.thread_id;
+    fetchedThreadRef.current = tid;
+    let cancelled = false;
+    mcpApp
+      .callServerTool({
+        name: "gmail_composer.get_thread",
+        arguments: { thread_id: tid },
+      })
+      .then((raw) => {
+        if (cancelled) return;
+        const data = extractThread(raw);
+        if (data) setThread(data);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [draft?.thread_id, mcpApp]);
 
   if (sent) {
     return (
@@ -234,6 +277,14 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   return (
     <div style={containerStyle}>
+      {thread && thread.messages.length > 0 && (
+        <ThreadPanel
+          thread={thread}
+          collapsed={threadCollapsed}
+          onToggle={() => setThreadCollapsed((v) => !v)}
+        />
+      )}
+
       <header style={headerStyle}>
         <h2 style={{ margin: 0, fontSize: 18 }}>Draft</h2>
         <span style={statusStyle(saveStatus)} data-testid="save-status">
@@ -345,6 +396,188 @@ export function Composer({ mcpApp }: ComposerProps) {
       </div>
     </div>
   );
+}
+
+function extractThread(raw: unknown): Thread | null {
+  if (!raw || typeof raw !== "object") return null;
+  const wrapper = raw as { structuredContent?: unknown };
+  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
+  if (!data || typeof data !== "object") return null;
+  if (!Array.isArray((data as { messages?: unknown }).messages)) return null;
+  return data as unknown as Thread;
+}
+
+function ThreadPanel({
+  thread,
+  collapsed,
+  onToggle,
+}: {
+  thread: Thread;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div style={threadPanelStyle}>
+      <button onClick={onToggle} style={threadToggleBtn}>
+        {collapsed ? "▶" : "▼"} Conversation ({thread.messages.length} message
+        {thread.messages.length === 1 ? "" : "s"})
+      </button>
+      {!collapsed && (
+        <div style={threadMessagesContainer}>
+          {thread.messages.map((m, i) => (
+            <ThreadMessageView
+              key={m.message_id}
+              message={m}
+              defaultExpanded={i === thread.messages.length - 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThreadMessageView({
+  message,
+  defaultExpanded,
+}: {
+  message: ThreadMessage;
+  defaultExpanded: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  if (!expanded) {
+    return (
+      <div
+        style={threadMsgCollapsedStyle}
+        onClick={() => setExpanded(true)}
+      >
+        <strong style={{ fontSize: 12 }}>{message.from || "(unknown)"}</strong>
+        <span style={{ color: "#888", fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {message.body_text?.slice(0, 100) || message.subject || ""}
+        </span>
+        <span style={{ color: "#999", fontSize: 10, flexShrink: 0 }}>
+          {relativeTime(message.date)}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={threadMsgExpandedStyle}>
+      <div
+        style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, cursor: "pointer" }}
+        onClick={() => setExpanded(false)}
+      >
+        <div>
+          <strong style={{ fontSize: 12 }}>{message.from || "(unknown)"}</strong>
+          {message.to && <span style={{ fontSize: 11, color: "#666", marginLeft: 8 }}>to {message.to}</span>}
+        </div>
+        <span style={{ fontSize: 10, color: "#999" }}>{relativeTime(message.date)}</span>
+      </div>
+      <ThreadMessageBody message={message} />
+    </div>
+  );
+}
+
+function ThreadMessageBody({ message }: { message: ThreadMessage }) {
+  const [showQuoted, setShowQuoted] = useState(false);
+
+  if (message.body_html) {
+    const { main, quoted } = splitHtmlAtQuote(message.body_html);
+    return (
+      <div>
+        <div style={threadBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: main }} />
+        {quoted && (
+          <>
+            <button onClick={() => setShowQuoted((v) => !v)} style={quoteToggleBtnStyle}>
+              &bull;&bull;&bull;
+            </button>
+            {showQuoted && (
+              <div
+                style={{ ...threadBodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }}
+                dangerouslySetInnerHTML={{ __html: quoted }}
+              />
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+  if (message.body_text) {
+    const { main, quoted } = splitTextAtQuote(message.body_text);
+    return (
+      <div>
+        <pre style={threadBodyTextStyle}>{main}</pre>
+        {quoted && (
+          <>
+            <button onClick={() => setShowQuoted((v) => !v)} style={quoteToggleBtnStyle}>
+              &bull;&bull;&bull;
+            </button>
+            {showQuoted && (
+              <pre style={{ ...threadBodyTextStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }}>{quoted}</pre>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+  return <div style={{ color: "#888", fontSize: 12 }}>(no body)</div>;
+}
+
+function splitHtmlAtQuote(html: string): { main: string; quoted: string | null } {
+  const markers = [
+    '<div class="gmail_quote"',
+    "<div class=\"gmail_quote\"",
+    '<blockquote class="gmail_quote"',
+    "<blockquote class=\"gmail_quote\"",
+    '<div class=3D"gmail_quote"',
+  ];
+  for (const marker of markers) {
+    const idx = html.indexOf(marker);
+    if (idx > 0) return { main: html.slice(0, idx), quoted: html.slice(idx) };
+  }
+  const onWroteRe = /(<br\s*\/?>[\s\S]{0,20}?On\s.{10,80}\s+wrote:\s*<br\s*\/?>)/i;
+  const m = onWroteRe.exec(html);
+  if (m && m.index > 50) return { main: html.slice(0, m.index), quoted: html.slice(m.index) };
+  return { main: html, quoted: null };
+}
+
+function splitTextAtQuote(text: string): { main: string; quoted: string | null } {
+  const lines = text.split("\n");
+  const onWroteRe = /^On .{10,80} wrote:\s*$/;
+  for (let i = 0; i < lines.length; i++) {
+    if (onWroteRe.test(lines[i]) && i > 0) {
+      return { main: lines.slice(0, i).join("\n"), quoted: lines.slice(i).join("\n") };
+    }
+  }
+  let firstQuoteLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith(">")) {
+      if (firstQuoteLine === -1) firstQuoteLine = i;
+    } else if (firstQuoteLine !== -1) {
+      break;
+    }
+  }
+  if (firstQuoteLine > 0 && lines.length - firstQuoteLine >= 3) {
+    return { main: lines.slice(0, firstQuoteLine).join("\n"), quoted: lines.slice(firstQuoteLine).join("\n") };
+  }
+  return { main: text, quoted: null };
+}
+
+function relativeTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return "";
+  const ageMs = Date.now() - dt.getTime();
+  const mins = Math.round(ageMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return dt.toLocaleDateString();
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -512,6 +745,79 @@ const successStyle: React.CSSProperties = {
 
 const mutedStyle: React.CSSProperties = {
   color: "#666",
+};
+
+const threadPanelStyle: React.CSSProperties = {
+  borderBottom: "1px solid #e5e7eb",
+  marginBottom: 12,
+  paddingBottom: 8,
+};
+
+const threadToggleBtn: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: "4px 0",
+  cursor: "pointer",
+  fontSize: 13,
+  color: "#374151",
+  fontWeight: 600,
+};
+
+const threadMessagesContainer: React.CSSProperties = {
+  maxHeight: 280,
+  overflowY: "auto",
+  marginTop: 6,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const threadMsgCollapsedStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "6px 8px",
+  borderRadius: 4,
+  background: "#f9fafb",
+  cursor: "pointer",
+  border: "1px solid #f3f4f6",
+};
+
+const threadMsgExpandedStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 4,
+  background: "#f9fafb",
+  border: "1px solid #e5e7eb",
+};
+
+const threadBodyHtmlStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#374151",
+  lineHeight: 1.5,
+  wordBreak: "break-word",
+};
+
+const threadBodyTextStyle: React.CSSProperties = {
+  whiteSpace: "pre-wrap",
+  fontFamily: "inherit",
+  margin: 0,
+  fontSize: 12,
+  color: "#374151",
+};
+
+const quoteToggleBtnStyle: React.CSSProperties = {
+  display: "block",
+  background: "#f1f3f4",
+  border: "none",
+  borderRadius: 4,
+  padding: "2px 10px",
+  fontSize: 12,
+  color: "#5f6368",
+  cursor: "pointer",
+  marginTop: 4,
+  letterSpacing: 2,
+  fontWeight: 700,
+  lineHeight: 1,
 };
 
 function statusStyle(s: SaveStatus): React.CSSProperties {

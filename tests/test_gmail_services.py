@@ -156,7 +156,10 @@ def _draft_resource(
 
 def _make_mock_service() -> MagicMock:
     """A MagicMock that supports the chained ``.users().drafts().get().execute()`` style."""
-    return MagicMock()
+    mock = MagicMock()
+    mock.users().labels().list().execute.return_value = {"labels": []}
+    mock.users().drafts().list().execute.return_value = {"drafts": []}
+    return mock
 
 
 # ---------------------------------------------------------------------------
@@ -275,40 +278,53 @@ def _stop(patches):
 
 class TestGmailListDrafts(TestTemplate):
     def test_happy_path(self):
+        draft_payloads = [
+            {
+                "id": "d-1",
+                "message": {
+                    "id": "m-d-1",
+                    "snippet": "Hi Alice",
+                    "internalDate": "1700000000000",
+                    "payload": {
+                        "headers": _headers(
+                            {"To": "alice@example.com", "Subject": "Hello"}
+                        ),
+                    },
+                },
+            },
+            {
+                "id": "d-2",
+                "message": {
+                    "id": "m-d-2",
+                    "snippet": "Hi Bob",
+                    "internalDate": "1700000001000",
+                    "payload": {
+                        "headers": _headers(
+                            {"To": "bob@example.com", "Subject": "Hey"}
+                        ),
+                    },
+                },
+            },
+        ]
+
+        class FakeBatch:
+            def __init__(self):
+                self._queue: list[tuple] = []
+
+            def add(self, req, callback):
+                self._queue.append((req, callback))
+
+            def execute(self):
+                for i, (_req, cb) in enumerate(self._queue):
+                    cb(str(i), draft_payloads[i], None)
+
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
             mock.users().drafts().list().execute.return_value = {
                 "drafts": [{"id": "d-1"}, {"id": "d-2"}],
             }
-            mock.users().drafts().get().execute.side_effect = [
-                {
-                    "id": "d-1",
-                    "message": {
-                        "id": "m-d-1",
-                        "snippet": "Hi Alice",
-                        "internalDate": "1700000000000",
-                        "payload": {
-                            "headers": _headers(
-                                {"To": "alice@example.com", "Subject": "Hello"}
-                            ),
-                        },
-                    },
-                },
-                {
-                    "id": "d-2",
-                    "message": {
-                        "id": "m-d-2",
-                        "snippet": "Hi Bob",
-                        "internalDate": "1700000001000",
-                        "payload": {
-                            "headers": _headers(
-                                {"To": "bob@example.com", "Subject": "Hey"}
-                            ),
-                        },
-                    },
-                },
-            ]
+            mock.new_batch_http_request.return_value = FakeBatch()
 
             patches = _patch_client(mock)
             _apply(patches)
@@ -484,52 +500,60 @@ class TestGmailDiscardDraft(TestTemplate):
 
 class TestGmailListInbox(TestTemplate):
     def test_happy_path_uses_from_alias(self):
+        msg_payloads = {
+            "m-1": {
+                "id": "m-1",
+                "threadId": "t-1",
+                "snippet": "snip 1",
+                "internalDate": "1700000000000",
+                "payload": {
+                    "headers": _headers(
+                        {
+                            "From": "sender1@example.com",
+                            "Subject": "S1",
+                            "Date": "Wed, 15 Nov 2023 00:00:00 +0000",
+                        }
+                    )
+                },
+            },
+            "m-2": {
+                "id": "m-2",
+                "threadId": "t-2",
+                "snippet": "snip 2",
+                "internalDate": "1700000001000",
+                "payload": {
+                    "headers": _headers(
+                        {"From": "sender2@example.com", "Subject": "S2"}
+                    )
+                },
+            },
+        }
+
+        def fake_batch_get_messages(svc, ids, **kwargs):
+            return {mid: msg_payloads[mid] for mid in ids if mid in msg_payloads}
+
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
             mock.users().messages().list().execute.return_value = {
                 "messages": [{"id": "m-1"}, {"id": "m-2"}],
             }
-            mock.users().messages().get().execute.side_effect = [
-                {
-                    "id": "m-1",
-                    "threadId": "t-1",
-                    "snippet": "snip 1",
-                    "internalDate": "1700000000000",
-                    "payload": {
-                        "headers": _headers(
-                            {
-                                "From": "sender1@example.com",
-                                "Subject": "S1",
-                                "Date": "Wed, 15 Nov 2023 00:00:00 +0000",
-                            }
-                        )
-                    },
-                },
-                {
-                    "id": "m-2",
-                    "threadId": "t-2",
-                    "snippet": "snip 2",
-                    "internalDate": "1700000001000",
-                    "payload": {
-                        "headers": _headers(
-                            {"From": "sender2@example.com", "Subject": "S2"}
-                        )
-                    },
-                },
-            ]
             patches = _patch_client(mock)
             _apply(patches)
-            try:
-                result = gmail_list_inbox(GmailListInboxInput(user_id="alice", limit=5))
-            finally:
-                _stop(patches)
+            with patch(
+                "services.gmail_messages_svc._batch_get_messages",
+                side_effect=fake_batch_get_messages,
+            ):
+                try:
+                    result = gmail_list_inbox(
+                        GmailListInboxInput(user_id="alice", limit=5)
+                    )
+                finally:
+                    _stop(patches)
 
         assert len(result.messages) == 2
-        # The alias 'from' is exposed as field from_
         assert result.messages[0].from_ == "sender1@example.com"
         assert result.messages[0].subject == "S1"
-        # Serializing with by_alias=True must emit 'from'
         dumped = result.messages[0].model_dump(by_alias=True)
         assert dumped["from"] == "sender1@example.com"
 
@@ -606,7 +630,6 @@ class TestGmailGetThread(TestTemplate):
 class TestGmailCurateInbox(TestTemplate):
     def test_ranks_by_score_deterministically(self):
         now = datetime.now(UTC)
-        # Thread A: IMPORTANT + UNREAD + recent (1h)
         thread_a = {
             "id": "tA",
             "messages": [
@@ -625,7 +648,6 @@ class TestGmailCurateInbox(TestTemplate):
                 },
             ],
         }
-        # Thread B: UNREAD only, 3 days old
         thread_b = {
             "id": "tB",
             "messages": [
@@ -644,7 +666,6 @@ class TestGmailCurateInbox(TestTemplate):
                 },
             ],
         }
-        # Thread C: no special labels, 2 weeks old (no recency boost)
         thread_c = {
             "id": "tC",
             "messages": [
@@ -663,6 +684,10 @@ class TestGmailCurateInbox(TestTemplate):
                 },
             ],
         }
+        thread_map = {"tA": thread_a, "tB": thread_b, "tC": thread_c}
+
+        def fake_batch_get_threads(svc, ids, **kwargs):
+            return {tid: thread_map[tid] for tid in ids if tid in thread_map}
 
         with _patch_db() as factory:
             _seed_token(factory)
@@ -670,31 +695,43 @@ class TestGmailCurateInbox(TestTemplate):
             mock.users().threads().list().execute.return_value = {
                 "threads": [{"id": "tA"}, {"id": "tB"}, {"id": "tC"}],
             }
-            mock.users().threads().get().execute.side_effect = [
-                thread_a,
-                thread_b,
-                thread_c,
-            ]
             patches = _patch_client(mock)
             _apply(patches)
-            try:
-                result = gmail_curate_inbox(
-                    GmailCurateInboxInput(user_id="alice", limit=10)
-                )
-            finally:
-                _stop(patches)
+            with patch(
+                "services.gmail_messages_svc._batch_get_threads",
+                side_effect=fake_batch_get_threads,
+            ):
+                try:
+                    result = gmail_curate_inbox(
+                        GmailCurateInboxInput(user_id="alice", limit=10)
+                    )
+                finally:
+                    _stop(patches)
 
         ids = [t.thread_id for t in result.threads]
         assert ids == ["tA", "tB", "tC"]
-        # A has IMPORTANT + UNREAD + strong recency
         assert result.threads[0].importance_score > result.threads[1].importance_score
         assert result.threads[1].importance_score > result.threads[2].importance_score
-        # alias roundtrip
         dumped = result.threads[0].model_dump(by_alias=True)
         assert dumped["from"] == "ceo@example.com"
 
-    def test_skips_thread_when_metadata_fetch_raises_http_error(self):
-        from googleapiclient.errors import HttpError
+    def test_skips_thread_when_batch_fetch_omits_it(self):
+        """Threads missing from the batch result (e.g. deleted) are silently skipped."""
+        good_thread = {
+            "id": "good",
+            "messages": [
+                {
+                    "id": "mG",
+                    "labelIds": ["IMPORTANT"],
+                    "snippet": "ok",
+                    "internalDate": "1700000000000",
+                    "payload": {"headers": _headers({"Subject": "ok"})},
+                },
+            ],
+        }
+
+        def fake_batch_get_threads(svc, ids, **kwargs):
+            return {"good": good_thread}
 
         with _patch_db() as factory:
             _seed_token(factory)
@@ -702,33 +739,18 @@ class TestGmailCurateInbox(TestTemplate):
             mock.users().threads().list().execute.return_value = {
                 "threads": [{"id": "good"}, {"id": "bad"}],
             }
-
-            good_thread = {
-                "id": "good",
-                "messages": [
-                    {
-                        "id": "mG",
-                        "labelIds": ["IMPORTANT"],
-                        "snippet": "ok",
-                        "internalDate": "1700000000000",
-                        "payload": {"headers": _headers({"Subject": "ok"})},
-                    },
-                ],
-            }
-            fake_resp = MagicMock()
-            fake_resp.status = 404
-            fake_resp.reason = "Not Found"
-            err = HttpError(fake_resp, b"not found")
-
-            mock.users().threads().get().execute.side_effect = [good_thread, err]
             patches = _patch_client(mock)
             _apply(patches)
-            try:
-                result = gmail_curate_inbox(
-                    GmailCurateInboxInput(user_id="alice", limit=10)
-                )
-            finally:
-                _stop(patches)
+            with patch(
+                "services.gmail_messages_svc._batch_get_threads",
+                side_effect=fake_batch_get_threads,
+            ):
+                try:
+                    result = gmail_curate_inbox(
+                        GmailCurateInboxInput(user_id="alice", limit=10)
+                    )
+                finally:
+                    _stop(patches)
 
         assert [t.thread_id for t in result.threads] == ["good"]
 

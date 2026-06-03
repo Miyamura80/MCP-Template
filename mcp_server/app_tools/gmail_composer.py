@@ -9,12 +9,15 @@ principal when one is bound; see ``mcp_server/app_tools/_auth_guard.py``.
 from mcp_server.app_tools._auth_guard import guard_user_id
 from mcp_server.server import mcp
 from models.gmail import (
+    AttachmentInput,
     GmailDiscardDraftInput,
     GmailDiscardDraftResult,
     GmailDraft,
     GmailGetDraftInput,
+    GmailGetThreadInput,
     GmailSendInput,
     GmailSendResult,
+    GmailThread,
     GmailUpdateDraftInput,
 )
 from services.gmail_drafts_svc import (
@@ -28,6 +31,9 @@ from services.gmail_drafts_svc import (
 )
 from services.gmail_drafts_svc import (
     gmail_update_draft as _gmail_update_draft,
+)
+from services.gmail_messages_svc import (
+    gmail_get_thread as _gmail_get_thread,
 )
 
 _APP_META = {"ui": {"visibility": ["app"]}}
@@ -46,8 +52,10 @@ def save_draft(
     body: str | None = None,
     cc: str | None = None,
     bcc: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> GmailDraft:
     uid = guard_user_id(user_id)
+    atts = [AttachmentInput(**a) for a in attachments] if attachments else None
     return _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,
@@ -57,6 +65,7 @@ def save_draft(
             body=body,
             cc=cc,
             bcc=bcc,
+            attachments=atts,
         )
     )
 
@@ -74,8 +83,10 @@ def send(
     body: str | None = None,
     cc: str | None = None,
     bcc: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> GmailSendResult:
     uid = guard_user_id(user_id)
+    atts = [AttachmentInput(**a) for a in attachments] if attachments else None
     _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,
@@ -85,6 +96,7 @@ def send(
             body=body,
             cc=cc,
             bcc=bcc,
+            attachments=atts,
         )
     )
     return _gmail_send(GmailSendInput(user_id=uid, draft_id=draft_id))
@@ -108,3 +120,37 @@ def discard(draft_id: str, user_id: str = "") -> GmailDiscardDraftResult:
 def refresh(draft_id: str, user_id: str = "") -> GmailDraft:
     uid = guard_user_id(user_id)
     return _gmail_get_draft(GmailGetDraftInput(user_id=uid, draft_id=draft_id))
+
+
+@mcp.tool(
+    name="gmail_composer.get_thread",
+    description="Fetch the full thread for display in the composer's thread panel.",
+    meta=_APP_META,
+)
+def get_thread(thread_id: str, user_id: str = "") -> GmailThread:
+    uid = guard_user_id(user_id)
+    return _gmail_get_thread(GmailGetThreadInput(user_id=uid, thread_id=thread_id))
+
+
+@mcp.tool(
+    name="gmail_composer.get_attachment",
+    description="Fetch the raw base64 data for an attachment on a message.",
+    meta=_APP_META,
+)
+def get_attachment(message_id: str, attachment_id: str, user_id: str = "") -> dict:
+    """Return ``{data_base64}`` for the given attachment."""
+    from services.gmail_svc import _get_gmail_client
+
+    uid = guard_user_id(user_id)
+    svc = _get_gmail_client(uid)
+    att = (
+        svc.users()
+        .messages()
+        .attachments()
+        .get(userId="me", messageId=message_id, id=attachment_id)
+        .execute()
+    )
+    raw = att.get("data", "")
+    data = raw.replace("-", "+").replace("_", "/")
+    data += "=" * (-len(data) % 4)
+    return {"data_base64": data}

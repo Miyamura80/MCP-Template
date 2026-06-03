@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from mcp_server.enhancers.base import EnhancedTool
 from mcp_server.enhancers.gmail_composer import (
-    APP_URI,
+    INBOX_URI,
     gmail_compose_enhanced,
     gmail_update_draft_enhanced,
 )
@@ -52,7 +52,7 @@ class TestGmailComposeEnhancer(TestTemplate):
         assert result is draft
         meta = tool.app_meta()
         assert meta is not None
-        assert meta["ui"]["resourceUri"] == APP_URI
+        assert meta["ui"]["resourceUri"] == INBOX_URI
 
     def test_skips_app_when_disabled_via_env(self, monkeypatch):
         monkeypatch.setenv("MCP_DISABLE_APPS", "1")
@@ -89,7 +89,7 @@ class TestGmailUpdateDraftEnhancer(TestTemplate):
         assert result is draft
         meta = tool.app_meta()
         assert meta is not None
-        assert meta["ui"]["resourceUri"] == APP_URI
+        assert meta["ui"]["resourceUri"] == INBOX_URI
 
     def test_skips_app_when_disabled(self, monkeypatch):
         monkeypatch.setenv("MCP_DISABLE_APPS", "1")
