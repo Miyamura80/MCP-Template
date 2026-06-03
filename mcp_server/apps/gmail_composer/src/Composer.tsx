@@ -241,7 +241,7 @@ export function Composer({ mcpApp }: ComposerProps) {
     }
     if (draft.thread_id === fetchedThreadRef.current) return;
     const tid = draft.thread_id;
-    fetchedThreadRef.current = tid;
+    setThread(null);
     let cancelled = false;
     mcpApp
       .callServerTool({
@@ -250,6 +250,7 @@ export function Composer({ mcpApp }: ComposerProps) {
       })
       .then((raw) => {
         if (cancelled) return;
+        fetchedThreadRef.current = tid;
         const data = extractThread(raw);
         if (data) setThread(data);
       })

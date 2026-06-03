@@ -1,12 +1,9 @@
 """Gmail composer enhancers - route draft results to the inbox app's InlineComposer.
 
-``gmail_update_draft`` and ``gmail_reply_to_thread`` call
-``send_app(INBOX_URI)`` so the host delivers the tool result to the
-already-visible inbox app. Its ``ontoolresult`` handler detects the
+All draft-producing tools (``gmail_update_draft``, ``gmail_reply_to_thread``,
+and ``gmail_compose``) call ``send_app(INBOX_URI)`` so the host delivers the
+tool result to the inbox app. Its ``ontoolresult`` handler detects the
 ``draft_id`` in the payload and activates the InlineComposer view.
-
-``gmail_compose`` (new email, no thread context) opens the standalone
-composer app as a fallback.
 
 The headless service result is returned unchanged so non-UI clients see
 identical output.

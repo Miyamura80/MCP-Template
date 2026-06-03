@@ -686,6 +686,7 @@ function ThreadReader({
       previewBlobRef.current = null;
     }
     setPreviewData(null);
+    setPreviewLoading(false);
   };
 
   const showPreview = (b64: string, mime: string, filename: string) => {
@@ -1007,6 +1008,7 @@ function InlineComposer({
       previewBlobRef.current = null;
     }
     setPreviewData(null);
+    setPreviewLoading(false);
   };
 
   const showPreview = (b64: string, mime: string, filename: string) => {

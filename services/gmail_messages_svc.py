@@ -144,7 +144,7 @@ def _resolve_inline_images(svc: Any, message_id: str, parsed: dict[str, Any]) ->
         cid = att.get("content_id")
         aid = att.get("attachment_id")
 
-        if not att.get("data") and aid:
+        if cid and not att.get("data") and aid:
             try:
                 resp = (
                     svc.users()
