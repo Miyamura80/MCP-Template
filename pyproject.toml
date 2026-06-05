@@ -52,6 +52,8 @@ dependencies = [
     "keyring>=25.0.0",
     "mcp[cli]>=1.10.0,<2.0.0",
     "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "anyio>=4.0.0",
     "uvicorn[standard]>=0.34.0",
     "sqlalchemy>=2.0.0",
     "alembic>=1.15.0",
@@ -128,6 +130,7 @@ python-version = "3.12"
 [tool.deptry]
 ignore = ["DEP002"]
 extend_exclude = ["scripts/sync_agent_config.py"]
+package_module_name_map = { "PyJWT" = "jwt", "google-api-python-client" = "googleapiclient", "google-auth" = "google", "google-genai" = "google", "openfeature-sdk" = "openfeature", "pillow" = "PIL", "pyyaml" = "yaml", "python-dotenv" = "dotenv" }
 
 [tool.vulture]
 exclude = [
