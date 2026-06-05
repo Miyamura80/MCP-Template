@@ -79,7 +79,7 @@ class DSPYInference:
         ),
         before_sleep=lambda retry_state: log.warning(
             "Retrying due to LLM error "
-            f"{retry_state.outcome.exception().__class__.__name__}. "
+            f"{type(retry_state.outcome.exception()).__name__ if retry_state.outcome else 'unknown'}. "
             f"Attempt {retry_state.attempt_number}"
         ),
     )

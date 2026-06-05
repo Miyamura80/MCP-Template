@@ -1,6 +1,7 @@
 """Stripe checkout session creation and subscription cancellation."""
 
 import time
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger as log
@@ -13,6 +14,9 @@ from api_server.billing.stripe_config import ensure_stripe, get_stripe_price_id
 from db.engine import get_db_session
 from db.models.subscription_types import SubscriptionStatus, SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
+
+if TYPE_CHECKING:
+    from stripe.params.checkout import SessionCreateParamsSubscriptionData
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
@@ -216,7 +220,9 @@ def create_checkout(
 
     sub_cfg = global_config.subscription_config
     trial_days = sub_cfg.trial_period_days
-    subscription_data = {"trial_period_days": trial_days} if trial_days else {}
+    subscription_data: SessionCreateParamsSubscriptionData = (
+        {"trial_period_days": trial_days} if trial_days else {}
+    )
 
     checkout_session = stripe.checkout.Session.create(
         customer=customer_id,

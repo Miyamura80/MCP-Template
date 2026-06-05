@@ -90,12 +90,14 @@ def _fake_thread(_input: GmailGetThreadInput) -> GmailThread:
     return GmailThread(
         thread_id="t1",
         messages=[
-            GmailThreadMessage(
-                message_id="m1",
-                from_="alice@example.com",
-                subject="Hello",
-                body_text="Hi there",
-                attachments=[],
+            GmailThreadMessage.model_validate(
+                {
+                    "message_id": "m1",
+                    "from": "alice@example.com",
+                    "subject": "Hello",
+                    "body_text": "Hi there",
+                    "attachments": [],
+                }
             )
         ],
     )
