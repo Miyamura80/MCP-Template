@@ -1,0 +1,20 @@
+# Render Blueprint - https://render.com/docs/blueprint-spec
+# Powers the one-click "Deploy to Render" button in the README. Render reads
+# this file from the repo, provisions the service, and builds the Dockerfile.
+services:
+  - type: web
+    name: mcp-template
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    # One process serves the HTTP API and the MCP server (/mcp) on $PORT.
+    healthCheckPath: /health
+    # Recommended for button/blueprint deploys so a push doesn't auto-redeploy.
+    autoDeploy: false
+    envVars:
+      - key: DEV_ENV
+        value: prod
+      # Add required secrets (e.g. OPENAI_API_KEY) in the Render dashboard or
+      # uncomment below to be prompted for them at deploy time.
+      # - key: OPENAI_API_KEY
+      #   sync: false

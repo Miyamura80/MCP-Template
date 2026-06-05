@@ -12,6 +12,7 @@
   <a href="#key-features">Key Features</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#quick-start">Quick Start</a> •
+  <a href="#deploy">Deploy</a> •
   <a href="#cli-usage">CLI Usage</a> •
   <a href="#adding-commands">Adding Commands</a> •
   <a href="#configuration">Configuration</a> •
@@ -119,6 +120,24 @@ uv run mymcp init my_command  # scaffold a new command
 uv run mymcp-serve        # start the server (HTTP API + MCP at /mcp on one port)
 uv run mymcp-mcp          # legacy: stdio MCP only, for local Claude Desktop / dev
 ```
+
+## Deploy
+
+One process serves the HTTP API and the MCP server (`/mcp`) on a single port. Both targets below build the included [`Dockerfile`](Dockerfile) and run the health-checked Uvicorn entrypoint (`/health`).
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/YOUR_TEMPLATE_CODE)
+&nbsp;
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Miyamura80/MCP-Template)
+
+- **Render** works out of the box: the button reads [`render.yaml`](render.yaml) from the repo, provisions the service, and deploys. No prior setup needed.
+- **Railway** ships with [`railway.json`](railway.json) for build/deploy config, but its button requires a **published-template code** tied to your Railway account (there is no pure repo-URL button). Publish once, then swap `YOUR_TEMPLATE_CODE` in the button URL above:
+  1. Push this repo to your own GitHub.
+  2. On Railway, create a project from the repo (<https://railway.com/new> → "Deploy from GitHub repo"), then generate a template from it in the project settings.
+  3. Copy the code from the template URL (`railway.com/new/template/<CODE>`) into the button link.
+
+After the first deploy, set any required secrets (e.g. `OPENAI_API_KEY`) in the platform's environment/variables settings.
+
+> **Other platforms.** Fly.io has no one-click README button - deploy with the CLI from the repo root: `fly launch` (creates `fly.toml` and deploys), then `fly deploy` for updates. Vercel is **not** recommended: it runs the app only as a serverless function, which can't host the persistent streamable-HTTP MCP transport (long-lived SSE / background tasks).
 
 ## CLI Usage
 

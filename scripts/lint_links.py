@@ -21,6 +21,9 @@ import time
 BOT_BLOCKED_DOMAINS = [
     r"https://www\.mastercard\.com/.*",
     r"https://news\.ycombinator\.com/.*",
+    # README "Deploy on Railway" button placeholder - intentionally a
+    # non-resolving template code until a Railway template is published.
+    r"https://railway\.com/new/template/YOUR_TEMPLATE_CODE",
 ]
 
 MAX_RETRIES = 3
