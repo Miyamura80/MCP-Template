@@ -1,16 +1,21 @@
 """Interactive onboarding CLI for project setup."""
 
 import asyncio
+import json
 import os
 import random
 import re
 import shutil
 import subprocess
 import tomllib
+from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
+from typing import Annotated, Any
 
 import questionary
 import typer
+import yaml
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
@@ -109,6 +114,802 @@ STEPS: list[tuple[str, str]] = [
 STEP_FUNCTIONS: dict[str, object] = {}
 
 
+class ServiceSurface(StrEnum):
+    """Transports that can expose the shared service registry."""
+
+    CLI = "cli"
+    MCP = "mcp"
+    HTTP_API = "http_api"
+    MCP_APPS = "mcp_apps"
+
+
+class PaymentStack(StrEnum):
+    """Payment stacks the template can keep or prune."""
+
+    STRIPE_BILLING = "stripe_billing"
+    STRIPE_METERING = "stripe_metering"
+    X402 = "x402"
+    MPP_STUB = "mpp_stub"
+    ACP_STUB = "acp_stub"
+
+
+class ExampleApp(StrEnum):
+    """Example integrations that are useful references but not core template code."""
+
+    GMAIL_GOOGLE_OAUTH = "gmail_google_oauth"
+    AGENTIC_PAYMENT_RESEARCH_DOCS = "agentic_payment_research_docs"
+
+
+class OnboardingProfile(StrEnum):
+    """Preset project shapes. Users can override any field headlessly."""
+
+    CLI_ONLY = "cli-only"
+    LOCAL_MCP = "local-mcp"
+    REMOTE_MCP = "remote-mcp"
+    FULL_SAAS = "full-saas"
+    CUSTOM = "custom"
+
+
+@dataclass(frozen=True)
+class OnboardingConfig:
+    """Headless onboarding decisions.
+
+    This is intentionally stdlib-only so the setup path stays light and can be
+    reused by tests, the interactive wizard, and agent-driven onboarding.
+    """
+
+    profile: OnboardingProfile = OnboardingProfile.CUSTOM
+    service_surfaces: frozenset[ServiceSurface] = field(default_factory=frozenset)
+    payments: frozenset[PaymentStack] = field(default_factory=frozenset)
+    examples: frozenset[ExampleApp] = field(default_factory=frozenset)
+    auth: bool = False
+    database: bool = False
+    docs: bool = False
+
+    @classmethod
+    def for_profile(cls, profile: OnboardingProfile) -> "OnboardingConfig":
+        """Return defaults for a project-shape preset."""
+        defaults = {
+            OnboardingProfile.CLI_ONLY: cls(
+                profile=profile,
+                service_surfaces=frozenset({ServiceSurface.CLI}),
+            ),
+            OnboardingProfile.LOCAL_MCP: cls(
+                profile=profile,
+                service_surfaces=frozenset({ServiceSurface.CLI, ServiceSurface.MCP}),
+            ),
+            OnboardingProfile.REMOTE_MCP: cls(
+                profile=profile,
+                service_surfaces=frozenset(
+                    {ServiceSurface.CLI, ServiceSurface.MCP, ServiceSurface.HTTP_API}
+                ),
+                auth=True,
+                database=True,
+                docs=True,
+            ),
+            OnboardingProfile.FULL_SAAS: cls(
+                profile=profile,
+                service_surfaces=frozenset(
+                    {
+                        ServiceSurface.CLI,
+                        ServiceSurface.MCP,
+                        ServiceSurface.HTTP_API,
+                        ServiceSurface.MCP_APPS,
+                    }
+                ),
+                payments=frozenset(
+                    {PaymentStack.STRIPE_BILLING, PaymentStack.STRIPE_METERING}
+                ),
+                auth=True,
+                database=True,
+                docs=True,
+            ),
+            OnboardingProfile.CUSTOM: cls(profile=profile),
+        }
+        return defaults[profile]
+
+    @classmethod
+    def from_mapping(cls, data: dict[str, Any]) -> "OnboardingConfig":
+        """Build config from a YAML/JSON mapping."""
+        profile = _coerce_choice(
+            data.get("profile", OnboardingProfile.CUSTOM.value), OnboardingProfile
+        )
+        base = cls.for_profile(profile)
+
+        surfaces = data.get("service_surfaces", data.get("surfaces"))
+        payments = data.get("payments")
+        examples = data.get("examples")
+
+        return cls(
+            profile=profile,
+            service_surfaces=_coerce_choice_set(
+                surfaces, ServiceSurface, default=base.service_surfaces
+            ),
+            payments=_coerce_choice_set(payments, PaymentStack, default=base.payments),
+            examples=_coerce_choice_set(examples, ExampleApp, default=base.examples),
+            auth=bool(data.get("auth", base.auth)),
+            database=bool(data.get("database", base.database)),
+            docs=bool(data.get("docs", base.docs)),
+        ).expanded()
+
+    def with_overrides(
+        self,
+        *,
+        service_surfaces: frozenset[ServiceSurface] | None = None,
+        payments: frozenset[PaymentStack] | None = None,
+        examples: frozenset[ExampleApp] | None = None,
+        auth: bool | None = None,
+        database: bool | None = None,
+        docs: bool | None = None,
+    ) -> "OnboardingConfig":
+        """Return a copy with explicit CLI overrides applied."""
+        return OnboardingConfig(
+            profile=self.profile,
+            service_surfaces=(
+                self.service_surfaces if service_surfaces is None else service_surfaces
+            ),
+            payments=self.payments if payments is None else payments,
+            examples=self.examples if examples is None else examples,
+            auth=self.auth if auth is None else auth,
+            database=self.database if database is None else database,
+            docs=self.docs if docs is None else docs,
+        ).expanded()
+
+    def expanded(self) -> "OnboardingConfig":
+        """Apply dependency implications from selected stacks to project shape."""
+        surfaces = set(self.service_surfaces)
+        payments = set(self.payments)
+        examples = set(self.examples)
+        auth = self.auth
+        database = self.database
+        docs = self.docs
+
+        if PaymentStack.STRIPE_METERING in payments:
+            payments.add(PaymentStack.STRIPE_BILLING)
+
+        if PaymentStack.STRIPE_BILLING in payments:
+            surfaces.add(ServiceSurface.HTTP_API)
+            auth = True
+            database = True
+
+        if PaymentStack.X402 in payments:
+            # Current agentic payment routes are HTTP API routes protected by scopes.
+            surfaces.add(ServiceSurface.HTTP_API)
+            auth = True
+
+        if ExampleApp.GMAIL_GOOGLE_OAUTH in examples:
+            surfaces.update(
+                {ServiceSurface.HTTP_API, ServiceSurface.MCP, ServiceSurface.MCP_APPS}
+            )
+            auth = True
+            database = True
+
+        if ServiceSurface.MCP_APPS in surfaces:
+            surfaces.add(ServiceSurface.MCP)
+
+        if auth:
+            database = True
+
+        if self.profile is OnboardingProfile.FULL_SAAS:
+            docs = True
+
+        return OnboardingConfig(
+            profile=self.profile,
+            service_surfaces=frozenset(surfaces),
+            payments=frozenset(payments),
+            examples=frozenset(examples),
+            auth=auth,
+            database=database,
+            docs=docs,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a stable, serializable representation."""
+        return {
+            "profile": self.profile.value,
+            "service_surfaces": sorted(item.value for item in self.service_surfaces),
+            "payments": sorted(item.value for item in self.payments),
+            "examples": sorted(item.value for item in self.examples),
+            "auth": self.auth,
+            "database": self.database,
+            "docs": self.docs,
+        }
+
+
+def _choice_values(enum_type: type[StrEnum]) -> str:
+    return ", ".join(item.value for item in enum_type)
+
+
+def _coerce_choice(value: Any, enum_type: type[StrEnum]):
+    if isinstance(value, enum_type):
+        return value
+    try:
+        return enum_type(str(value))
+    except ValueError as exc:
+        allowed = _choice_values(enum_type)
+        raise typer.BadParameter(
+            f"Invalid value {value!r}. Expected one of: {allowed}"
+        ) from exc
+
+
+def _coerce_choice_set(
+    value: Any,
+    enum_type: type[StrEnum],
+    *,
+    default: frozenset | None = None,
+) -> frozenset:
+    """Parse comma-separated CLI values or YAML lists into enum sets."""
+    if value is None:
+        return frozenset() if default is None else default
+    if value == "":
+        return frozenset()
+    if isinstance(value, str):
+        raw_items = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list | tuple | set | frozenset):
+        raw_items = list(value)
+    else:
+        raise typer.BadParameter(
+            f"Expected a comma-separated string or list, got {type(value).__name__}"
+        )
+    return frozenset(_coerce_choice(item, enum_type) for item in raw_items)
+
+
+def load_onboarding_config(path: Path) -> OnboardingConfig:
+    """Load a headless onboarding config from YAML or JSON."""
+    try:
+        text = path.read_text()
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(f"Config file not found: {path}") from exc
+
+    try:
+        if path.suffix == ".json":
+            data = json.loads(text)
+        else:
+            data = yaml.safe_load(text) or {}
+    except (json.JSONDecodeError, yaml.YAMLError) as exc:
+        raise typer.BadParameter(f"Invalid onboarding config: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise typer.BadParameter("Onboarding config must be a mapping.")
+    return OnboardingConfig.from_mapping(data)
+
+
+def plan_onboarding(config: OnboardingConfig) -> list[str]:
+    """Return high-level actions implied by a headless config."""
+    actions = ["Apply deterministic template rename/branding/setup inputs."]
+
+    if ServiceSurface.CLI in config.service_surfaces:
+        actions.append("Keep CLI command surface.")
+    else:
+        actions.append("Prune CLI command surface.")
+
+    if ServiceSurface.MCP in config.service_surfaces:
+        actions.append("Keep MCP tool surface.")
+    else:
+        actions.append("Prune MCP server files and distribution metadata.")
+
+    if ServiceSurface.HTTP_API in config.service_surfaces:
+        actions.append("Keep HTTP API service routes.")
+    else:
+        actions.append("Prune FastAPI server and API-only routes.")
+
+    if ServiceSurface.MCP_APPS in config.service_surfaces:
+        actions.append("Keep MCP App/enhancer surface.")
+    else:
+        actions.append("Prune MCP App example bundles and enhancers.")
+
+    actions.append(
+        "Keep auth infrastructure." if config.auth else "Prune auth infrastructure."
+    )
+    actions.append(
+        "Keep DB infrastructure." if config.database else "Prune DB infrastructure."
+    )
+    actions.append("Keep docs site." if config.docs else "Prune docs site.")
+
+    if config.payments:
+        enabled = ", ".join(sorted(item.value for item in config.payments))
+        actions.append(f"Keep payment stacks: {enabled}.")
+    else:
+        actions.append("Prune all payment stacks.")
+
+    if config.examples:
+        enabled = ", ".join(sorted(item.value for item in config.examples))
+        actions.append(f"Keep example apps/docs: {enabled}.")
+    else:
+        actions.append("Prune example apps/docs, including Gmail/Google OAuth.")
+
+    return actions
+
+
+def _remove_path(path: Path) -> bool:
+    """Remove a file, symlink, or directory if it exists."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+        return True
+    if path.exists() or path.is_symlink():
+        path.unlink()
+        return True
+    return False
+
+
+def _remove_paths(paths: list[str]) -> list[str]:
+    """Remove repo-relative paths and return the removed path list."""
+    removed: list[str] = []
+    for rel_path in paths:
+        if _remove_path(PROJECT_ROOT / rel_path):
+            removed.append(rel_path)
+    return removed
+
+
+def _remove_lines_matching(path: Path, patterns: list[str]) -> bool:
+    """Remove lines containing any pattern from a text file."""
+    if not path.exists():
+        return False
+    lines = path.read_text().splitlines()
+    kept = [line for line in lines if not any(pattern in line for pattern in patterns)]
+    if kept == lines:
+        return False
+    path.write_text("\n".join(kept) + "\n")
+    return True
+
+
+def _rewrite_pyproject_list(
+    text: str,
+    field_name: str,
+    remove_values: set[str],
+) -> str:
+    """Rewrite a single-line TOML string list by removing exact values."""
+    pattern = rf"({field_name}\s*=\s*)\[([^\]]*)\]"
+    match = re.search(pattern, text)
+    if not match:
+        return text
+
+    values = re.findall(r'"([^"]+)"', match.group(2))
+    kept = [value for value in values if value not in remove_values]
+    replacement = f"{match.group(1)}[{', '.join(f'"{value}"' for value in kept)}]"
+    return text[: match.start()] + replacement + text[match.end() :]
+
+
+def _rewrite_pyproject_for_config(config: OnboardingConfig) -> list[str]:
+    """Remove pyproject references for pruned onboarding surfaces."""
+    pyproject = PROJECT_ROOT / "pyproject.toml"
+    text = pyproject.read_text()
+    original = text
+    changes: list[str] = []
+
+    dependency_patterns: list[str] = []
+    packages_to_remove: set[str] = set()
+    scripts_to_remove: list[str] = []
+    vulture_patterns: list[str] = []
+    rules = [
+        (
+            ServiceSurface.MCP not in config.service_surfaces,
+            ['"mcp[cli]'],
+            {"mcp_server"},
+            ["mcp_server:main"],
+            ['"mcp_server/', '"tests/test_mcp_'],
+        ),
+        (
+            ServiceSurface.HTTP_API not in config.service_surfaces,
+            [
+                '"fastapi',
+                '"uvicorn',
+                '"starlette',
+                '"limits',
+                '"redis',
+                '"itsdangerous',
+            ],
+            {"api_server"},
+            ["api_server:main"],
+            ['"api_server/', '"tests/test_api_'],
+        ),
+        (
+            not config.database,
+            ['"sqlalchemy', '"alembic', '"psycopg2-binary'],
+            {"db"},
+            [],
+            ['"db/', '"tests/test_db_'],
+        ),
+        (
+            not config.auth,
+            ['"PyJWT', '"cryptography'],
+            set(),
+            [],
+            [
+                '"tests/test_api_key_auth.py"',
+                '"tests/test_unified_auth.py"',
+                '"tests/test_workos_auth.py"',
+                '"tests/test_scopes.py"',
+            ],
+        ),
+        (
+            PaymentStack.STRIPE_BILLING not in config.payments,
+            ['"stripe'],
+            set(),
+            [],
+            ['"src/payments/', '"tests/test_billing.py"'],
+        ),
+        (
+            PaymentStack.X402 not in config.payments,
+            ['"x402'],
+            set(),
+            [],
+            [
+                '"tests/test_agentic_payments.py"',
+                '"tests/test_agentic_payments_api.py"',
+            ],
+        ),
+    ]
+    for enabled, deps, packages, scripts, vulture in rules:
+        if not enabled:
+            continue
+        dependency_patterns.extend(deps)
+        packages_to_remove.update(packages)
+        scripts_to_remove.extend(scripts)
+        vulture_patterns.extend(vulture)
+
+    for pattern in dependency_patterns:
+        text = re.sub(rf"^\s*{re.escape(pattern)}.*\n", "", text, flags=re.MULTILINE)
+    for script_target in scripts_to_remove:
+        text = re.sub(
+            rf"^.*=\s*\"{re.escape(script_target)}\"\s*\n",
+            "",
+            text,
+            flags=re.MULTILINE,
+        )
+    text = _rewrite_pyproject_list(text, "packages", packages_to_remove)
+    text = _rewrite_pyproject_list(text, "source", packages_to_remove)
+    if ServiceSurface.MCP_APPS not in config.service_surfaces:
+        text = re.sub(r"force-include\s*=\s*\{.*\}", "force-include = {}", text)
+    for pattern in vulture_patterns:
+        text = re.sub(rf"^\s*{re.escape(pattern)}.*\n", "", text, flags=re.MULTILINE)
+
+    if text != original:
+        pyproject.write_text(text)
+        changes.append("pyproject.toml")
+    return changes
+
+
+def _remove_make_target_blocks(targets: set[str]) -> bool:
+    """Remove simple Makefile target blocks."""
+    path = PROJECT_ROOT / "Makefile"
+    lines = path.read_text().splitlines()
+    out: list[str] = []
+    skipping = False
+
+    target_re = re.compile(r"^([a-zA-Z0-9_-]+):")
+    for line in lines:
+        match = target_re.match(line)
+        if match and match.group(1) in targets:
+            skipping = True
+            continue
+        if skipping:
+            if line.startswith("\t") or line.strip() == "":
+                continue
+            skipping = False
+        out.append(line)
+
+    if out == lines:
+        return False
+    path.write_text("\n".join(out) + "\n")
+    return True
+
+
+def _rewrite_importlinter_for_config(config: OnboardingConfig) -> list[str]:
+    """Remove root package references for pruned top-level packages."""
+    removed_modules: list[str] = []
+    if ServiceSurface.MCP not in config.service_surfaces:
+        removed_modules.append("mcp_server")
+    if ServiceSurface.HTTP_API not in config.service_surfaces:
+        removed_modules.append("api_server")
+    if not config.database:
+        removed_modules.append("db")
+    if not removed_modules:
+        return []
+    path = PROJECT_ROOT / ".importlinter"
+    if _remove_lines_matching(path, removed_modules):
+        return [".importlinter"]
+    return []
+
+
+def _rewrite_api_server_for_config(config: OnboardingConfig) -> list[str]:
+    """Remove API route registrations for pruned optional systems."""
+    server_path = PROJECT_ROOT / "api_server" / "server.py"
+    if not server_path.exists():
+        return []
+    text = server_path.read_text()
+    original = text
+
+    if not config.payments:
+        text = text.replace("agentic_payments, ", "")
+        text = text.replace(", agentic_payments", "")
+        text = re.sub(
+            r"^from api_server\.routes\.payments import .*\n",
+            "",
+            text,
+            flags=re.MULTILINE,
+        )
+        text = re.sub(
+            r"^app\.include_router\((agentic_payments|checkout|metering|subscription|webhooks)\.router\)\n",
+            "",
+            text,
+            flags=re.MULTILINE,
+        )
+
+    if ExampleApp.GMAIL_GOOGLE_OAUTH not in config.examples:
+        text = text.replace("google_oauth, ", "")
+        text = text.replace(", google_oauth", "")
+        text = re.sub(
+            r"^app\.include_router\(google_oauth\.router\)\n",
+            "",
+            text,
+            flags=re.MULTILINE,
+        )
+
+    if text == original:
+        return []
+    server_path.write_text(text)
+    return ["api_server/server.py"]
+
+
+def _rewrite_mcp_server_for_config(config: OnboardingConfig) -> list[str]:
+    """Remove API-auth coupling from MCP when the HTTP API is pruned."""
+    path = PROJECT_ROOT / "mcp_server" / "_tool_factory.py"
+    if ServiceSurface.MCP not in config.service_surfaces or not path.exists():
+        return []
+    if ServiceSurface.HTTP_API in config.service_surfaces:
+        return []
+
+    text = path.read_text()
+    original = text
+    replacement = '''def _check_scopes() -> None:
+    """No-op for local MCP profiles without HTTP auth."""
+    return
+
+
+def _check_quota() -> None:
+    """No-op for local MCP profiles without HTTP billing."""
+    return
+
+
+'''
+    text = re.sub(
+        r"def _check_scopes\(\) -> None:.*?\n(?=def make_tool)",
+        replacement,
+        text,
+        flags=re.DOTALL,
+    )
+    if text == original:
+        return []
+    path.write_text(text)
+    return ["mcp_server/_tool_factory.py"]
+
+
+def _pruned_path_groups(config: OnboardingConfig) -> dict[str, list[str]]:
+    """Return prune groups implied by config."""
+    groups: dict[str, list[str]] = {}
+
+    base_rules = [
+        (
+            "mcp",
+            ServiceSurface.MCP not in config.service_surfaces,
+            [
+                "mcp_server",
+                "server.json",
+                "smithery.yaml",
+                ".mcp.json.example",
+                ".github/workflows/mcp-registry-publish.yml",
+            ],
+        ),
+        (
+            "api",
+            ServiceSurface.HTTP_API not in config.service_surfaces,
+            ["api_server", "railway.json"],
+        ),
+        ("db", not config.database, ["db", "alembic.ini"]),
+        (
+            "docs",
+            not config.docs,
+            [
+                "docs",
+                ".github/workflows/docs-lint.yaml",
+                ".github/workflows/jules-find-outdated-docs.yml",
+                ".github/workflows/jules-sync-translations.yml",
+            ],
+        ),
+        (
+            "auth",
+            not config.auth,
+            [
+                "models/auth.py",
+                "common/token_encryption.py",
+                "tests/test_api_key_auth.py",
+                "tests/test_unified_auth.py",
+                "tests/test_workos_auth.py",
+                "tests/test_scopes.py",
+                "tests/test_token_encryption.py",
+            ],
+        ),
+    ]
+    for name, enabled, paths in base_rules:
+        if enabled:
+            groups[name] = paths
+
+    if not config.auth and ServiceSurface.HTTP_API not in config.service_surfaces:
+        groups.setdefault("auth", []).append("src/utils/current_user.py")
+
+    _add_payment_prune_groups(config, groups)
+    _add_example_prune_groups(config, groups)
+    _add_surface_test_prune_groups(config, groups)
+    return groups
+
+
+def _add_payment_prune_groups(
+    config: OnboardingConfig, groups: dict[str, list[str]]
+) -> None:
+    """Add payment-related prune path groups."""
+    if not config.payments:
+        groups["payments"] = [
+            "src/payments",
+            "common/payments.yaml",
+            "common/subscription_config.yaml",
+            "api_server/routes/agentic_payments.py",
+            "api_server/routes/payments",
+            "docs/agentic_payments_plan.md",
+            "docs/agentic_payment_protocols_research.md",
+            "tests/test_agentic_payments.py",
+            "tests/test_agentic_payments_api.py",
+            "tests/test_billing.py",
+            "tests/test_payments_config.py",
+        ]
+    elif PaymentStack.X402 not in config.payments:
+        groups["x402"] = [
+            "src/payments/x402",
+            "tests/test_agentic_payments.py",
+            "tests/test_agentic_payments_api.py",
+            "tests/test_payments_config.py",
+        ]
+
+
+def _add_example_prune_groups(
+    config: OnboardingConfig, groups: dict[str, list[str]]
+) -> None:
+    """Add example-app prune path groups."""
+    if ExampleApp.GMAIL_GOOGLE_OAUTH not in config.examples:
+        groups["gmail_example"] = [
+            "models/gmail.py",
+            "services/gmail_svc.py",
+            "services/gmail_messages_svc.py",
+            "services/gmail_drafts_svc.py",
+            "api_server/routes/google_oauth.py",
+            "tests/test_gmail_services.py",
+            "tests/test_gmail_composer_enhancer.py",
+            "tests/test_gmail_inbox_enhancer.py",
+            "tests/test_google_oauth.py",
+        ]
+        groups["gmail_example"].extend(
+            [
+                "mcp_server/apps/gmail_composer",
+                "mcp_server/apps/gmail_inbox",
+                "mcp_server/app_tools/gmail_composer.py",
+                "mcp_server/app_tools/gmail_inbox.py",
+                "mcp_server/enhancers/gmail_composer.py",
+                "mcp_server/enhancers/gmail_inbox.py",
+            ]
+        )
+
+    if ServiceSurface.MCP_APPS not in config.service_surfaces:
+        groups.setdefault("mcp_apps", []).extend(
+            [
+                "mcp_server/apps",
+                "mcp_server/app_tools/_auth_guard.py",
+                "tests/test_enhancers.py",
+            ]
+        )
+
+
+def _add_surface_test_prune_groups(
+    config: OnboardingConfig, groups: dict[str, list[str]]
+) -> None:
+    """Add transport-specific test prune groups."""
+    if ServiceSurface.HTTP_API not in config.service_surfaces:
+        groups["api_tests"] = [
+            "tests/test_api_server.py",
+            "tests/test_error_handler.py",
+            "tests/test_agentic_payments_api.py",
+            "tests/test_rate_limit.py",
+            "tests/test_health_enhanced.py",
+            "tests/test_mcp_remote.py",
+        ]
+
+    if ServiceSurface.MCP not in config.service_surfaces:
+        groups["mcp_tests"] = [
+            "tests/test_mcp_server.py",
+            "tests/test_mcp_remote.py",
+            "tests/test_enhancers.py",
+        ]
+
+    if not config.database:
+        groups["db_tests"] = ["tests/test_db_models.py"]
+
+
+def apply_headless_onboarding(config: OnboardingConfig) -> list[str]:
+    """Apply deterministic pruning for a resolved headless config."""
+    changed: list[str] = []
+
+    for group, paths in _pruned_path_groups(config).items():
+        removed = _remove_paths(paths)
+        changed.extend(f"{group}: {path}" for path in removed)
+
+    changed.extend(_rewrite_pyproject_for_config(config))
+    changed.extend(_rewrite_importlinter_for_config(config))
+    changed.extend(_rewrite_api_server_for_config(config))
+    changed.extend(_rewrite_mcp_server_for_config(config))
+
+    make_targets: set[str] = set()
+    if ServiceSurface.HTTP_API not in config.service_surfaces:
+        make_targets.add("api")
+    if ServiceSurface.MCP not in config.service_surfaces:
+        make_targets.update({"mcp", "mcp_inspect", "dev_host"})
+    if ServiceSurface.MCP_APPS not in config.service_surfaces:
+        make_targets.add("build_apps")
+    if not config.docs:
+        make_targets.update({"docs", "docs_lint"})
+    if not config.database:
+        make_targets.update({"db_migrate", "db_revision"})
+    if make_targets and _remove_make_target_blocks(make_targets):
+        changed.append("Makefile")
+
+    if not config.payments:
+        _remove_lines_matching(
+            PROJECT_ROOT / ".env.example",
+            ["STRIPE_", "X402_", "LANGFUSE_", "SUPABASE_"],
+        )
+        changed.append(".env.example")
+
+    return changed
+
+
+def print_headless_summary(config: OnboardingConfig, *, dry_run: bool) -> None:
+    """Print the resolved headless config and action plan."""
+    resolved = yaml.safe_dump(config.to_dict(), sort_keys=False).strip()
+    table = Table(title="Headless Onboarding Plan")
+    table.add_column("#", style="cyan", justify="right")
+    table.add_column("Action", style="white")
+    for index, action in enumerate(plan_onboarding(config), 1):
+        table.add_row(str(index), action)
+
+    rprint(
+        Panel(
+            f"[bold]Resolved config[/bold]\n{resolved}\n\n"
+            f"[bold]Mode[/bold]\n{'Dry run' if dry_run else 'Apply'}",
+            title="Onboarding Config",
+            border_style="blue",
+        )
+    )
+    console.print(table)
+
+
+def run_headless_onboarding(config: OnboardingConfig, *, dry_run: bool) -> None:
+    """Run the headless onboarding path.
+
+    The first headless milestone resolves and validates project shape. The
+    destructive pruning operations are intentionally centralized here and will be
+    filled in profile-by-profile instead of scattered through the interactive
+    prompts.
+    """
+    print_headless_summary(config, dry_run=dry_run)
+    if dry_run:
+        return
+    changed = apply_headless_onboarding(config)
+    if changed:
+        rprint("\n[green]Applied onboarding changes:[/green]")
+        for rel_path in changed:
+            rprint(f"  {rel_path}")
+    else:
+        rprint("[yellow]No onboarding changes were needed.[/yellow]")
+
+
 def _run_orchestrator() -> None:
     """Run the full onboarding flow, executing all steps in sequence."""
     project_name = _read_pyproject_name()
@@ -186,10 +987,106 @@ def _print_summary(completed: list[str], skipped: list[str]) -> None:
 
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
-    """Run the full onboarding flow, or use a subcommand for a specific step."""
-    if ctx.invoked_subcommand is None:
+def main(
+    ctx: typer.Context,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help=(f"Headless preset: {_choice_values(OnboardingProfile)}."),
+        ),
+    ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", help="YAML/JSON headless onboarding config."),
+    ] = None,
+    surfaces: Annotated[
+        str | None,
+        typer.Option(
+            "--surfaces",
+            help=f"Comma-separated service surfaces: {_choice_values(ServiceSurface)}.",
+        ),
+    ] = None,
+    payments: Annotated[
+        str | None,
+        typer.Option(
+            "--payments",
+            help=f"Comma-separated payment stacks: {_choice_values(PaymentStack)}.",
+        ),
+    ] = None,
+    examples: Annotated[
+        str | None,
+        typer.Option(
+            "--examples",
+            help=f"Comma-separated example apps/docs: {_choice_values(ExampleApp)}.",
+        ),
+    ] = None,
+    auth: Annotated[
+        bool | None,
+        typer.Option("--auth/--no-auth", help="Keep or prune auth infrastructure."),
+    ] = None,
+    database: Annotated[
+        bool | None,
+        typer.Option(
+            "--database/--no-database", help="Keep or prune DB infrastructure."
+        ),
+    ] = None,
+    docs: Annotated[
+        bool | None,
+        typer.Option("--docs/--no-docs", help="Keep or prune docs site."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run", help="Print the headless plan without changing files."
+        ),
+    ] = False,
+) -> None:
+    """Run the full onboarding flow, a headless profile, or a specific step."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    headless_requested = any(
+        value is not None
+        for value in (
+            profile,
+            config,
+            surfaces,
+            payments,
+            examples,
+            auth,
+            database,
+            docs,
+        )
+    )
+    if not headless_requested:
         _run_orchestrator()
+        return
+
+    resolved = (
+        load_onboarding_config(config)
+        if config is not None
+        else OnboardingConfig.for_profile(
+            _coerce_choice(profile or OnboardingProfile.CUSTOM.value, OnboardingProfile)
+        )
+    )
+    resolved = resolved.with_overrides(
+        service_surfaces=(
+            _coerce_choice_set(surfaces, ServiceSurface)
+            if surfaces is not None
+            else None
+        ),
+        payments=(
+            _coerce_choice_set(payments, PaymentStack) if payments is not None else None
+        ),
+        examples=(
+            _coerce_choice_set(examples, ExampleApp) if examples is not None else None
+        ),
+        auth=auth,
+        database=database,
+        docs=docs,
+    )
+    run_headless_onboarding(resolved, dry_run=dry_run)
 
 
 def _save_cli_branding(emoji: str, primary_color: str, secondary_color: str) -> None:

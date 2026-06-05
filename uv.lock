@@ -1911,6 +1911,7 @@ version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "anyio" },
     { name = "cryptography" },
     { name = "deptry" },
     { name = "dspy" },
@@ -1918,6 +1919,7 @@ dependencies = [
     { name = "google-api-python-client" },
     { name = "google-auth" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "human-id" },
     { name = "import-linter" },
     { name = "itsdangerous" },
@@ -1968,6 +1970,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.15.0" },
+    { name = "anyio", specifier = ">=4.0.0" },
     { name = "cryptography", specifier = ">=44.0.0" },
     { name = "deptry", specifier = ">=0.23.0" },
     { name = "dspy", specifier = ">=3.1.2" },
@@ -1975,6 +1978,7 @@ requires-dist = [
     { name = "google-api-python-client", specifier = ">=2.196.0" },
     { name = "google-auth", specifier = ">=2.53.0" },
     { name = "google-genai", specifier = ">=2.3.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "human-id", specifier = ">=0.2.0" },
     { name = "import-linter", specifier = ">=2.1.1" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
