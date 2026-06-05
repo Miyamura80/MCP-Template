@@ -123,3 +123,85 @@ def test_headless_apply_prunes_cli_only_copy(tmp_path: Path):
     assert result.returncode == 0
     for rel_path in ("api_server", "mcp_server", "db", "docs", "src/payments"):
         assert not (worktree / rel_path).exists()
+
+
+def test_headless_apply_prunes_multiline_force_include(tmp_path: Path):
+    worktree = tmp_path / "repo"
+    ignore = {
+        ".git",
+        ".venv",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".ty",
+        "node_modules",
+        ".next",
+    }
+
+    def _ignore(_dir: str, names: list[str]) -> set[str]:
+        return ignore & set(names)
+
+    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore)
+    pyproject = worktree / "pyproject.toml"
+    text = pyproject.read_text()
+    text = text.replace(
+        'force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html"}',
+        "\n".join(
+            [
+                "force-include = {",
+                '    "mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html",',
+                '    "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html",',
+                "}",
+            ]
+        ),
+    )
+    pyproject.write_text(text)
+
+    result = _run_onboard(
+        "--profile",
+        "cli-only",
+        cwd=worktree,
+        onboard=worktree / "init" / "onboard.py",
+    )
+
+    assert result.returncode == 0
+    rewritten = pyproject.read_text()
+    assert "force-include = {}" in rewritten
+    assert "mcp_server/apps/gmail_composer" not in rewritten
+
+
+def test_headless_apply_prunes_cli_surface_for_custom_profile(tmp_path: Path):
+    worktree = tmp_path / "repo"
+    ignore = {
+        ".git",
+        ".venv",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".ty",
+        "node_modules",
+        ".next",
+    }
+
+    def _ignore(_dir: str, names: list[str]) -> set[str]:
+        return ignore & set(names)
+
+    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore)
+    result = _run_onboard(
+        "--profile",
+        "custom",
+        "--surfaces",
+        "mcp",
+        "--no-auth",
+        "--no-database",
+        "--no-docs",
+        cwd=worktree,
+        onboard=worktree / "init" / "onboard.py",
+    )
+
+    assert result.returncode == 0
+    assert not (worktree / "src/cli").exists()
+    assert not (worktree / "tests/cli").exists()
+    assert (worktree / "mcp_server").exists()
+    pyproject = (worktree / "pyproject.toml").read_text()
+    makefile = (worktree / "Makefile").read_text()
+    assert 'mymcp = "src.cli.app:main_cli"' not in pyproject
+    assert "\ncli:" not in makefile

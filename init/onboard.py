@@ -483,6 +483,13 @@ def _rewrite_pyproject_for_config(config: OnboardingConfig) -> list[str]:
     vulture_patterns: list[str] = []
     rules = [
         (
+            ServiceSurface.CLI not in config.service_surfaces,
+            ['"keyring'],
+            set(),
+            ["src.cli.app:main_cli"],
+            ['"src/cli/', '"tests/cli/'],
+        ),
+        (
             ServiceSurface.MCP not in config.service_surfaces,
             ['"mcp[cli]'],
             {"mcp_server"},
@@ -560,7 +567,7 @@ def _rewrite_pyproject_for_config(config: OnboardingConfig) -> list[str]:
     text = _rewrite_pyproject_list(text, "packages", packages_to_remove)
     text = _rewrite_pyproject_list(text, "source", packages_to_remove)
     if ServiceSurface.MCP_APPS not in config.service_surfaces:
-        text = re.sub(r"force-include\s*=\s*\{.*\}", "force-include = {}", text)
+        text = re.sub(r"force-include\s*=\s*\{[^}]*\}", "force-include = {}", text)
     for pattern in vulture_patterns:
         text = re.sub(rf"^\s*{re.escape(pattern)}.*\n", "", text, flags=re.MULTILINE)
 
@@ -706,6 +713,11 @@ def _pruned_path_groups(config: OnboardingConfig) -> dict[str, list[str]]:
             ServiceSurface.HTTP_API not in config.service_surfaces,
             ["api_server", "railway.json"],
         ),
+        (
+            "cli",
+            ServiceSurface.CLI not in config.service_surfaces,
+            ["src/cli", "tests/cli"],
+        ),
         ("db", not config.database, ["db", "alembic.ini"]),
         (
             "docs",
@@ -849,6 +861,8 @@ def apply_headless_onboarding(config: OnboardingConfig) -> list[str]:
     make_targets: set[str] = set()
     if ServiceSurface.HTTP_API not in config.service_surfaces:
         make_targets.add("api")
+    if ServiceSurface.CLI not in config.service_surfaces:
+        make_targets.add("cli")
     if ServiceSurface.MCP not in config.service_surfaces:
         make_targets.update({"mcp", "mcp_inspect", "dev_host"})
     if ServiceSurface.MCP_APPS not in config.service_surfaces:
