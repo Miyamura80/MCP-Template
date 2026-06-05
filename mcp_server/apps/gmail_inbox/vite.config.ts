@@ -12,7 +12,9 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "happy-dom",
+    // jsdom (not happy-dom) - DOMPurify needs a spec-compliant DOM to sanitize
+    // email HTML; under happy-dom it collapses sanitized markup to bare text.
+    environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
   },
