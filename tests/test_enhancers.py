@@ -236,6 +236,53 @@ class TestEnhancerCrashFallback(TestTemplate):
         finally:
             cleanup()
 
+    def test_context_is_injected_and_not_published_in_schema(self):
+        from mcp.server.fastmcp import FastMCP
+
+        from mcp_server._tool_factory import make_tool
+        from mcp_server.enhancers import _enhancers
+        from services import _registry, service
+
+        class _CtxIn(BaseModel):
+            x: int
+
+        class _CtxOut(BaseModel):
+            value: int
+
+        svc_name = "__context_schema_test"
+
+        @service(
+            name=svc_name,
+            description="test",
+            input_model=_CtxIn,
+            output_model=_CtxOut,
+        )
+        def _svc(input: _CtxIn) -> _CtxOut:
+            return _CtxOut(value=input.x)
+
+        @enhance(svc_name, fallback="headless")
+        async def _enhancer(tool):
+            assert tool.can_show_app is True
+            return tool.call()
+
+        try:
+            from services import get_registry
+
+            entry = next(e for e in get_registry() if e.name == svc_name)
+            test_mcp = FastMCP("test_context_schema")
+            make_tool(test_mcp, entry)
+            tool = test_mcp._tool_manager._tools[svc_name]
+
+            assert tool.context_kwarg == "ctx"
+            assert "ctx" not in tool.parameters.get("properties", {})
+            assert "ctx" not in tool.parameters.get("required", [])
+
+            result = asyncio.run(tool.run({"x": 7}, context=_make_mock_ctx()))
+            assert result.structuredContent == {"value": 7}
+        finally:
+            _registry[:] = [e for e in _registry if e.name != svc_name]
+            _enhancers.pop(svc_name, None)
+
 
 class TestBuildCallToolResultTypeGuard(TestTemplate):
     """_build_call_tool_result must reject non-BaseModel results loudly."""

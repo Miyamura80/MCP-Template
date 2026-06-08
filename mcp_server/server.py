@@ -39,6 +39,15 @@ _MCP_INSTRUCTIONS = (
 mcp: FastMCP = FastMCP("mymcp", instructions=_MCP_INSTRUCTIONS)
 
 _populated: bool = False
+_EXCLUDED_DEFAULT_MCP_SERVICES = frozenset(
+    {
+        "config_get",
+        "config_set",
+        "config_show",
+        "doctor",
+        "greet",
+    }
+)
 
 
 def build_mcp_server() -> FastMCP:
@@ -56,6 +65,9 @@ def build_mcp_server() -> FastMCP:
     discover_app_tools()
 
     for entry in get_registry():
+        if entry.name in _EXCLUDED_DEFAULT_MCP_SERVICES:
+            log.debug("Skipping default MCP registration for service {!r}", entry.name)
+            continue
         make_tool(mcp, entry)
     _register_app_resources(mcp)
 
