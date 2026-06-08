@@ -7,6 +7,21 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ONBOARD = PROJECT_ROOT / "init" / "onboard.py"
+_COPYTREE_IGNORE_NAMES = {
+    ".git",
+    ".venv",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".ty",
+    "node_modules",
+    ".next",
+}
+
+
+def _ignore_worktree_copy(_dir: str, names: list[str]) -> set[str]:
+    ignored = _COPYTREE_IGNORE_NAMES & set(names)
+    ignored.update(name for name in names if name.startswith(".coverage"))
+    return ignored
 
 
 def _run_onboard(
@@ -99,20 +114,7 @@ def test_load_onboarding_config_from_yaml(tmp_path: Path):
 
 def test_headless_apply_prunes_cli_only_copy(tmp_path: Path):
     worktree = tmp_path / "repo"
-    ignore = {
-        ".git",
-        ".venv",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".ty",
-        "node_modules",
-        ".next",
-    }
-
-    def _ignore(_dir: str, names: list[str]) -> set[str]:
-        return ignore & set(names)
-
-    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore)
+    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore_worktree_copy)
     result = _run_onboard(
         "--profile",
         "cli-only",
@@ -127,20 +129,7 @@ def test_headless_apply_prunes_cli_only_copy(tmp_path: Path):
 
 def test_headless_apply_prunes_multiline_force_include(tmp_path: Path):
     worktree = tmp_path / "repo"
-    ignore = {
-        ".git",
-        ".venv",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".ty",
-        "node_modules",
-        ".next",
-    }
-
-    def _ignore(_dir: str, names: list[str]) -> set[str]:
-        return ignore & set(names)
-
-    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore)
+    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore_worktree_copy)
     pyproject = worktree / "pyproject.toml"
     text = pyproject.read_text()
     text = text.replace(
@@ -171,20 +160,7 @@ def test_headless_apply_prunes_multiline_force_include(tmp_path: Path):
 
 def test_headless_apply_prunes_cli_surface_for_custom_profile(tmp_path: Path):
     worktree = tmp_path / "repo"
-    ignore = {
-        ".git",
-        ".venv",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".ty",
-        "node_modules",
-        ".next",
-    }
-
-    def _ignore(_dir: str, names: list[str]) -> set[str]:
-        return ignore & set(names)
-
-    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore)
+    shutil.copytree(PROJECT_ROOT, worktree, ignore=_ignore_worktree_copy)
     result = _run_onboard(
         "--profile",
         "custom",
