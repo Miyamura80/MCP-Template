@@ -208,14 +208,9 @@ omit = [
 show_missing = true
 
 [tool.uv]
-# Quarantine freshly-published packages for 7 days before they're eligible for
-# resolution. This is a supply-chain defense: most malicious package releases
-# (typosquats, hijacked maintainer accounts) are caught and yanked within days,
-# so a rolling exclusion window blunts the blast radius of a compromised upload.
-# Declared here (not just in a developer's global ~/.config/uv) so every
-# contributor and CI run applies the identical policy and produces an identical
-# lockfile - otherwise uv stamps a per-machine `[options]` block into uv.lock and
-# the pre-commit hook reports spurious drift.
+# 7-day quarantine on freshly-published packages (supply-chain defense). Declared
+# here, not just in a dev's global ~/.config/uv, so every contributor and CI run
+# produces an identical uv.lock instead of spurious per-machine drift.
 exclude-newer = "7 days"
 
 [dependency-groups]
