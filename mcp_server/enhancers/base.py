@@ -20,6 +20,18 @@ from mcp.types import (
 from pydantic import BaseModel
 
 
+def build_app_meta(resource_uri: str) -> dict:
+    """Build the ``_meta`` dict declaring an MCP App resource.
+
+    Used both on tool definitions (``tools/list``) and call results. Dual-keys
+    the nested spec form and the deprecated flat form for legacy host compat.
+    """
+    return {
+        "ui": {"resourceUri": resource_uri},
+        "ui/resourceUri": resource_uri,
+    }
+
+
 class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
     """Wrapper around a pure service, passed to enhancer functions.
 
@@ -108,13 +120,10 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
         self.app_resource_uri = resource_uri
 
     def app_meta(self) -> dict | None:
-        """Build the _meta dict for app attachment. Dual-keys for legacy host compat."""
+        """Build the _meta dict for app attachment, or None if no app was sent."""
         if self.app_resource_uri is None:
             return None
-        return {
-            "ui": {"resourceUri": self.app_resource_uri},
-            "ui/resourceUri": self.app_resource_uri,
-        }
+        return build_app_meta(self.app_resource_uri)
 
 
 def _annotations(audience: list[Role] | None):

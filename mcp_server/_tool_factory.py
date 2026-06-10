@@ -21,7 +21,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel
 
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
-from mcp_server.enhancers.base import EnhancedTool
+from mcp_server.enhancers.base import EnhancedTool, build_app_meta
 from services import ServiceEntry
 
 
@@ -135,7 +135,14 @@ def _make_enhanced_tool(
     _apply_tool_signature(
         tool_fn, entry, return_annotation=CallToolResult, include_context=True
     )
-    mcp.tool(name=entry.name, description=entry.description)(tool_fn)
+    # Declare the app's ui:// resource on the tool definition so hosts see it
+    # in tools/list (per MCP Apps spec) and not only on the call result.
+    meta = (
+        build_app_meta(enhancer_entry.app_uri)
+        if enhancer_entry.app_uri is not None
+        else None
+    )
+    mcp.tool(name=entry.name, description=entry.description, meta=meta)(tool_fn)
     _patch_output_schema(mcp, entry.name, output_model)
 
 

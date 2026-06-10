@@ -21,7 +21,7 @@ from services.gmail_drafts_svc import GmailReplyInput
 INBOX_URI = "ui://mymcp/gmail_inbox"
 
 
-@enhance("gmail_compose", fallback="headless")
+@enhance("gmail_compose", fallback="headless", app_uri=INBOX_URI)
 async def gmail_compose_enhanced(
     tool: EnhancedTool[GmailComposeInput, GmailDraft],
 ) -> GmailDraft:
@@ -31,7 +31,7 @@ async def gmail_compose_enhanced(
     return result
 
 
-@enhance("gmail_update_draft", fallback="headless")
+@enhance("gmail_update_draft", fallback="headless", app_uri=INBOX_URI)
 async def gmail_update_draft_enhanced(
     tool: EnhancedTool[GmailUpdateDraftInput, GmailDraft],
 ) -> GmailDraft:
@@ -41,7 +41,7 @@ async def gmail_update_draft_enhanced(
     return result
 
 
-@enhance("gmail_reply_to_thread", fallback="headless")
+@enhance("gmail_reply_to_thread", fallback="headless", app_uri=INBOX_URI)
 async def gmail_reply_to_thread_enhanced(
     tool: EnhancedTool[GmailReplyInput, GmailDraft],
 ) -> GmailDraft:
