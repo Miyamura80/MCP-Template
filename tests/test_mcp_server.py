@@ -1,7 +1,6 @@
 """Tests for MCP server tool registration."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
 
 from tests.test_template import TestTemplate
 
@@ -14,6 +13,8 @@ class TestMCPServer(TestTemplate):
 
     def test_all_services_registered_as_tools(self):
         # Importing server.py triggers service module imports + registration.
+        # Some services are deliberately not exposed through the default MCP
+        # surface, but they remain available to CLI/API transports.
         import mcp_server.server  # noqa: F401
         from services import get_registry
 
@@ -34,20 +35,30 @@ class TestMCPServer(TestTemplate):
             assert entry.func is not None
             assert entry.description
 
+    def test_default_mcp_surface_excludes_admin_and_demo_tools(self):
+        from mcp_server.server import mcp
+
+        tools = mcp._tool_manager._tools
+        for tool_name in ("config_get", "config_set", "config_show", "doctor", "greet"):
+            assert tool_name not in tools
+
     def test_enhanced_tools_publish_output_schema(self):
         from mcp_server.server import mcp
 
-        for tool_name in ("doctor", "config_show", "greet"):
+        for tool_name in ("gmail_compose", "gmail_curate_inbox", "gmail_get_thread"):
             tool = mcp._tool_manager._tools.get(tool_name)
             assert tool is not None, f"{tool_name} not registered"
             assert tool.output_schema is not None, f"{tool_name} missing outputSchema"
 
+    def test_enhanced_tools_do_not_publish_context_as_input(self):
+        from mcp_server.server import mcp
 
-def _mock_ctx():
-    ctx = MagicMock()
-    ctx.session.check_client_capability = MagicMock(return_value=True)
-    ctx.elicit = AsyncMock()
-    return ctx
+        for tool_name in ("gmail_compose", "gmail_curate_inbox", "gmail_get_thread"):
+            tool = mcp._tool_manager._tools.get(tool_name)
+            assert tool is not None, f"{tool_name} not registered"
+            assert tool.context_kwarg == "ctx"
+            assert "ctx" not in tool.parameters.get("properties", {})
+            assert "ctx" not in tool.parameters.get("required", [])
 
 
 class TestMCPServerIntegration(TestTemplate):
@@ -68,22 +79,9 @@ class TestMCPServerIntegration(TestTemplate):
             text = str(contents[0].content)
             assert text.lstrip().lower().startswith("<!doctype html>")
 
-    def test_config_show_attaches_image_content_block(self):
+    def test_model_visible_focus_tool_returns_pydantic_model_directly(self):
         from mcp_server.server import mcp
 
-        tool_fn = mcp._tool_manager._tools["config_show"].fn
-        result = asyncio.run(tool_fn(ctx=_mock_ctx()))
-
-        block_types = [c.type for c in result.content]
-        assert "image" in block_types
-        image_block = next(c for c in result.content if c.type == "image")
-        assert image_block.mimeType == "image/png"
-
-    def test_headless_greet_returns_pydantic_model_directly(self):
-        from mcp_server.server import mcp
-        from models.greet import GreetResult
-
-        tool_fn = mcp._tool_manager._tools["greet"].fn
-        result = tool_fn(name="World", shout=False, times=1)
-        assert isinstance(result, GreetResult)
-        assert result.message == "Hello, World!"
+        tool_fn = mcp._tool_manager._tools["gmail_get_focused_email"].fn
+        result = tool_fn(user_id="test-user")
+        assert result.focused is False

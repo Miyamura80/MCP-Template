@@ -184,6 +184,8 @@ def _apply_tool_signature(
 
     input_sig = inspect.signature(entry.input_model)
     annotations: dict = {k: v.annotation for k, v in input_sig.parameters.items()}
+    if include_context:
+        annotations["ctx"] = Context
     annotations["return"] = return_annotation
     tool_fn.__annotations__ = annotations
 
