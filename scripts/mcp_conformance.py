@@ -20,6 +20,7 @@ Usage::
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -29,9 +30,20 @@ import urllib.request
 from pathlib import Path
 
 HOST = "127.0.0.1"
-PORT = int(os.environ.get("MCP_CONFORMANCE_PORT", "8765"))
+
+
+def _free_port() -> int:
+    """Pick an OS-assigned free TCP port to avoid collisions across runs."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((HOST, 0))
+        return sock.getsockname()[1]
+
+
+# An explicit port wins; otherwise grab a free one so concurrent runs don't clash.
+PORT = int(os.environ.get("MCP_CONFORMANCE_PORT") or _free_port())
 MCPJAM_VERSION = os.environ.get("MCPJAM_VERSION", "3.4.0")
 READY_TIMEOUT_S = int(os.environ.get("MCP_CONFORMANCE_READY_TIMEOUT", "90"))
+CMD_TIMEOUT_S = int(os.environ.get("MCP_CONFORMANCE_CMD_TIMEOUT", "300"))
 RESULTS_DIR = Path(
     os.environ.get("MCP_CONFORMANCE_RESULTS_DIR", "mcp_conformance_results")
 )
@@ -43,8 +55,12 @@ ALLOWED_FAILURES: set[str] = set()
 
 
 def _configure_db_env() -> None:
-    """Point the app at a throwaway file SQLite shared by seed + server."""
-    db_path = Path(tempfile.gettempdir()) / "mcp_conformance.db"
+    """Point the app at a throwaway file SQLite shared by seed + server.
+
+    The filename is PID-scoped so concurrent conformance runs on one host
+    don't clobber each other's database.
+    """
+    db_path = Path(tempfile.gettempdir()) / f"mcp_conformance_{os.getpid()}.db"
     if db_path.exists():
         db_path.unlink()
     os.environ["BACKEND_DB_URI"] = f"sqlite:///{db_path}"
@@ -117,7 +133,14 @@ def _run_conformance(suite: str, api_key: str) -> dict:
         "--header",
         f"X-API-KEY: {api_key}",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=CMD_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"{suite}: conformance timed out after {CMD_TIMEOUT_S}s"
+        ) from exc
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIR / f"{suite}-conformance.json").write_text(proc.stdout)
     try:
