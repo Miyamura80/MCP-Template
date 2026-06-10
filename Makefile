@@ -133,6 +133,12 @@ dev_host: ## Run upstream @modelcontextprotocol/ext-apps basic-host for manual s
 	@if [ ! -d /tmp/ext-apps ]; then git clone --depth 1 https://github.com/modelcontextprotocol/ext-apps.git /tmp/ext-apps; fi
 	@cd /tmp/ext-apps/examples/basic-host && bun install --silent && bun start
 
+mcp_conformance: check_uv ## Run MCPJam apps + protocol conformance against the local /mcp server (requires node)
+	@command -v npx >/dev/null 2>&1 || { echo "$(RED)npx (Node.js) is not installed. Install from https://nodejs.org$(RESET)"; exit 1; }
+	@echo "$(YELLOW)🔌 Running MCPJam conformance...$(RESET)"
+	@uv run python scripts/mcp_conformance.py
+	@echo "$(GREEN)✅ MCP conformance passed.$(RESET)"
+
 ralph: check_jq ## Run Ralph agent loop
 	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
 	@echo "$(RED)⚠️  It is HIGHLY RECOMMENDED to run Ralph in a sandboxed environment.$(RESET)"
