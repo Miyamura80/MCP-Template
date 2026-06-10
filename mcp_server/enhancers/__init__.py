@@ -28,22 +28,33 @@ EnhancerFn = Callable[[EnhancedTool[Any, Any]], Awaitable[BaseModel]]
 class EnhancerEntry:
     fn: EnhancerFn
     fallback: FallbackMode
+    app_uri: str | None = None
 
 
 _enhancers: dict[str, EnhancerEntry] = {}
 
 
-def enhance(service_name: str, fallback: FallbackMode = "headless"):
+def enhance(
+    service_name: str,
+    fallback: FallbackMode = "headless",
+    app_uri: str | None = None,
+):
     """Register an MCP-specific enhancement for a pure service.
 
     fallback="headless" - if the enhancer raises, fall back to the pure service result.
     fallback="error" - propagate the exception (FastMCP turns it into isError).
+    app_uri - the ``ui://`` resource this tool renders. Declared in the tool's
+    ``_meta.ui.resourceUri`` in ``tools/list`` so hosts can pre-fetch the app
+    HTML and apply CSP before the first call. Enhancers that call
+    ``tool.send_app(...)`` must declare the same URI here.
     """
 
     def decorator(fn: EnhancerFn) -> EnhancerFn:
         if service_name in _enhancers:
             raise ValueError(f"Duplicate enhancer registration for {service_name!r}")
-        _enhancers[service_name] = EnhancerEntry(fn=fn, fallback=fallback)
+        _enhancers[service_name] = EnhancerEntry(
+            fn=fn, fallback=fallback, app_uri=app_uri
+        )
         return fn
 
     return decorator

@@ -50,6 +50,36 @@ class TestMCPServer(TestTemplate):
             assert tool is not None, f"{tool_name} not registered"
             assert tool.output_schema is not None, f"{tool_name} missing outputSchema"
 
+    def test_app_rendering_tools_declare_ui_resource_in_tools_list(self):
+        # Per the MCP Apps spec, tools that render an app must advertise the
+        # ui:// resource in their tools/list _meta so hosts can pre-fetch the
+        # HTML and apply CSP before the first call (found by MCPJam's
+        # `apps conformance` check).
+        import asyncio
+
+        from mcp_server.server import mcp
+
+        app_tools = {
+            "gmail_compose",
+            "gmail_update_draft",
+            "gmail_reply_to_thread",
+            "gmail_curate_inbox",
+            "gmail_get_thread",
+        }
+        tools = {t.name: t for t in asyncio.run(mcp.list_tools())}
+        for name in app_tools:
+            meta = tools[name].meta
+            assert meta is not None, f"{name} missing _meta"
+            uri = meta["ui"]["resourceUri"]
+            assert uri.startswith("ui://mymcp/"), f"{name} bad resourceUri: {uri}"
+            # Deprecated flat key kept for legacy host compat.
+            assert meta["ui/resourceUri"] == uri
+
+        # Headless tools must not grow UI metadata.
+        assert tools["gmail_send"].meta is None
+        # App-only companion tools keep visibility-only metadata.
+        assert tools["gmail_inbox.refresh"].meta == {"ui": {"visibility": ["app"]}}
+
     def test_enhanced_tools_do_not_publish_context_as_input(self):
         from mcp_server.server import mcp
 

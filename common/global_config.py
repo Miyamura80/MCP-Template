@@ -317,8 +317,10 @@ class Config(BaseSettings):
 
 
 # Load .env files before creating the config instance
-# Load .env file first, to get DEV_ENV if it's defined there
-load_dotenv(dotenv_path=root_dir / ".env", override=True)
+# Load .env file first, to get DEV_ENV if it's defined there.
+# override=False so real environment variables keep priority over .env,
+# matching the source order documented in settings_customise_sources.
+load_dotenv(dotenv_path=root_dir / ".env", override=False)
 
 # Now, check DEV_ENV and load .prod.env if it's 'prod', overriding .env
 if os.getenv("DEV_ENV") == "prod":

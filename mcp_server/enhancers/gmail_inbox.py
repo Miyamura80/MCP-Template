@@ -17,7 +17,7 @@ from models.gmail import (
 APP_URI = "ui://mymcp/gmail_inbox"
 
 
-@enhance("gmail_curate_inbox", fallback="headless")
+@enhance("gmail_curate_inbox", fallback="headless", app_uri=APP_URI)
 async def gmail_curate_inbox_enhanced(
     tool: EnhancedTool[GmailCurateInboxInput, GmailCurateInboxResult],
 ) -> GmailCurateInboxResult:
@@ -27,7 +27,7 @@ async def gmail_curate_inbox_enhanced(
     return result
 
 
-@enhance("gmail_get_thread", fallback="headless")
+@enhance("gmail_get_thread", fallback="headless", app_uri=APP_URI)
 async def gmail_get_thread_enhanced(
     tool: EnhancedTool[GmailGetThreadInput, GmailThread],
 ) -> GmailThread:
