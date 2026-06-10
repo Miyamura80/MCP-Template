@@ -5,7 +5,7 @@
 # Wednesday at 2pm UTC and on manual dispatch. Opens a PR with
 # any removals.
 #
-# Jules reads UNNECESSARY_CODE_GUIDELINE.md before making changes.
+# Jules reads manual_docs/jules/UNNECESSARY_CODE_GUIDELINE.md before making changes.
 #
 # Required secrets: JULES_API_KEY
 # ─────────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ jobs:
           REPO_NAME="${REPO##*/}"
           SOURCE="sources/github/${OWNER}/${REPO_NAME}"
 
-          PROMPT="IMPORTANT: Before you begin, read the file UNNECESSARY_CODE_GUIDELINE.md in the root of this repository.
+          PROMPT="IMPORTANT: Before you begin, read the file manual_docs/jules/UNNECESSARY_CODE_GUIDELINE.md in this repository.
           It contains the conservative rules and protected patterns you must follow strictly when identifying
           and removing unnecessary code.
 
@@ -75,7 +75,7 @@ jobs:
           - Deprecated compatibility shims that are no longer needed
 
           Strict rules - you MUST follow every one:
-          1. Follow ALL rules in UNNECESSARY_CODE_GUIDELINE.md without exception.
+          1. Follow ALL rules in manual_docs/jules/UNNECESSARY_CODE_GUIDELINE.md without exception.
           2. Only remove code you are confident is unused. If in doubt, leave it.
           3. Do NOT remove any test files, test functions, fixtures, or conftest code.
           4. Do NOT remove any code referenced in __init__.py exports or __all__ lists.

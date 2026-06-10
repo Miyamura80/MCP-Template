@@ -20,9 +20,9 @@ def _get_cli_name() -> str:
     """Derive CLI name from package console_scripts entry point."""
     eps = importlib.metadata.entry_points(group="console_scripts")
     for ep in eps:
-        if ep.dist and ep.dist.name == "miyamura80-cli-template":
+        if ep.dist and ep.dist.name == "mcp-template":
             return ep.name
-    return "mycli"
+    return "mymcp"
 
 
 _SERVICE_NAME = _get_cli_name()

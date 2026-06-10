@@ -223,6 +223,13 @@ class Config(BaseSettings):
     # Redis
     REDIS_URL: str | None = None
 
+    # Google OAuth (Gmail integration) - fill in real values in .env
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
+    # Base64-url Fernet key used to encrypt stored refresh tokens
+    GOOGLE_TOKEN_ENC_KEY: str | None = None
+
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(
         default_factory=lambda: os.getenv("GITHUB_ACTIONS") != "true"
@@ -310,8 +317,10 @@ class Config(BaseSettings):
 
 
 # Load .env files before creating the config instance
-# Load .env file first, to get DEV_ENV if it's defined there
-load_dotenv(dotenv_path=root_dir / ".env", override=True)
+# Load .env file first, to get DEV_ENV if it's defined there.
+# override=False so real environment variables keep priority over .env,
+# matching the source order documented in settings_customise_sources.
+load_dotenv(dotenv_path=root_dir / ".env", override=False)
 
 # Now, check DEV_ENV and load .prod.env if it's 'prod', overriding .env
 if os.getenv("DEV_ENV") == "prod":
@@ -331,4 +340,4 @@ if is_local:
 
 # Create a singleton instance
 # Note: Config() loads all required fields from YAML and .env files via custom settings sources
-global_config = Config()  # type: ignore[call-arg]
+global_config = Config()  # ty: ignore[missing-argument]

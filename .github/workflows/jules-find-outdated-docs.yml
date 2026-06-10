@@ -5,7 +5,7 @@
 # Wednesday at 4pm UTC and on manual dispatch. Opens a PR with
 # any corrections.
 #
-# Jules reads OUTDATED_DOCUMENTATION_GUIDELINE.md before making changes.
+# Jules reads manual_docs/jules/OUTDATED_DOCUMENTATION_GUIDELINE.md before making changes.
 #
 # Required secrets: JULES_API_KEY
 # ─────────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ jobs:
           REPO_NAME="${REPO##*/}"
           SOURCE="sources/github/${OWNER}/${REPO_NAME}"
 
-          PROMPT="IMPORTANT: Before you begin, read the file OUTDATED_DOCUMENTATION_GUIDELINE.md in the root of this repository.
+          PROMPT="IMPORTANT: Before you begin, read the file manual_docs/jules/OUTDATED_DOCUMENTATION_GUIDELINE.md in this repository.
           It contains the rules and validation requirements you must follow strictly when detecting
           and fixing outdated documentation.
 
@@ -81,7 +81,7 @@ jobs:
           - Install/setup instructions that skip required steps or list wrong commands
 
           Strict rules - you MUST follow every one:
-          1. Follow ALL rules in OUTDATED_DOCUMENTATION_GUIDELINE.md without exception.
+          1. Follow ALL rules in manual_docs/jules/OUTDATED_DOCUMENTATION_GUIDELINE.md without exception.
           2. Only fix documentation that is verifiably incorrect by cross-referencing the actual code.
           3. Do NOT rewrite documentation style, tone, or structure - only fix factual inaccuracies.
           4. Do NOT add new documentation sections - only update existing content.

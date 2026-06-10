@@ -1,4 +1,4 @@
-"""Auto-discovery of user commands in the commands/ package."""
+"""Auto-discovery of user commands in the src/cli/commands/ package."""
 
 import importlib
 import pkgutil
@@ -9,7 +9,7 @@ from loguru import logger as log
 
 
 def discover_commands(app: typer.Typer) -> None:
-    """Scan commands/ and register subcommands on the Typer app.
+    """Scan src/cli/commands/ and register subcommands on the Typer app.
 
     - If a module has ``app: typer.Typer`` → added as a sub-app (subcommand group).
     - If a module has ``main()`` callable → registered as a single command.
@@ -22,7 +22,7 @@ def discover_commands(app: typer.Typer) -> None:
         if module_info.name.startswith("_"):
             continue
 
-        module = importlib.import_module(f"commands.{module_info.name}")
+        module = importlib.import_module(f"src.cli.commands.{module_info.name}")  # noqa: TID251 - plugin auto-discovery; see CLAUDE.md "Adding a new feature"
         command_name = module_info.name.replace("_", "-")
 
         if hasattr(module, "app") and isinstance(module.app, typer.Typer):
@@ -32,5 +32,5 @@ def discover_commands(app: typer.Typer) -> None:
             app.command(name=command_name)(module.main)
         else:
             log.warning(
-                f"commands/{module_info.name}.py has no 'app' (Typer) or 'main()' - skipped"
+                f"src/cli/commands/{module_info.name}.py has no 'app' (Typer) or 'main()' - skipped"
             )

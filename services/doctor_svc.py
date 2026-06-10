@@ -82,7 +82,9 @@ def _check_config_parseable() -> CheckResultModel:
             status="pass",
             message="global_config loaded successfully",
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
+        # Doctor diagnostic: report any config-load failure (yaml, validation,
+        # missing secrets, import errors) as a single "fail" result for the user.
         return CheckResultModel(
             name="Config parseable",
             status="fail",

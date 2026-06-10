@@ -32,7 +32,7 @@ _FORMAT_MAP = {
 }
 
 app = typer.Typer(
-    name="mycli",
+    name="mymcp",
     help="CLI Template - a batteries-included Python CLI.",
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -48,10 +48,10 @@ def _load_cli_branding() -> tuple[str, str]:
 
 def _version_callback(value: bool) -> None:
     if value:
-        version = importlib.metadata.version("miyamura80-cli-template")
+        version = importlib.metadata.version("mcp-template")
         emoji, _ = _load_cli_branding()
         prefix = f"{emoji} " if emoji else ""
-        typer.echo(f"{prefix}mycli {version}")
+        typer.echo(f"{prefix}mymcp {version}")
         raise typer.Exit()
 
 
@@ -146,13 +146,13 @@ def _register_builtin_commands() -> None:
 
 
 def _register_user_commands() -> None:
-    """Discover and register user commands from commands/ (idempotent)."""
+    """Discover and register user commands from src/cli/commands/ (idempotent)."""
     global _user_commands_registered  # noqa: PLW0603
     if _user_commands_registered:
         return
     _user_commands_registered = True
 
-    from commands import discover_commands
+    from src.cli.commands import discover_commands
 
     discover_commands(app)
 
@@ -183,7 +183,7 @@ def main_cli() -> None:
     _register_builtin_commands()
     _register_user_commands()
 
-    version = importlib.metadata.version("miyamura80-cli-template")
+    version = importlib.metadata.version("mcp-template")
     emoji, primary = _load_cli_branding()
     prefix = f"{emoji} " if emoji else ""
     app.info.help = (
@@ -199,7 +199,8 @@ def main_cli() -> None:
     except SystemExit as exc:
         success = exc.code in (None, 0)
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Top-level CLI boundary: record telemetry for any failure mode then re-raise.
         success = False
         raise
     finally:

@@ -1,5 +1,5 @@
 [project]
-name = "miyamura80-cli-template"
+name = "mcp-template"
 version = "0.1.1"
 description = "🪛 CLI tool template (python) with batteries included. Auto-install, updates, linting, dead code analysis, and a whole lot more."
 authors = [
@@ -33,7 +33,7 @@ dependencies = [
     "litellm>=1.59.8,!=1.82.*",
     "tenacity>=9.0.0",
     "pillow>=12.1.0",
-    "google-genai>=1.60.0",
+    "google-genai>=2.3.0",
     "ty>=0.0.14",
     "pytest-env>=1.2.0",
     "pydantic-settings>=2.7.1",
@@ -47,34 +47,44 @@ dependencies = [
     "numpy>=2.2.2",
     "typer",
     "questionary",
-    "rich>=14.3.1",
+    "rich>=15.0.0",
     "packaging>=24.0",
     "keyring>=25.0.0",
-    "mcp[cli]>=1.0.0",
+    "mcp[cli]>=1.10.0,<2.0.0",
     "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "anyio>=4.0.0",
     "uvicorn[standard]>=0.34.0",
     "sqlalchemy>=2.0.0",
     "alembic>=1.15.0",
     "PyJWT[crypto]>=2.10.0",
     "cryptography>=44.0.0",
     "itsdangerous>=2.2.0",
-    "stripe>=11.0.0",
+    "stripe>=15.2.0",
     "limits>=5.8.0",
     "redis>=5.0.0",
-    "x402[fastapi,httpx]>=2.5.0",
+    "x402[fastapi,httpx]>=2.12.0",
+    "starlette>=0.40.0",
+    "google-api-python-client>=2.196.0",
+    "google-auth>=2.53.0",
+    "psycopg2-binary>=2.9.12",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
 
 [project.urls]
-Homepage = "https://github.com/Miyamura80/CLI-Template"
-Repository = "https://github.com/Miyamura80/CLI-Template"
-Issues = "https://github.com/Miyamura80/CLI-Template/issues"
+Homepage = "https://github.com/Miyamura80/MCP-Template"
+Repository = "https://github.com/Miyamura80/MCP-Template"
+Issues = "https://github.com/Miyamura80/MCP-Template/issues"
 
 [project.scripts]
-mycli = "cli:main_cli"
-mycli-mcp = "mcp_server:main"
-mycli-api = "api_server:main"
+mymcp = "src.cli.app:main_cli"
+# Primary remote-MCP entrypoint: HTTP API + MCP (streamable HTTP) on one port.
+mymcp-serve = "api_server:main"
+# Legacy stdio transport, kept for local Claude Desktop / dev only.
+mymcp-mcp = "mcp_server:main"
+# Deprecated alias for mymcp-serve; prefer the new name.
+mymcp-api = "api_server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -84,19 +94,24 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src", "common", "utils", "commands", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"cli.py" = "cli.py"}
+packages = ["src", "common", "utils", "services", "models", "mcp_server", "db", "api_server"]
+force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html"}
 
 [tool.ruff]
 line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "C901", "FIX"]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "C901", "FIX", "BLE", "TID"]
 ignore = ["E501", "UP015", "B008"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"importlib.import_module".msg = "Dynamic imports are banned. If genuinely needed (e.g. plugin auto-discovery), add `# noqa: TID251` with a one-line justification."
+"importlib.reload".msg = "importlib.reload is for narrow test-fixture use only. Add `# noqa: TID251` with justification."
+"importlib.util.spec_from_file_location".msg = "Loading modules from arbitrary file paths is banned. Add `# noqa: TID251` with justification."
 
 [tool.ty]
 
@@ -114,6 +129,8 @@ python-version = "3.12"
 
 [tool.deptry]
 ignore = ["DEP002"]
+extend_exclude = ["scripts/sync_agent_config.py"]
+package_module_name_map = { "PyJWT" = "jwt", "google-api-python-client" = "googleapiclient", "google-auth" = "google", "google-genai" = "google", "openfeature-sdk" = "openfeature", "pillow" = "PIL", "pyyaml" = "yaml", "python-dotenv" = "dotenv" }
 
 [tool.vulture]
 exclude = [
@@ -141,6 +158,7 @@ exclude = [
     "common/",
     "src/utils/logging_config.py",
     "src/utils/context.py",
+    "src/utils/current_user.py",
     "src/utils/interactive.py",
     "src/utils/progress.py",
     "src/utils/output.py",
@@ -148,10 +166,8 @@ exclude = [
     "src/utils/theme.py",
     "tests/conftest.py",
     "init/",
-    "onboard.py",
-    "commands/",
+    "init/onboard.py",
     "src/cli/",
-    "cli.py",
     "templates/",
     "services/",
     "models/",
@@ -161,19 +177,26 @@ exclude = [
     "src/payments/",
     "tests/test_agentic_payments.py",
     "tests/test_agentic_payments_api.py",
+    "tests/test_enhancers.py",
+    "tests/test_mcp_server.py",
+    "tests/test_mcp_remote.py",
+    "tests/test_gmail_services.py",
 ]
 
 [tool.file_length]
 max_lines = 500
 exclude = [
-    "onboard.py",
+    "init/onboard.py",
     "api_server/routes/payments/webhooks.py",
     "api_server/middleware/rate_limit.py",
+    "tests/test_gmail_services.py",
+    "services/gmail_messages_svc.py",
+    "services/gmail_svc.py",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["src", "common", "utils", "commands", "services", "models", "db", "api_server"]
+source = ["src", "common", "utils", "services", "models", "db", "api_server"]
 omit = [
     "tests/*",
     "docs/*",

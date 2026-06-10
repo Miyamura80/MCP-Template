@@ -2,7 +2,7 @@
 
 from typer.testing import CliRunner
 
-from cli import _register_builtin_commands, _register_user_commands, app
+from src.cli.app import _register_builtin_commands, _register_user_commands, app
 from tests.test_template import TestTemplate
 
 runner = CliRunner()
@@ -16,7 +16,7 @@ class TestCLI(TestTemplate):
     def test_version(self):
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "mycli" in result.output
+        assert "mymcp" in result.output
 
     def test_help(self):
         result = runner.invoke(app, ["--help"])

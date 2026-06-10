@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from cli import (
+from src.cli.app import (
     _detect_command,
     _register_builtin_commands,
     _register_user_commands,
@@ -195,22 +195,22 @@ class TestDetectCommand(TestTemplate):
     """CLI command detection from argv."""
 
     def test_simple_command(self):
-        assert _detect_command(["mycli", "greet", "Alice"]) == "greet"
+        assert _detect_command(["mymcp", "greet", "Alice"]) == "greet"
 
     def test_with_global_flags(self):
-        assert _detect_command(["mycli", "--verbose", "config", "show"]) == "config"
+        assert _detect_command(["mymcp", "--verbose", "config", "show"]) == "config"
 
     def test_with_format_flag(self):
-        assert _detect_command(["mycli", "--format", "json", "config"]) == "config"
+        assert _detect_command(["mymcp", "--format", "json", "config"]) == "config"
 
     def test_with_format_equals_syntax(self):
-        assert _detect_command(["mycli", "--format=json", "config"]) == "config"
+        assert _detect_command(["mymcp", "--format=json", "config"]) == "config"
 
     def test_no_command(self):
-        assert _detect_command(["mycli", "--help"]) == "<root>"
+        assert _detect_command(["mymcp", "--help"]) == "<root>"
 
     def test_root_only(self):
-        assert _detect_command(["mycli"]) == "<root>"
+        assert _detect_command(["mymcp"]) == "<root>"
 
 
 class TestTelemetryCommands(TestTemplate):

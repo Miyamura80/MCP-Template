@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from cli import _register_builtin_commands, _register_user_commands, app
+from src.cli.app import _register_builtin_commands, _register_user_commands, app
 from src.cli.security import (
     _score_bar,
     _score_label,
@@ -26,7 +26,7 @@ _register_user_commands()
 class TestSecurityURLs(TestTemplate):
     def test_snyk_advisor_url_default(self):
         url = get_snyk_advisor_url()
-        assert url == "https://snyk.io/advisor/python/miyamura80-cli-template"
+        assert url == "https://snyk.io/advisor/python/mcp-template"
 
     def test_snyk_advisor_url_custom(self):
         url = get_snyk_advisor_url("my-package")
@@ -34,7 +34,7 @@ class TestSecurityURLs(TestTemplate):
 
     def test_snyk_security_url_default(self):
         url = get_snyk_security_url()
-        assert url == "https://security.snyk.io/package/pip/miyamura80-cli-template"
+        assert url == "https://security.snyk.io/package/pip/mcp-template"
 
     def test_snyk_security_url_custom(self):
         url = get_snyk_security_url("my-package")
@@ -42,7 +42,7 @@ class TestSecurityURLs(TestTemplate):
 
     def test_socket_url_default(self):
         url = get_socket_url()
-        assert url == "https://socket.dev/pypi/package/miyamura80-cli-template"
+        assert url == "https://socket.dev/pypi/package/mcp-template"
 
     def test_socket_url_custom(self):
         url = get_socket_url("my-package")

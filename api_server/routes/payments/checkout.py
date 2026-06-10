@@ -30,7 +30,9 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
         import stripe
 
         stripe.Customer.delete(orphaned_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
+        # Best-effort cleanup: any Stripe API / network error here is non-fatal;
+        # the orphan will eventually be cleaned by Stripe's GC or ops tooling.
         log.warning("Failed to delete orphaned Stripe customer {}", orphaned_id)
 
 
@@ -120,6 +122,9 @@ def _ensure_stripe_customer(
 
     # Now lock the row briefly to serialize the DB write.  Re-check after
     # acquiring the lock in case another thread already set the customer ID.
+    # Nested rather than `and`-combined: the inner re-query may return None if
+    # the row was deleted between reads, and that case must fall through to the
+    # `else` branch below to create a fresh row.
     if sub:
         sub = (
             session.query(UserSubscription)
@@ -127,15 +132,32 @@ def _ensure_stripe_customer(
             .with_for_update()
             .first()
         )
-        if sub and sub.stripe_customer_id:
+    if sub:
+        if sub.stripe_customer_id:
             # Another thread won the race -- clean up our orphan
             if customer_id != sub.stripe_customer_id:
                 _delete_orphaned_customer(
                     customer_id, user.user_id, sub.stripe_customer_id
                 )
             return sub.stripe_customer_id, sub
+        if sub is None:
+            # Row vanished between the unlocked check and with_for_update --
+            # extremely rare. Log the orphan for manual cleanup and surface
+            # a transient error so the client can retry.
+            log.error(
+                "Subscription row for user {} disappeared during checkout; "
+                "Stripe customer {} is orphaned",
+                user.user_id,
+                customer_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Database error during checkout",
+            )
         sub.stripe_customer_id = customer_id
     else:
+        # Either no prior row, or it was deleted between the initial read and
+        # the locking re-query.  Create a fresh row tied to our new customer.
         sub = UserSubscription(
             user_id=user.user_id,
             stripe_customer_id=customer_id,

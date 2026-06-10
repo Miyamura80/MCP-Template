@@ -11,7 +11,7 @@ from rich.console import Console
 console = Console(stderr=True)
 
 _ROOT_DIR = Path(__file__).parent.parent.parent
-_COMMANDS_DIR = _ROOT_DIR / "commands"
+_COMMANDS_DIR = _ROOT_DIR / "src" / "cli" / "commands"
 _TEMPLATE_PATH = _ROOT_DIR / "templates" / "command.py.tpl"
 
 
@@ -42,5 +42,5 @@ def init_command(
 
     target.write_text(rendered)
     command_name = name.replace("_", "-")
-    console.print(f"[green]Created[/green] commands/{name}.py")
-    console.print(f"Run it with: [bold]mycli {command_name}[/bold]")
+    console.print(f"[green]Created[/green] src/cli/commands/{name}.py")
+    console.print(f"Run it with: [bold]mymcp {command_name}[/bold]")

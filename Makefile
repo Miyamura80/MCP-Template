@@ -6,7 +6,7 @@ BLUE=\033[0;34m
 RESET=\033[0m
 
 PYTHON=uv run
-TEST=uv run pytest
+TEST=uv run python -m pytest
 PROJECT_ROOT=.
 
 .DEFAULT_GOAL := help
@@ -37,8 +37,8 @@ help: ## Show this help message
 
 ### Initialization
 .PHONY: onboard banner logo
-onboard: check_uv ## Run interactive onboarding CLI
-	@$(PYTHON) onboard.py
+onboard: check_uv ## Run onboarding CLI (PROFILE=cli-only, CONFIG=.onboard.yaml, ARGS="--dry-run")
+	@$(PYTHON) -m init.onboard $(if $(PROFILE),--profile $(PROFILE),) $(if $(CONFIG),--config $(CONFIG),) $(if $(DRY_RUN),--dry-run,) $(ARGS)
 
 banner: check_uv ## Generate project banner image
 	@echo "$(YELLOW)🔍Generating banner...$(RESET)"
@@ -95,14 +95,12 @@ view_python_venv_size_by_libraries:
 ########################################################
 
 ### Running
-all: check_uv ## Sync dependencies and run main application
+all: check_uv ## Sync dependencies
 	@uv sync
-	@echo "$(GREEN)🏁Running main application...$(RESET)"
-	@$(PYTHON) main.py
-	@echo "$(GREEN)✅ Main application run completed.$(RESET)"
+	@echo "$(GREEN)✅ Dependencies synced.$(RESET)"
 
 cli: check_uv ## Run the CLI (pass ARGS="..." for arguments)
-	@$(PYTHON) -m cli $(ARGS)
+	@$(PYTHON) -m src.cli.app $(ARGS)
 
 docs: ## Run docs with bun
 	@echo "$(GREEN)📚Running docs...$(RESET)"
@@ -114,10 +112,26 @@ api: check_uv ## Run authenticated API server
 	@$(PYTHON) mycli-api
 
 mcp: check_uv ## Run MCP server locally (stdio)
-	@$(PYTHON) mycli-mcp
+	@$(PYTHON) mymcp-mcp
 
 mcp_inspect: check_uv ## Run MCP server with inspector for debugging
 	@$(PYTHON) mcp dev mcp_server/server.py
+
+build_apps: ## Build all MCP App frontends to dist/mcp-app.html (requires bun)
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@for dir in mcp_server/apps/*/; do \
+		if [ -f "$$dir/package.json" ]; then \
+			echo "$(YELLOW)📦 Building $$dir$(RESET)"; \
+			(cd "$$dir" && bun install --silent && bun run build); \
+		fi; \
+	done
+	@echo "$(GREEN)✅ All MCP Apps built.$(RESET)"
+
+dev_host: ## Run upstream @modelcontextprotocol/ext-apps basic-host for manual smoke testing
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@echo "$(YELLOW)Cloning ext-apps basic-host (one-time)...$(RESET)"
+	@if [ ! -d /tmp/ext-apps ]; then git clone --depth 1 https://github.com/modelcontextprotocol/ext-apps.git /tmp/ext-apps; fi
+	@cd /tmp/ext-apps/examples/basic-host && bun install --silent && bun start
 
 ralph: check_jq ## Run Ralph agent loop
 	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
@@ -223,7 +237,7 @@ tech_debt: install_tools ## Check TODO/FIXME markers
 
 duplicate_code: check_uv ## Detect duplicate code blocks
 	@echo "$(YELLOW)🔍Checking duplicate code...$(RESET)"
-	@uv run pylint --disable=all --enable=R0801 src common utils
+	@uv run python -m pylint --disable=all --enable=R0801 src common utils
 	@echo "$(GREEN)✅Duplicate code check completed.$(RESET)"
 
 vulture: install_tools ## Find dead code with vulture
@@ -243,12 +257,12 @@ ty: install_tools ## Run type checker
 
 docs_lint: ## Lint docs links
 	@echo "$(YELLOW)🔍Linting docs links...$(RESET)"
-	@cd docs && bun run lint:links
+	@cd docs && bun install --frozen-lockfile && bun run lint:links
 	@echo "$(GREEN)✅Docs linting completed.$(RESET)"
 
 lint_links: ## Lint all markdown links using pytest-check-links
 	@echo "$(YELLOW)🔍Linting all markdown links with pytest-check-links...$(RESET)"
-	@find . -name "*.md" -not -path "./.venv/*" -not -path "./.venv-test/*" -not -path "./node_modules/*" -not -path "./docs/node_modules/*" | xargs uv run pytest -p no:cov -o "addopts=" --check-links --check-links-ignore "http://localhost:.*"
+	@uv run python scripts/lint_links.py
 	@echo "$(GREEN)✅Link linting completed.$(RESET)"
 
 agents_validate: ## Validate AGENTS.md content
@@ -266,7 +280,12 @@ file_len_check: check_uv ## Check Python files don't exceed max line count
 	@uv run python scripts/check_file_length.py
 	@echo "$(GREEN)✅File length check completed.$(RESET)"
 
-ci: ruff vulture import_lint ty docs_lint lint_links check_deps file_len_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, lint_links, file_len_check)
+blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification comment
+	@echo "$(YELLOW)🔍Checking blind-except justifications...$(RESET)"
+	@uv run python scripts/check_blind_except_justification.py
+	@echo "$(GREEN)✅Blind-except justification check completed.$(RESET)"
+
+ci: ruff vulture import_lint ty docs_lint check_deps file_len_check blind_except_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, check_deps, file_len_check, blind_except_check)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
 .PHONY: sync-agent-config

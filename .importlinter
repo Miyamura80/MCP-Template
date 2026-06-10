@@ -5,7 +5,6 @@ root_packages =
     src
     tests
     init
-    commands
     services
     models
     mcp_server
@@ -41,15 +40,6 @@ forbidden_modules =
     tests
     init
 
-[importlinter:contract:commands_allowed_imports]
-name = Commands do not import tests or init
-type = forbidden
-source_modules =
-    commands
-forbidden_modules =
-    tests
-    init
-
 [importlinter:contract:services_no_transport]
 name = Services do not import CLI or MCP transport layers
 type = forbidden
@@ -58,7 +48,7 @@ source_modules =
 forbidden_modules =
     tests
     init
-    commands
+    src.cli
     mcp_server
     api_server
 
@@ -70,7 +60,6 @@ source_modules =
 forbidden_modules =
     tests
     init
-    commands
     services
     mcp_server
     api_server
@@ -85,20 +74,21 @@ source_modules =
     db
 forbidden_modules =
     services
-    commands
+    src.cli
     mcp_server
     api_server
     tests
     init
 
-[importlinter:contract:api_server_no_cli_mcp]
-name = API server does not import CLI or MCP layers
+[importlinter:contract:api_server_no_cli]
+# api_server intentionally imports mcp_server to mount it at /mcp (remote MCP transport).
+# CLI remains forbidden.
+name = API server does not import CLI layers
 type = forbidden
 source_modules =
     api_server
 forbidden_modules =
-    commands
-    mcp_server
+    src.cli
     tests
     init
 
@@ -110,7 +100,6 @@ source_modules =
     utils
     src
     init
-    commands
     services
     models
     mcp_server

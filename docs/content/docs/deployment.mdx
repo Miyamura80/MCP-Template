@@ -1,0 +1,37 @@
+---
+title: Deployment
+description: Deploy the MCP + HTTP server to Railway (or any container host)
+---
+
+`mymcp-serve` runs the FastAPI app, which mounts FastMCP at `/mcp`. One image,
+one process, one port -- anything that can run a container can host it.
+
+## Railway (quickest path)
+
+1. Create a project from this repo. Railway detects `Dockerfile` and
+   `railway.json` and uses them automatically.
+2. Set environment variables in the Railway dashboard:
+   - `DEV_ENV=prod` -- picks up `common/production_config.yaml` overrides.
+   - `BACKEND_DB_URI` -- Postgres connection string (Railway can provision one).
+   - `SESSION_SECRET_KEY` -- random 32+ bytes.
+   - `WORKOS_CLIENT_ID`, `WORKOS_API_KEY` -- only if using JWT auth.
+   - Any other secrets your services need (LLM keys, Stripe, etc.).
+3. Edit `common/production_config.yaml` and replace the placeholder
+   `server.allowed_origins` with your dashboard / MCP host domain.
+4. Deploy. Railway's healthcheck hits `/health`.
+
+## Other hosts
+
+Any container host works. The `Dockerfile` runs:
+
+```
+uv run uvicorn api_server.server:app --host 0.0.0.0 --port ${PORT:-8080}
+```
+
+Expose port `8080` (or whatever you set `PORT` to). Healthcheck `/health`.
+Mount MCP traffic at the `/mcp` path.
+
+## Connecting clients
+
+Once deployed, clients connect to `https://YOUR-DOMAIN/mcp` with a Bearer JWT
+or an `X-API-KEY` header. See [Setup](/docs/mcp/setup).

@@ -314,4 +314,5 @@ class TestX402VerifyPayment(TestTemplate):
         proto = X402Protocol(X402ProtocolConfig())
         result = asyncio.run(proto.verify_payment(self._payload(), self._requirement()))
         assert result.status == PaymentStatus.FAILED
+        assert result.error is not None
         assert "not initialized" in result.error

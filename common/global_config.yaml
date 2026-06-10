@@ -79,10 +79,10 @@ rate_limit:
   trust_proxy_headers: false
   tiers:
     free_tier:
-      rps: 2
-      rpm: 30
-      rph: 200
-      rpd: 100
+      rps: 10
+      rpm: 120
+      rph: 5000
+      rpd: 10000
     plus_tier:
       rps: 10
       rpm: 120
@@ -114,6 +114,6 @@ cli:
   default_format: table
   interactive_fallback: true
   check_updates_on_start: true
-  emoji: ""
-  primary_color: "cyan"
-  secondary_color: "green"
+  emoji: "🏵️"
+  primary_color: "bright_yellow"
+  secondary_color: "yellow"

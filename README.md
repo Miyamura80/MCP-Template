@@ -1,28 +1,28 @@
-# cli-template
+# mcp-template
 
 <p align="center">
   <img src="media/banner.png" alt="2" width="400">
 </p>
 
 <p align="center">
-<b>Batteries-included Python CLI template. Auto-discovery commands, global flags, output formatting, self-update, and a whole lot more.</b>
+<b>Batteries-included Python template. One codebase ships as a CLI, an MCP server, and an HTTP API over a shared service registry.</b>
 </p>
 
 <p align="center">
   <a href="#key-features">Key Features</a> •
+  <a href="#architecture">Architecture</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#cli-usage">CLI Usage</a> •
   <a href="#adding-commands">Adding Commands</a> •
   <a href="#configuration">Configuration</a> •
-  <a href="#credits">Credits</a> •
-  <a href="#about-the-core-contributors">About the Core Contributors</a>
+  <a href="#credits">Credits</a>
 </p>
 
 <p align="center">
-  <img alt="Project Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FCLI-Template%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=blue">
-  <img alt="Python Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FCLI-Template%2Fmain%2Fpyproject.toml&query=%24.project['requires-python']&label=python&logo=python&color=blue">
-  <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/Miyamura80/CLI-Template">
-  <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/Miyamura80/CLI-Template/a_test_target_tests.yml?branch=main">
+  <img alt="Project Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FMCP-Template%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=blue">
+  <img alt="Python Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FMCP-Template%2Fmain%2Fpyproject.toml&query=%24.project['requires-python']&label=python&logo=python&color=blue">
+  <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/Miyamura80/MCP-Template">
+  <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/Miyamura80/MCP-Template/a_test_target_tests.yml?branch=main">
 
 </p>
 
@@ -35,7 +35,7 @@
 ```text
 Install the CLI and download the usage skill:
 
-pip install miyamura80-cli-template
+pip install mcp-template
 
 curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh -o install-skills.sh
 bash install-skills.sh && rm install-skills.sh
@@ -58,35 +58,66 @@ bash install-skills.sh && rm install-skills.sh
 
 ## Key Features
 
-Opinionated Python CLI template for fast development. The `saas` branch extends `main` with web framework, auth, and payments.
+| Feature | Stack |
+|---|---|
+| CLI (auto-discovery commands, global flags, shell completions, self-update) | Typer |
+| MCP server (streamable HTTP at `/mcp`, services auto-registered as tools; stdio supported for local dev) | FastMCP |
+| HTTP API server (also hosts `/mcp`) | FastAPI + Uvicorn |
+| Auth | WorkOS + API keys |
+| Payments | Stripe |
+| Database + migrations | SQLAlchemy + Alembic |
+| Config (YAML + `.env`) | Pydantic-settings |
+| LLM inference + observability | DSPY + LiteLLM + LangFuse |
+| Testing | pytest + `TestTemplate` |
+| Lint / type / dead-code | Ruff + Vulture + ty + import-linter |
+| Pre-commit (folder size, ai-writing, agent-config sync) | prek |
+| Agent loop | Ralph Wiggum |
+| Telemetry | Anonymous, opt-out |
 
-| Feature | `main` | `saas` |
-|---------|:------:|:------:|
-| Auto-discovery command system | ✅ | ✅ |
-| Interactive fallback prompts | ✅ | ✅ |
-| Shell completions | ✅ | ✅ |
-| Self-update | ✅ | ✅ |
-| Anonymous telemetry with opt-out | ✅ | ✅ |
-| UV + Pydantic config | ✅ | ✅ |
-| CI/Linters (Ruff, Vulture) | ✅ | ✅ |
-| Pre-commit hooks (prek) | ✅ | ✅ |
-| LLM (DSPY + LangFuse Observability) | ✅ | ✅ |
-| FastAPI + Uvicorn | ❌ | ✅ |
-| SQLAlchemy + Alembic | ❌ | ✅ |
-| Auth (WorkOS + API keys) | ❌ | ✅ |
-| Payments (Stripe) | ❌ | ✅ |
-| Ralph Wiggum Agent Loop | ✅ | ✅ |
+## Architecture
 
-[Full comparison](manual_docs/branch_comparison.md)
+One codebase, three interfaces. Write business logic once in `services/` and it ships as a CLI subcommand, an MCP tool, and an HTTP route - same Pydantic input/output contract everywhere.
+
+```
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ src/cli/app  │  │ mcp_server/  │  │ api_server/  │   transport / interface
+│  (Typer)     │  │ (FastMCP)    │  │ (FastAPI)    │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         ▼
+                 ┌───────────────┐
+                 │  services/    │   pure @service functions
+                 │  @service     │   (transport-agnostic)
+                 └───────┬───────┘
+                         ▼
+                 ┌───────────────┐
+                 │  models/      │   Pydantic I/O contracts
+                 └───────┬───────┘
+                         ▼
+        ┌────────────┬───────┬────────────┬─────────────┐
+        │ common/    │ db/   │ utils/llm/ │ src/utils/  │   shared infra
+        │ (config)   │ (ORM) │ (DSPY)     │ (logs/theme)│
+        └────────────┴───────┴────────────┴─────────────┘
+```
+
+### MCP UI (optional)
+
+Need elicitation, image output, or an iframe dashboard for an MCP tool? Add an opt-in **enhancer** in `mcp_server/enhancers/`. Enhancers wrap a service for the MCP transport only - the pure service stays untouched and CLI/API consumers are unaffected.
+
+See [`mcp_server/MCP_UI_ARCHITECTURE.md`](mcp_server/MCP_UI_ARCHITECTURE.md) for the full design.
 
 ## Quick Start
 
 ```bash
 make onboard              # interactive setup (rename, deps, env, hooks)
 uv sync                   # install deps
-uv run mycli --help       # see all commands
-uv run mycli greet Alice  # run a command
-uv run mycli init my_command  # scaffold a new command
+uv run mymcp --help       # see all CLI commands
+uv run mymcp greet Alice  # run a command
+uv run mymcp init my_command  # scaffold a new command
+
+uv run mymcp-serve        # start the server (HTTP API + MCP at /mcp on one port)
+uv run mymcp-mcp          # legacy: stdio MCP only, for local Claude Desktop / dev
 ```
 
 ## CLI Usage
@@ -103,19 +134,19 @@ Global flags go **before** the subcommand:
 | `--version` | `-V` | Print version and exit |
 
 ```bash
-uv run mycli --format json config show     # JSON output
-uv run mycli --dry-run greet Bob           # preview without executing
-uv run mycli --verbose greet Alice         # detailed output
+uv run mymcp --format json config show     # JSON output
+uv run mymcp --dry-run greet Bob           # preview without executing
+uv run mymcp --verbose greet Alice         # detailed output
 ```
 
 ## Adding Commands
 
-Drop a Python file in `commands/` and it is auto-discovered.
+Drop a Python file in `src/cli/commands/` and it is auto-discovered.
 
 **Single command** - export a `main()` function:
 
 ```python
-# commands/hello.py
+# src/cli/commands/hello.py
 from typing import Annotated
 import typer
 
@@ -125,13 +156,13 @@ def main(name: Annotated[str, typer.Argument(help="Who to greet.")]) -> None:
 ```
 
 ```bash
-uv run mycli hello World   # Hello, World!
+uv run mymcp hello World   # Hello, World!
 ```
 
 **Subcommand group** - export `app = typer.Typer()`:
 
 ```python
-# commands/db.py
+# src/cli/commands/db.py
 import typer
 
 app = typer.Typer()
@@ -143,10 +174,10 @@ def migrate() -> None:
 ```
 
 ```bash
-uv run mycli db migrate
+uv run mymcp db migrate
 ```
 
-Or scaffold with: `uv run mycli init my_command --desc "Does something"`.
+Or scaffold with: `uv run mymcp init my_command --desc "Does something"`.
 
 ## Configuration
 
@@ -163,9 +194,9 @@ global_config.OPENAI_API_KEY
 CLI config inspection:
 
 ```bash
-uv run mycli config show                           # full config
-uv run mycli config get llm_config.cache_enabled   # single value
-uv run mycli config set logging.verbose false      # write override
+uv run mymcp config show                           # full config
+uv run mymcp config get llm_config.cache_enabled   # single value
+uv run mymcp config set logging.verbose false      # write override
 ```
 
 [Full configuration docs](manual_docs/configuration.md)
@@ -183,8 +214,8 @@ This software uses the following tools:
 
 ## About the Core Contributors
 
-<a href="https://github.com/Miyamura80/CLI-Template/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Miyamura80/CLI-Template" />
+<a href="https://github.com/Miyamura80/MCP-Template/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Miyamura80/MCP-Template" />
 </a>
 
 Made with [contrib.rocks](https://contrib.rocks).

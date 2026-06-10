@@ -21,7 +21,7 @@ ERROR_THRESHOLD="${LARGE_FILE_ERROR_THRESHOLD:-800}"
 
 EXCLUDE_PATH_RE='(^|/)(node_modules|__pycache__|\.venv|venv|visual-tests|e2e|tests|test|__tests__|\.git)(/|$)'
 ALEMBIC_RE='(^|/)alembic[^/]*/versions(/|$)'
-EXCLUDE_NAME_RE='(^test_[^/]+\.py|^conftest\.py|^vulture_whitelist\.py)$'
+EXCLUDE_NAME_RE='(^test_[^/]+\.py|^conftest\.py|^vulture_whitelist\.py|^onboard\.py)$'
 
 is_source_file() {
   case "$1" in

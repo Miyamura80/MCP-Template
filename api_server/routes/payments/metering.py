@@ -54,7 +54,10 @@ def _report_to_stripe(
             identifier=idempotency_key,
         )
         return True
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Stripe SDK + network errors all need the same response: log, reset
+        # auth on AuthError, and return False so the caller rolls back the
+        # dedup record and can retry.
         if isinstance(exc, stripe.AuthenticationError):
             from api_server.billing.stripe_config import reset_stripe_on_auth_error
 
