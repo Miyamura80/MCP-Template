@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { sanitizeHtml } from "./sanitize";
 
 export type Draft = {
   draft_id: string;
@@ -488,7 +489,7 @@ function ThreadMessageBody({ message }: { message: ThreadMessage }) {
     const { main, quoted } = splitHtmlAtQuote(message.body_html);
     return (
       <div>
-        <div style={threadBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: main }} />
+        <div style={threadBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }} />
         {quoted && (
           <>
             <button onClick={() => setShowQuoted((v) => !v)} style={quoteToggleBtnStyle}>
@@ -497,7 +498,7 @@ function ThreadMessageBody({ message }: { message: ThreadMessage }) {
             {showQuoted && (
               <div
                 style={{ ...threadBodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }}
-                dangerouslySetInnerHTML={{ __html: quoted }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }}
               />
             )}
           </>

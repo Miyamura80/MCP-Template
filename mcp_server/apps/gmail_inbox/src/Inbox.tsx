@@ -14,6 +14,7 @@ import {
 } from "@phosphor-icons/react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { sanitizeHtml } from "./sanitize";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
@@ -1370,12 +1371,12 @@ function ComposerMsgBody({ message }: { message: ThreadMessage }) {
     const { main, quoted } = splitHtmlAtQuote(message.body_html);
     return (
       <div>
-        <div style={composerBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: main }} />
+        <div style={composerBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }} />
         {quoted && (
           <>
             <button onClick={() => setShowQuoted((v) => !v)} style={composerQuoteToggle}>&bull;&bull;&bull;</button>
             {showQuoted && (
-              <div style={{ ...composerBodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }} dangerouslySetInnerHTML={{ __html: quoted }} />
+              <div style={{ ...composerBodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }} />
             )}
           </>
         )}
@@ -1682,7 +1683,7 @@ function MessageBody({
       <div>
         <div
           style={bodyHtmlStyle}
-          dangerouslySetInnerHTML={{ __html: main }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }}
           onClick={handleLinkClick}
         />
         {quoted && (
@@ -1697,7 +1698,7 @@ function MessageBody({
             {showQuoted && (
               <div
                 style={{ ...bodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 10, marginTop: 4 }}
-                dangerouslySetInnerHTML={{ __html: quoted }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }}
                 onClick={handleLinkClick}
               />
             )}
