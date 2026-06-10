@@ -207,6 +207,17 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 
+[tool.uv]
+# Quarantine freshly-published packages for 7 days before they're eligible for
+# resolution. This is a supply-chain defense: most malicious package releases
+# (typosquats, hijacked maintainer accounts) are caught and yanked within days,
+# so a rolling exclusion window blunts the blast radius of a compromised upload.
+# Declared here (not just in a developer's global ~/.config/uv) so every
+# contributor and CI run applies the identical policy and produces an identical
+# lockfile - otherwise uv stamps a per-machine `[options]` block into uv.lock and
+# the pre-commit hook reports spurious drift.
+exclude-newer = "7 days"
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.5.1",
