@@ -207,6 +207,10 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 
+[tool.uv]
+# 7-day quarantine on freshly-published packages (supply-chain defense).
+exclude-newer = "7 days"
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.5.1",
