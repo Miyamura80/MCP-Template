@@ -9,6 +9,7 @@ from mcp_server.enhancers.gmail_inbox import (
     gmail_curate_inbox_enhanced,
     gmail_get_thread_enhanced,
 )
+from mcp_server.server import build_mcp_server
 from models.gmail import (
     GmailCuratedThread,
     GmailCurateInboxInput,
@@ -139,15 +140,11 @@ class TestGmailInboxAppTools(TestTemplate):
     ]
 
     def test_all_five_tools_registered(self):
-        from mcp_server.server import build_mcp_server
-
         m = build_mcp_server()
         for name in self.EXPECTED:
             assert name in m._tool_manager._tools, f"missing {name}"
 
     def test_all_carry_app_visibility_meta(self):
-        from mcp_server.server import build_mcp_server
-
         m = build_mcp_server()
         for name in self.EXPECTED:
             tool = m._tool_manager._tools[name]

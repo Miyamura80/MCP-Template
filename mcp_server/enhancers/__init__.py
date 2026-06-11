@@ -9,6 +9,8 @@ take the headless path unchanged.
 See `mcp_server/MCP_UI_ARCHITECTURE.md` and `mcp_server/MCP_UI_EDGE_CASES.md`.
 """
 
+import importlib
+import pkgutil
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -73,12 +75,7 @@ def discover_enhancers() -> None:
     global _discovered
     if _discovered:
         return
-    import importlib
-    import pkgutil
-
-    import mcp_server.enhancers as _pkg
-
-    for module_info in pkgutil.iter_modules(_pkg.__path__):
+    for module_info in pkgutil.iter_modules(__path__):
         if module_info.name in _SKIP_MODULES:
             continue
         importlib.import_module(f"mcp_server.enhancers.{module_info.name}")  # noqa: TID251 - enhancer auto-discovery so @enhance decorators register on startup

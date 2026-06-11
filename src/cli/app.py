@@ -9,6 +9,10 @@ from typing import Annotated
 
 import typer
 
+from src.cli.commands import discover_commands
+from src.cli.completions import app as completions_app
+from src.cli.scaffold import init_command
+from src.cli.security import security_command, show_first_install_notice
 from src.cli.state import (
     OutputFormat,
     Verbosity,
@@ -16,7 +20,16 @@ from src.cli.state import (
     output_format,
     verbosity,
 )
+from src.cli.telemetry import (
+    app as telemetry_app,
+)
+from src.cli.telemetry import (
+    record_event,
+    show_first_run_notice,
+)
+from src.cli.update import update_command
 from src.utils.errors import install_error_handler
+from src.utils.theme import get_cli_emoji, get_primary_color
 
 
 class FormatChoice(StrEnum):
@@ -41,8 +54,6 @@ app = typer.Typer(
 
 def _load_cli_branding() -> tuple[str, str]:
     """Read emoji and primary color from config. Returns (emoji, primary_color)."""
-    from src.utils.theme import get_cli_emoji, get_primary_color
-
     return get_cli_emoji(), get_primary_color()
 
 
@@ -110,14 +121,10 @@ def main(
 
     # One-time security notice on first run (after flags are parsed)
     if not quiet:
-        from src.cli.security import show_first_install_notice
-
         show_first_install_notice()
 
     # One-time telemetry opt-out notice
     if not quiet:
-        from src.cli.telemetry import show_first_run_notice
-
         show_first_run_notice()
 
 
@@ -132,12 +139,6 @@ def _register_builtin_commands() -> None:
         return
     _builtins_registered = True
 
-    from src.cli.completions import app as completions_app
-    from src.cli.scaffold import init_command
-    from src.cli.security import security_command
-    from src.cli.telemetry import app as telemetry_app
-    from src.cli.update import update_command
-
     app.add_typer(completions_app, name="completions", help="Manage shell completions.")
     app.add_typer(telemetry_app, name="telemetry", help="Manage anonymous telemetry.")
     app.command(name="update")(update_command)
@@ -151,8 +152,6 @@ def _register_user_commands() -> None:
     if _user_commands_registered:
         return
     _user_commands_registered = True
-
-    from src.cli.commands import discover_commands
 
     discover_commands(app)
 
@@ -205,8 +204,6 @@ def main_cli() -> None:
         raise
     finally:
         duration = time.monotonic() - start
-        from src.cli.telemetry import record_event
-
         # Best-effort: never let telemetry mask the original error.
         with contextlib.suppress(Exception):
             record_event(command=command, duration=duration, success=success)

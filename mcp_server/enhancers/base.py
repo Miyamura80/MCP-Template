@@ -10,6 +10,7 @@ from collections.abc import Callable
 from mcp.server.elicitation import ElicitationResult
 from mcp.server.fastmcp.server import Context
 from mcp.types import (
+    Annotations,
     AudioContent,
     ClientCapabilities,
     ElicitationCapability,
@@ -129,6 +130,4 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
 def _annotations(audience: list[Role] | None):
     if audience is None:
         return None
-    from mcp.types import Annotations
-
     return Annotations(audience=audience)

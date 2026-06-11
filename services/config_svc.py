@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from common import global_config
 from models.config import (
     ConfigGetInput,
     ConfigGetResult,
@@ -43,8 +44,6 @@ def _coerce_value(value: str) -> bool | int | float | str | None:
     output_model=ConfigShowResult,
 )
 def config_show(input: ConfigShowInput) -> ConfigShowResult:
-    from common import global_config
-
     return ConfigShowResult(config=global_config.to_dict())
 
 
@@ -55,8 +54,6 @@ def config_show(input: ConfigShowInput) -> ConfigShowResult:
     output_model=ConfigGetResult,
 )
 def config_get(input: ConfigGetInput) -> ConfigGetResult:
-    from common import global_config
-
     obj = global_config
     for part in input.key.split("."):
         try:

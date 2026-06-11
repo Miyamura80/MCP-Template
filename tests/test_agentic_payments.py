@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from common import global_config
 from common.config_models import AgenticPaymentsConfig, X402ProtocolConfig
 from src.payments.registry import PaymentRegistry
 from src.payments.types import (
@@ -100,8 +101,6 @@ class TestPaymentRegistry(TestTemplate):
             x402=X402ProtocolConfig(enabled=True),
         )
 
-        from common import global_config
-
         original = global_config.payments
         try:
             object.__setattr__(global_config, "payments", mock_cfg)
@@ -123,8 +122,6 @@ class TestPaymentRegistry(TestTemplate):
         mock_cfg = AgenticPaymentsConfig(
             x402=X402ProtocolConfig(enabled=True),
         )
-
-        from common import global_config
 
         original = global_config.payments
         try:

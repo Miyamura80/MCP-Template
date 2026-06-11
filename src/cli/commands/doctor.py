@@ -18,8 +18,10 @@ def main(
     ] = False,
 ) -> None:
     """Run health checks on your project environment."""
-    from models.doctor import DoctorInput
-    from services.doctor_svc import doctor
+    # Lazy by design: this module is imported on every CLI startup; keep
+    # model/service imports out of it so `--help` stays fast.
+    from models.doctor import DoctorInput  # noqa: PLC0415
+    from services.doctor_svc import doctor  # noqa: PLC0415
 
     result = doctor(DoctorInput(fix=fix))
 

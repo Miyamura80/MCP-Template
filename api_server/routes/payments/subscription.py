@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
 from api_server.auth.scopes import BILLING_READ, require_scopes
-from api_server.billing.stripe_config import ensure_stripe
+from api_server.billing.stripe_config import (
+    ensure_stripe,
+    reset_stripe_on_auth_error,
+)
 from db.engine import get_db_session
 from db.models.subscription_types import (
     STRIPE_STATUS_MAP,
@@ -81,7 +84,9 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         _stripe_in_flight.add(stripe_sub_id)
 
     # Network I/O outside the lock.
-    import stripe
+    # Deliberately lazy: routes must import (and the app boot) without the
+    # stripe SDK; the ensure_stripe() gate above degrades billing instead.
+    import stripe  # noqa: PLC0415
 
     try:
         stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
@@ -103,8 +108,6 @@ def _get_stripe_status(stripe_sub_id: str) -> str | None:
         # any failure here must fall back to the DB-backed status (the function
         # returns None to signal the caller to use the cached/DB value).
         if isinstance(exc, stripe.AuthenticationError):
-            from api_server.billing.stripe_config import reset_stripe_on_auth_error
-
             reset_stripe_on_auth_error()
         log.debug(
             "Stripe subscription lookup failed for {}: {}; falling back to DB",

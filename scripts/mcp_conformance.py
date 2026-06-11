@@ -69,11 +69,12 @@ def _configure_db_env() -> None:
 
 def _seed_api_key() -> str:
     """Create tables and a scoped API key; return the raw key."""
-    # Imported after _configure_db_env so config/engine pick up BACKEND_DB_URI.
-    import api_server.server  # noqa: F401  registers every ORM model on Base.metadata
-    from api_server.auth.api_key_auth import create_api_key
-    from db.base import Base
-    from db.engine import _init_engine, use_db_session
+    # Imported after _configure_db_env so config/engine pick up BACKEND_DB_URI;
+    # api_server.server registers every ORM model on Base.metadata.
+    import api_server.server  # noqa: F401, PLC0415
+    from api_server.auth.api_key_auth import create_api_key  # noqa: PLC0415
+    from db.base import Base  # noqa: PLC0415
+    from db.engine import _init_engine, use_db_session  # noqa: PLC0415
 
     Base.metadata.create_all(_init_engine())
     with use_db_session() as session:

@@ -13,9 +13,11 @@ from sqlalchemy.exc import IntegrityError
 
 from api_server.billing.stripe_config import (
     ensure_stripe,
+    get_stripe_price_id,
     get_webhook_secret,
     is_production,
 )
+from common import global_config
 from db.engine import use_db_session
 from db.models.processed_stripe_events import ProcessedStripeEvent
 from db.models.subscription_types import (
@@ -55,7 +57,9 @@ async def _dispatch_event(event_type: str, data: dict, event_id: str) -> None:
 
 def _try_construct_event(payload: bytes, sig_header: str):
     """Try to verify with primary secret, then fallback to test secret."""
-    import stripe
+    # Deliberately lazy: routes must import (and the app boot) without the
+    # stripe SDK; the webhook 503s via ensure_stripe() before reaching here.
+    import stripe  # noqa: PLC0415
 
     secret = get_webhook_secret()
     if not secret:
@@ -69,8 +73,6 @@ def _try_construct_event(payload: bytes, sig_header: str):
         # security risk (test-mode dashboard access could inject events).
         if is_production():
             raise
-
-        from common import global_config
 
         fallback = (
             global_config.STRIPE_TEST_WEBHOOK_SECRET
@@ -238,8 +240,6 @@ def _resolve_tier(data: dict) -> str:
     Stripe tier without updating this mapping is caught immediately
     rather than silently assigning every subscriber to PLUS.
     """
-    from api_server.billing.stripe_config import get_stripe_price_id
-
     items = data.get("items", {}).get("data", [])
     price_id = items[0].get("price", {}).get("id") if items else None
     expected_plus_id = get_stripe_price_id()
@@ -470,7 +470,9 @@ def _resolve_payment_error(data: dict) -> str | None:
         return raw_err.get("message") if isinstance(raw_err, dict) else None
     if isinstance(pi, str) and ensure_stripe():
         try:
-            import stripe
+            # Deliberately lazy: stripe SDK optional (see _try_construct_event);
+            # guarded by the ensure_stripe() check above.
+            import stripe  # noqa: PLC0415
 
             pi_obj = stripe.PaymentIntent.retrieve(pi)
             raw_err = getattr(pi_obj, "last_payment_error", None)

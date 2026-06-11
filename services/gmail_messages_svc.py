@@ -53,6 +53,7 @@ from models.gmail import (
     GmailThreadMessage,
 )
 from services import service
+from services.gmail_drafts_svc import _draft_resource_to_model
 from services.gmail_svc import (
     _get_gmail_client,
     _headers_to_dict,
@@ -359,7 +360,9 @@ def _find_mcp_done_label(svc: Any) -> str | None:
 
 def _get_or_create_mcp_done_label(svc: Any) -> str:
     """Return the label ID for ``MCP/Done``, creating it if absent."""
-    from googleapiclient.errors import HttpError
+    # Deliberate deferral: the Google SDK is heavy - only load it when a Gmail
+    # API call is actually made, not at service discovery / module import.
+    from googleapiclient.errors import HttpError  # noqa: PLC0415
 
     existing = _find_mcp_done_label(svc)
     if existing is not None:
@@ -430,8 +433,6 @@ def gmail_list_inbox(input: GmailListInboxInput) -> GmailListInboxResult:
     output_model=GmailThread,
 )
 def gmail_get_thread(input: GmailGetThreadInput) -> GmailThread:
-    from services.gmail_drafts_svc import _draft_resource_to_model
-
     svc = _get_gmail_client(input.user_id)
     thread = (
         svc.users()

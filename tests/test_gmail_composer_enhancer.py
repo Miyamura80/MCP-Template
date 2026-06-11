@@ -3,12 +3,14 @@
 import asyncio
 from unittest.mock import MagicMock
 
+from mcp_server.enhancers import get_enhancer
 from mcp_server.enhancers.base import EnhancedTool
 from mcp_server.enhancers.gmail_composer import (
     INBOX_URI,
     gmail_compose_enhanced,
     gmail_update_draft_enhanced,
 )
+from mcp_server.server import mcp
 from models.gmail import (
     GmailComposeInput,
     GmailDraft,
@@ -110,15 +112,11 @@ class TestEnhancerRegistrationFallback(TestTemplate):
     """The fallback mode protects the headless path if the enhancer crashes."""
 
     def test_compose_registered_with_headless_fallback(self):
-        from mcp_server.enhancers import get_enhancer
-
         entry = get_enhancer("gmail_compose")
         assert entry is not None
         assert entry.fallback == "headless"
 
     def test_update_draft_registered_with_headless_fallback(self):
-        from mcp_server.enhancers import get_enhancer
-
         entry = get_enhancer("gmail_update_draft")
         assert entry is not None
         assert entry.fallback == "headless"
@@ -128,8 +126,6 @@ class TestGmailComposerAppTools(TestTemplate):
     """The four gmail_composer.* tools must be registered with app-only visibility."""
 
     def test_all_four_app_tools_registered(self):
-        from mcp_server.server import mcp
-
         names = {
             "gmail_composer.save_draft",
             "gmail_composer.send",
@@ -140,8 +136,6 @@ class TestGmailComposerAppTools(TestTemplate):
         assert names.issubset(registered), names - registered
 
     def test_app_tools_have_visibility_app_meta(self):
-        from mcp_server.server import mcp
-
         for tool_name in (
             "gmail_composer.save_draft",
             "gmail_composer.send",

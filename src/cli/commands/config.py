@@ -14,8 +14,10 @@ console = Console(stderr=True)
 @app.command()
 def show() -> None:
     """Show the full configuration."""
-    from models.config import ConfigShowInput
-    from services.config_svc import config_show
+    # Lazy by design: this module is imported on every CLI startup; keep
+    # model/service imports out of it so `--help` stays fast.
+    from models.config import ConfigShowInput  # noqa: PLC0415
+    from services.config_svc import config_show  # noqa: PLC0415
 
     result = config_show(ConfigShowInput())
     render(result.config, title="Configuration")
@@ -29,8 +31,9 @@ def get(
     ],
 ) -> None:
     """Get a single configuration value by dot-separated key."""
-    from models.config import ConfigGetInput
-    from services.config_svc import config_get
+    # Lazy by design: keep model/service imports off the CLI startup path.
+    from models.config import ConfigGetInput  # noqa: PLC0415
+    from services.config_svc import config_get  # noqa: PLC0415
 
     try:
         result = config_get(ConfigGetInput(key=key))
@@ -50,8 +53,9 @@ def set_value(
     value: Annotated[str, typer.Argument(help="Value to set.")],
 ) -> None:
     """Set a configuration override (writes to .global_config.yaml)."""
-    from models.config import ConfigSetInput
-    from services.config_svc import config_set
+    # Lazy by design: keep model/service imports off the CLI startup path.
+    from models.config import ConfigSetInput  # noqa: PLC0415
+    from services.config_svc import config_set  # noqa: PLC0415
 
     result = config_set(ConfigSetInput(key=key, value=value))
     console.print(

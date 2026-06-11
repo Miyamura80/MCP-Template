@@ -7,6 +7,7 @@ from typing import Annotated
 import keyring
 import keyring.errors
 import typer
+from dotenv import dotenv_values
 from rich.console import Console
 
 from src.cli.state import is_quiet
@@ -152,8 +153,6 @@ def import_secrets(
     ] = False,
 ) -> None:
     """Import secrets from a .env file into the OS keyring."""
-    from dotenv import dotenv_values
-
     values = dotenv_values(file)
     if not values:
         console.print(f"[yellow]No values found in {file}[/yellow]")

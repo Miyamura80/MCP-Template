@@ -17,8 +17,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api_server.auth.api_key_auth import create_api_key
+from api_server.auth.unified_auth import AuthenticatedUser
+from api_server.server import app
 from db import engine as db_engine
 from db.base import Base
+from mcp_server._tool_factory import _check_quota, _check_scopes
+from src.utils.current_user import reset_current_user, set_current_user
 from tests.test_template import TestTemplate
 
 
@@ -55,8 +59,6 @@ def _read_sse_first_message(response) -> dict:
 
 class TestMCPRemote(TestTemplate):
     def test_mcp_requires_auth(self):
-        from api_server.server import app
-
         # No `with`: the mcp_auth middleware short-circuits before the MCP sub-app
         # is reached, so we don't need to enter the lifespan / session manager.
         client = TestClient(app)
@@ -90,8 +92,6 @@ class TestMCPRemote(TestTemplate):
             with session_factory() as s:
                 raw_key, _ = create_api_key(s, user_id="u-mcp-remote-test")
 
-            from api_server.server import app
-
             with TestClient(app) as client:
                 resp = client.post(
                     "/mcp",
@@ -117,8 +117,6 @@ class TestMCPRemote(TestTemplate):
             assert msg["result"]["serverInfo"]["name"] == "mymcp"
 
     def test_health_endpoint_unaffected_by_mcp_auth(self):
-        from api_server.server import app
-
         # Plain TestClient (no lifespan) -- /health doesn't need the MCP session
         # manager and entering the lifespan would clobber other tests' use of it.
         client = TestClient(app)
@@ -130,20 +128,12 @@ class TestMCPAuthGuards(TestTemplate):
     """Verify that MCP tool calls enforce scopes and daily quota."""
 
     def test_no_user_skips_scope_check(self):
-        from mcp_server._tool_factory import _check_scopes
-
         _check_scopes()
 
     def test_no_user_skips_quota_check(self):
-        from mcp_server._tool_factory import _check_quota
-
         _check_quota()
 
     def test_wildcard_scopes_pass(self):
-        from api_server.auth.unified_auth import AuthenticatedUser
-        from mcp_server._tool_factory import _check_scopes
-        from src.utils.current_user import reset_current_user, set_current_user
-
         user = AuthenticatedUser(user_id="u-admin", auth_method="api_key", scopes=["*"])
         token = set_current_user(user)
         try:
@@ -152,10 +142,6 @@ class TestMCPAuthGuards(TestTemplate):
             reset_current_user(token)
 
     def test_read_only_scopes_blocked(self):
-        from api_server.auth.unified_auth import AuthenticatedUser
-        from mcp_server._tool_factory import _check_scopes
-        from src.utils.current_user import reset_current_user, set_current_user
-
         user = AuthenticatedUser(
             user_id="u-readonly", auth_method="api_key", scopes=["services:read"]
         )
@@ -167,10 +153,6 @@ class TestMCPAuthGuards(TestTemplate):
             reset_current_user(token)
 
     def test_quota_exhausted_raises(self):
-        from api_server.auth.unified_auth import AuthenticatedUser
-        from mcp_server._tool_factory import _check_quota
-        from src.utils.current_user import reset_current_user, set_current_user
-
         user = AuthenticatedUser(
             user_id="u-quota",
             auth_method="api_key",

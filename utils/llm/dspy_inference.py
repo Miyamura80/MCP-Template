@@ -51,7 +51,9 @@ class DSPYInference:
         )
         self.dspy_config: dict[str, Any] = {"lm": self.lm}
         if observe and _langfuse_configured():
-            from utils.llm.dspy_langfuse import LangFuseDSPYCallback
+            # Defer the langfuse-backed callback until observability is
+            # actually enabled - importing it pulls in the langfuse SDK.
+            from utils.llm.dspy_langfuse import LangFuseDSPYCallback  # noqa: PLC0415
 
             self.callback = LangFuseDSPYCallback(pred_signature)
             self.dspy_config["callbacks"] = [self.callback]
@@ -141,7 +143,8 @@ class DSPYInference:
         **kwargs: Any,
     ) -> Any:
         if self._use_langfuse_observe:
-            from langfuse import observe as langfuse_observe
+            # Defer langfuse until observability is enabled with credentials.
+            from langfuse import observe as langfuse_observe  # noqa: PLC0415
 
             return await langfuse_observe()(self._run_inner)(**kwargs)
         return await self._run_inner(**kwargs)

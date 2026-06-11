@@ -4,6 +4,8 @@ import threading
 
 from loguru import logger as log
 
+from common import global_config
+
 # Canonical webhook path shared by the route module and rate-limit middleware.
 STRIPE_WEBHOOK_PATH = "/api/v1/billing/webhook/stripe"
 
@@ -14,8 +16,6 @@ _NON_PROD_ENVS = frozenset({"dev", "development", "staging", "test", "local"})
 
 def is_production() -> bool:
     """Return True if the current environment is considered production."""
-    from common import global_config
-
     return global_config.DEV_ENV.lower() not in _NON_PROD_ENVS
 
 
@@ -44,9 +44,10 @@ def ensure_stripe() -> bool:
             return True
 
         try:
-            import stripe
-
-            from common import global_config
+            # Deliberately lazy: the app must boot (and billing degrade to
+            # 503 via the False return) when the stripe SDK is pruned from
+            # the template or fails to import.
+            import stripe  # noqa: PLC0415
 
             cfg = global_config.subscription_config.stripe
 
@@ -105,8 +106,6 @@ def reset_stripe_on_auth_error() -> None:
 
 def get_stripe_price_id() -> str:
     """Return the Stripe price ID for the current environment."""
-    from common import global_config
-
     cfg = global_config.subscription_config.stripe
     if is_production():
         return cfg.price_ids.get("prod", "")
@@ -115,22 +114,16 @@ def get_stripe_price_id() -> str:
 
 def get_meter_event_name() -> str:
     """Return the Stripe Billing Meter event name."""
-    from common import global_config
-
     return global_config.subscription_config.stripe.meter_event_name
 
 
 def get_included_units() -> int:
     """Return the number of included metered units per period."""
-    from common import global_config
-
     return global_config.subscription_config.metered.included_units
 
 
 def get_webhook_secret() -> str | None:
     """Return the Stripe webhook signing secret for the current environment."""
-    from common import global_config
-
     if is_production():
         return global_config.STRIPE_WEBHOOK_SECRET
     return (

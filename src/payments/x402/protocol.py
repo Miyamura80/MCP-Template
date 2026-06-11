@@ -55,7 +55,10 @@ class X402Protocol(PaymentProtocol):
                 return True
 
             try:
-                from x402 import x402ResourceServer
+                # Lazy by design (see class docstring): the x402 SDK stays off
+                # the module import path so a missing/broken SDK is caught here
+                # and retried, instead of failing at import time.
+                from x402 import x402ResourceServer  # noqa: PLC0415
 
                 # Pre-flight: wallet address is used as the payment
                 # recipient in build_payment_requirement(). The private
@@ -139,7 +142,9 @@ class X402Protocol(PaymentProtocol):
             )
 
         try:
-            from x402.http import HTTPFacilitatorClient
+            # Lazy by design: keep the x402 SDK off the module import path
+            # (see class docstring); failures surface as PaymentResult below.
+            from x402.http import HTTPFacilitatorClient  # noqa: PLC0415
 
             facilitator_url = (
                 requirement.facilitator_url or self._config.facilitator_url
@@ -178,13 +183,17 @@ class X402Protocol(PaymentProtocol):
 
     def _to_sdk_payload(self, payload: PaymentPayload) -> Any:
         """Convert our PaymentPayload to x402 SDK's PaymentPayload."""
-        from x402 import parse_payment_payload
+        # Lazy by design: keep the x402 SDK off the module import path
+        # (see class docstring).
+        from x402 import parse_payment_payload  # noqa: PLC0415
 
         return parse_payment_payload(payload.raw)
 
     def _to_sdk_requirements(self, req: PaymentRequirement) -> Any:
         """Convert our PaymentRequirement to x402 SDK's PaymentRequirements."""
-        from x402 import ResourceConfig
+        # Lazy by design: keep the x402 SDK off the module import path
+        # (see class docstring).
+        from x402 import ResourceConfig  # noqa: PLC0415
 
         config = ResourceConfig(
             scheme="exact-evm",

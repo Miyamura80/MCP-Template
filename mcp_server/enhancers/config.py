@@ -22,7 +22,9 @@ async def config_show_enhanced(
 def _render_config_image(config: dict) -> str | None:
     """Render a simple config-tree image. Returns base64 PNG or None on failure."""
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        # Deliberate deferral: Pillow is treated as optional here - the image
+        # render degrades to None (text-only result) when PIL is unavailable.
+        from PIL import Image, ImageDraw, ImageFont  # noqa: PLC0415
     except ImportError:
         return None
 
