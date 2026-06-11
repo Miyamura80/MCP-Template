@@ -181,6 +181,7 @@ exclude = [
     "tests/test_mcp_server.py",
     "tests/test_mcp_remote.py",
     "tests/test_gmail_services.py",
+    "tests/test_mcp_oauth.py",
 ]
 
 [tool.file_length]

@@ -210,6 +210,11 @@ class Config(BaseSettings):
     BACKEND_DB_URI: str | None = None
     WORKOS_CLIENT_ID: str | None = None
     WORKOS_API_KEY: str | None = None
+    # AuthKit issuer URL (https://<env>.authkit.app); enables OAuth 2.1 on /mcp
+    WORKOS_AUTHKIT_DOMAIN: str | None = None
+    # Canonical public URL of the /mcp endpoint (RFC 8707 resource identifier);
+    # must match the resource indicator configured in the WorkOS dashboard
+    MCP_PUBLIC_URL: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Stripe & billing
