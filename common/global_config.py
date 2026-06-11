@@ -256,6 +256,21 @@ class Config(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _require_mcp_public_url_with_authkit(self) -> "Config":
+        # Tokens are audience-bound to MCP_PUBLIC_URL; without it the resource
+        # URI falls back to localhost and OAuth silently breaks in production.
+        if (
+            self.DEV_ENV == "prod"
+            and self.WORKOS_AUTHKIT_DOMAIN
+            and not self.MCP_PUBLIC_URL
+        ):
+            raise ValueError(
+                "MCP_PUBLIC_URL must be set when WORKOS_AUTHKIT_DOMAIN is "
+                "enabled in production"
+            )
+        return self
+
     @classmethod
     def settings_customise_sources(
         cls,

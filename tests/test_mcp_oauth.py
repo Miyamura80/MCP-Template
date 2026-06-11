@@ -107,6 +107,17 @@ class TestAuthKitTokenVerification(TestTemplate):
 
     @patch("api_server.auth.authkit_auth.global_config")
     @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_malformed_scope_claim_rejected(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, scope=123)
+        assert verify_authkit_token(token) is None
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
     def test_wrong_audience_rejected(self, mock_jwks, mock_config):
         mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
         mock_config.MCP_PUBLIC_URL = RESOURCE
@@ -168,11 +179,11 @@ class TestResourceUrls(TestTemplate):
             "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
         )
 
-    def test_resource_url_default_without_config(self):
-        # Real config in tests has no MCP_PUBLIC_URL; falls back to localhost.
-        url = mcp_resource_url()
-        assert url.startswith("http://localhost:")
-        assert url.endswith("/mcp")
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_resource_url_default_without_config(self, mock_config):
+        mock_config.MCP_PUBLIC_URL = None
+        mock_config.server.port = 8080
+        assert mcp_resource_url() == "http://localhost:8080/mcp"
 
 
 class TestProtectedResourceMetadata(TestTemplate):
@@ -197,7 +208,9 @@ class TestProtectedResourceMetadata(TestTemplate):
             assert body["authorization_servers"] == [AUTHKIT_DOMAIN]
             assert body["bearer_methods_supported"] == ["header"]
 
-    def test_metadata_404_when_unconfigured(self):
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_404_when_unconfigured(self, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = None
         resp = self._client().get("/.well-known/oauth-protected-resource/mcp")
         assert resp.status_code == 404
 
@@ -230,7 +243,9 @@ class TestUnauthorizedDiscoveryHint(TestTemplate):
             '/.well-known/oauth-protected-resource/mcp"' in challenge
         )
 
-    def test_401_plain_challenge_when_unconfigured(self):
+    @patch("api_server.middleware.mcp_auth.global_config")
+    def test_401_plain_challenge_when_unconfigured(self, mock_mw_config):
+        mock_mw_config.WORKOS_AUTHKIT_DOMAIN = None
         resp = self._post_mcp_unauthenticated()
         assert resp.status_code == 401
         assert resp.headers["www-authenticate"] == 'Bearer realm="mcp"'

@@ -88,7 +88,13 @@ def verify_authkit_token(token: str) -> AuthKitUser | None:
 
     if "scope" in payload:
         raw = payload["scope"]
-        scopes = raw.split() if isinstance(raw, str) else [str(s) for s in raw]
+        if isinstance(raw, str):
+            scopes = raw.split()
+        elif isinstance(raw, list):
+            scopes = [str(s) for s in raw]
+        else:
+            # Malformed scope claim: reject the token instead of erroring.
+            return None
     else:
         # No scope claim: the user authorized the whole resource, mirroring
         # how unified_auth treats interactive JWT users.
