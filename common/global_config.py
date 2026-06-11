@@ -258,6 +258,12 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def _require_mcp_public_url_with_authkit(self) -> "Config":
+        # Normalize blank .env values so whitespace doesn't masquerade as
+        # configuration (and so the production check below can't be bypassed).
+        if self.WORKOS_AUTHKIT_DOMAIN and not self.WORKOS_AUTHKIT_DOMAIN.strip():
+            self.WORKOS_AUTHKIT_DOMAIN = None
+        if self.MCP_PUBLIC_URL and not self.MCP_PUBLIC_URL.strip():
+            self.MCP_PUBLIC_URL = None
         # Tokens are audience-bound to MCP_PUBLIC_URL; without it the resource
         # URI falls back to localhost and OAuth silently breaks in production.
         if (
