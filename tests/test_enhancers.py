@@ -86,6 +86,38 @@ class TestEnhancedTool(TestTemplate):
         assert len(tool.extra_content) == 1
         assert tool.extra_content[0].type == "image"
 
+    def test_send_audio_appends_content(self):
+        from mcp.types import AudioContent
+
+        tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
+        tool.send_audio(data="UklGRg==", mime_type="audio/wav")
+        assert len(tool.extra_content) == 1
+        block = tool.extra_content[0]
+        assert isinstance(block, AudioContent)
+        assert block.data == "UklGRg=="
+        assert block.mimeType == "audio/wav"
+
+    def test_audience_annotations_attached(self):
+        tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
+        tool.send_text("for the user", audience=["user"])
+        tool.send_image(data="abc", mime_type="image/png", audience=["assistant"])
+        tool.send_audio(
+            data="def", mime_type="audio/mp3", audience=["user", "assistant"]
+        )
+
+        text, image, audio = tool.extra_content
+        assert text.annotations is not None
+        assert text.annotations.audience == ["user"]
+        assert image.annotations is not None
+        assert image.annotations.audience == ["assistant"]
+        assert audio.annotations is not None
+        assert audio.annotations.audience == ["user", "assistant"]
+
+    def test_no_audience_means_no_annotations(self):
+        tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
+        tool.send_text("plain")
+        assert tool.extra_content[0].annotations is None
+
     def test_send_app_dual_keys_meta(self):
         tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
         tool.send_app("ui://test/widget")
@@ -282,6 +314,70 @@ class TestEnhancerCrashFallback(TestTemplate):
         finally:
             _registry[:] = [e for e in _registry if e.name != svc_name]
             _enhancers.pop(svc_name, None)
+
+
+class TestHeadlessToolErrorPath(TestTemplate):
+    """Headless wrappers must propagate service exceptions unchanged.
+
+    There is deliberately no try/except in `_make_headless_tool` - FastMCP
+    converts the raised exception into a protocol-level error result. If a
+    future refactor swallows the exception, the client would get a bogus
+    success payload instead.
+    """
+
+    class _In(BaseModel):
+        x: int = 0
+
+    class _Out(BaseModel):
+        value: int
+
+    def _register_headless_service(self, svc_name, fn):
+        from mcp.server.fastmcp import FastMCP
+
+        from mcp_server._tool_factory import make_tool
+        from services import _registry, get_registry, service
+
+        service(
+            name=svc_name,
+            description="test",
+            input_model=self._In,
+            output_model=self._Out,
+        )(fn)
+
+        entry = next(e for e in get_registry() if e.name == svc_name)
+        test_mcp = FastMCP("test_headless")
+        make_tool(test_mcp, entry)
+        tool_fn = test_mcp._tool_manager._tools[svc_name].fn
+
+        def cleanup():
+            _registry[:] = [e for e in _registry if e.name != svc_name]
+
+        return tool_fn, cleanup
+
+    def test_service_exception_propagates(self):
+        def _exploding(input):
+            raise ValueError("service blew up")
+
+        tool_fn, cleanup = self._register_headless_service(
+            "__headless_error_test", _exploding
+        )
+        try:
+            with pytest.raises(ValueError, match="service blew up"):
+                tool_fn(x=1)
+        finally:
+            cleanup()
+
+    def test_returns_output_model_instance(self):
+        def _ok(input):
+            return self._Out(value=input.x + 1)
+
+        tool_fn, cleanup = self._register_headless_service("__headless_ok_test", _ok)
+        try:
+            result = tool_fn(x=41)
+            assert isinstance(result, self._Out)
+            assert result.value == 42
+        finally:
+            cleanup()
 
 
 class TestBuildCallToolResultTypeGuard(TestTemplate):

@@ -28,7 +28,7 @@ export type Thread = {
   messages: ThreadMessage[];
 };
 
-type McpAppLike = {
+export type McpAppLike = {
   ontoolresult?: (result: any) => void;  // eslint-disable-line @typescript-eslint/no-explicit-any
   callServerTool: (args: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
 };

@@ -84,7 +84,7 @@ export type Thread = {
 
 export type CurateResult = { threads: CuratedThread[] };
 
-type McpAppLike = {
+export type McpAppLike = {
   ontoolresult?: (result: unknown) => void;
   callServerTool: (args: {
     name: string;
