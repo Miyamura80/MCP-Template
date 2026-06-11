@@ -74,6 +74,13 @@ connection. Streamable HTTP also conveys it via `MCP-Protocol-Version` header.
 ## 7. OAuth 2.1 pitfalls
 
 - MCP server is a **resource server**, not the authorization server (token factory).
+  This template implements exactly that split: RFC 9728 Protected Resource
+  Metadata at `/.well-known/oauth-protected-resource[/mcp]`
+  (`api_server/routes/well_known.py`), a `resource_metadata` hint in the 401
+  `WWW-Authenticate` challenge (`api_server/middleware/mcp_auth.py`), and
+  audience-bound token validation against WorkOS AuthKit
+  (`api_server/auth/authkit_auth.py`). AuthKit is the AS and handles
+  CIMD/DCR/PKCE. Enable via `WORKOS_AUTHKIT_DOMAIN` + `MCP_PUBLIC_URL`.
 - Sessions are anonymous unless wired through OAuth. Machine identity is
   now first-class (M2M client_credentials, Cross App Access).
 - `resource` parameter must match the AS's expected URL **exactly** (trailing

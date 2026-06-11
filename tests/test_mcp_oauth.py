@@ -1,0 +1,293 @@
+"""Tests for OAuth 2.1 resource-server support on the /mcp transport.
+
+Covers AuthKit access-token verification (signature, issuer, audience,
+scope mapping), the RFC 9728 Protected Resource Metadata endpoints, the
+``WWW-Authenticate`` discovery hint on 401, and an end-to-end MCP
+``initialize`` with an OAuth Bearer token.
+"""
+
+import json
+import time
+from unittest.mock import patch
+
+import jwt as pyjwt
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.testclient import TestClient
+
+from api_server.auth.authkit_auth import (
+    mcp_resource_url,
+    resource_metadata_url,
+    verify_authkit_token,
+)
+from tests.test_template import TestTemplate
+
+AUTHKIT_DOMAIN = "https://test-env.authkit.app"
+RESOURCE = "https://mcp.example.com/mcp"
+
+
+def _generate_rsa_keypair():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return private_key, private_key.public_key()
+
+
+def _make_token(private_key, **overrides) -> str:
+    payload = {
+        "sub": "user-oauth",
+        "aud": RESOURCE,
+        "iss": AUTHKIT_DOMAIN,
+        "exp": int(time.time()) + 3600,
+    }
+    payload.update(overrides)
+    return pyjwt.encode(payload, private_key, algorithm="RS256")
+
+
+def _patch_jwks(mock_jwks, public_key) -> None:
+    class FakeSigningKey:
+        key = public_key
+
+    mock_jwks.return_value.get_signing_key_from_jwt.return_value = FakeSigningKey()
+
+
+def _read_sse_first_message(response) -> dict:
+    """Parse the first ``data:`` line from an MCP SSE response."""
+    for line in response.iter_lines():
+        if isinstance(line, bytes):
+            line = line.decode()
+        if line.startswith("data:"):
+            return json.loads(line.removeprefix("data:").strip())
+    raise AssertionError("no SSE data frame in response")
+
+
+class TestAuthKitTokenVerification(TestTemplate):
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_no_domain_returns_none(self, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = None
+        assert verify_authkit_token("anything") is None
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_valid_token(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, email="o@test.com")
+        user = verify_authkit_token(token)
+        assert user is not None
+        assert user.user_id == "user-oauth"
+        assert user.email == "o@test.com"
+        assert user.scopes == ["*"]
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_scope_claim_mapped(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, scope="services:read services:execute")
+        user = verify_authkit_token(token)
+        assert user is not None
+        assert user.scopes == ["services:read", "services:execute"]
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_empty_scope_grants_nothing(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, scope="")
+        user = verify_authkit_token(token)
+        assert user is not None
+        assert user.scopes == []
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_malformed_scope_claim_rejected(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, scope=123)
+        assert verify_authkit_token(token) is None
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_wrong_audience_rejected(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, aud="https://other.example.com/mcp")
+        assert verify_authkit_token(token) is None
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_wrong_issuer_rejected(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, iss="https://evil.example.com")
+        assert verify_authkit_token(token) is None
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_expired_token_rejected(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, exp=int(time.time()) - 3600)
+        assert verify_authkit_token(token) is None
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_missing_sub_rejected(self, mock_jwks, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        payload = {
+            "aud": RESOURCE,
+            "iss": AUTHKIT_DOMAIN,
+            "exp": int(time.time()) + 3600,
+        }
+        token = pyjwt.encode(payload, private_key, algorithm="RS256")
+        assert verify_authkit_token(token) is None
+
+
+class TestResourceUrls(TestTemplate):
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_resource_url_strips_trailing_slash(self, mock_config):
+        mock_config.MCP_PUBLIC_URL = "https://mcp.example.com/mcp/"
+        assert mcp_resource_url() == "https://mcp.example.com/mcp"
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_url_is_path_form(self, mock_config):
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        assert resource_metadata_url() == (
+            "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
+        )
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_resource_url_default_without_config(self, mock_config):
+        mock_config.MCP_PUBLIC_URL = None
+        mock_config.server.port = 8080
+        assert mcp_resource_url() == "http://localhost:8080/mcp"
+
+
+class TestProtectedResourceMetadata(TestTemplate):
+    def _client(self) -> TestClient:
+        from api_server.server import app
+
+        # No lifespan needed: these routes never reach the MCP sub-app.
+        return TestClient(app)
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_served_when_configured(self, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        for path in (
+            "/.well-known/oauth-protected-resource/mcp",
+            "/.well-known/oauth-protected-resource",
+        ):
+            resp = self._client().get(path)
+            assert resp.status_code == 200, path
+            body = resp.json()
+            assert body["resource"] == RESOURCE
+            assert body["authorization_servers"] == [AUTHKIT_DOMAIN]
+            assert body["bearer_methods_supported"] == ["header"]
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_404_when_unconfigured(self, mock_config):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = None
+        resp = self._client().get("/.well-known/oauth-protected-resource/mcp")
+        assert resp.status_code == 404
+
+
+class TestUnauthorizedDiscoveryHint(TestTemplate):
+    def _post_mcp_unauthenticated(self):
+        from api_server.server import app
+
+        # No lifespan: mcp_auth short-circuits before the MCP sub-app.
+        client = TestClient(app)
+        return client.post(
+            "/mcp",
+            headers={"Accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        )
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.middleware.mcp_auth.global_config")
+    def test_401_advertises_resource_metadata(self, mock_mw_config, mock_ak_config):
+        mock_mw_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_ak_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_ak_config.MCP_PUBLIC_URL = RESOURCE
+
+        resp = self._post_mcp_unauthenticated()
+        assert resp.status_code == 401
+        challenge = resp.headers["www-authenticate"]
+        assert challenge.startswith('Bearer realm="mcp"')
+        assert (
+            'resource_metadata="https://mcp.example.com'
+            '/.well-known/oauth-protected-resource/mcp"' in challenge
+        )
+
+    @patch("api_server.middleware.mcp_auth.global_config")
+    def test_401_plain_challenge_when_unconfigured(self, mock_mw_config):
+        mock_mw_config.WORKOS_AUTHKIT_DOMAIN = None
+        resp = self._post_mcp_unauthenticated()
+        assert resp.status_code == 401
+        assert resp.headers["www-authenticate"] == 'Bearer realm="mcp"'
+
+
+class TestMCPInitializeWithOAuthToken(TestTemplate):
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.middleware.mcp_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_initialize_with_authkit_bearer(
+        self, mock_jwks, mock_mw_config, mock_ak_config
+    ):
+        mock_mw_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_mw_config.WORKOS_CLIENT_ID = None
+        mock_ak_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_ak_config.MCP_PUBLIC_URL = RESOURCE
+
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+        token = _make_token(private_key)
+
+        from api_server.server import app
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/mcp",
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "Host": "127.0.0.1:8080",
+                    "Authorization": f"Bearer {token}",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "0"},
+                    },
+                },
+            )
+        assert resp.status_code == 200, resp.text
+        msg = _read_sse_first_message(resp)
+        assert msg["result"]["serverInfo"]["name"] == "mymcp"

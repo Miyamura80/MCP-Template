@@ -210,6 +210,11 @@ class Config(BaseSettings):
     BACKEND_DB_URI: str | None = None
     WORKOS_CLIENT_ID: str | None = None
     WORKOS_API_KEY: str | None = None
+    # AuthKit issuer URL (https://<env>.authkit.app); enables OAuth 2.1 on /mcp
+    WORKOS_AUTHKIT_DOMAIN: str | None = None
+    # Canonical public URL of the /mcp endpoint (RFC 8707 resource identifier);
+    # must match the resource indicator configured in the WorkOS dashboard
+    MCP_PUBLIC_URL: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Stripe & billing
@@ -248,6 +253,28 @@ class Config(BaseSettings):
         ):
             raise ValueError(
                 "SESSION_SECRET_KEY must be set to a strong random value in production"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_mcp_public_url_with_authkit(self) -> "Config":
+        # Strip stray whitespace from .env values (it would break exact
+        # issuer/audience matching) and normalize blank values to None so
+        # they can't bypass the production check below.
+        if self.WORKOS_AUTHKIT_DOMAIN is not None:
+            self.WORKOS_AUTHKIT_DOMAIN = self.WORKOS_AUTHKIT_DOMAIN.strip() or None
+        if self.MCP_PUBLIC_URL is not None:
+            self.MCP_PUBLIC_URL = self.MCP_PUBLIC_URL.strip() or None
+        # Tokens are audience-bound to MCP_PUBLIC_URL; without it the resource
+        # URI falls back to localhost and OAuth silently breaks in production.
+        if (
+            self.DEV_ENV == "prod"
+            and self.WORKOS_AUTHKIT_DOMAIN
+            and not self.MCP_PUBLIC_URL
+        ):
+            raise ValueError(
+                "MCP_PUBLIC_URL must be set when WORKOS_AUTHKIT_DOMAIN is "
+                "enabled in production"
             )
         return self
 

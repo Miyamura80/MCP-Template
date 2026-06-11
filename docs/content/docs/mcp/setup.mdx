@@ -20,8 +20,10 @@ clients (Claude Cowork/Desktop 0.7+, Cursor, etc.) can connect directly:
 }
 ```
 
-Authentication accepts a Bearer JWT (WorkOS) or an API key via `X-API-KEY`,
-same as the REST API. See [Deployment](/docs/deployment) for hosting.
+Authentication accepts an OAuth 2.1 access token (see [OAuth 2.1](/docs/mcp/oauth)
+for zero-provisioning connections from Claude and other clients), a Bearer JWT
+(WorkOS), or an API key via `X-API-KEY`, same as the REST API. See
+[Deployment](/docs/deployment) for hosting.
 
 ## Local (stdio, legacy)
 

@@ -1,11 +1,15 @@
 """Authentication for the streamable-HTTP /mcp endpoint.
 
-Reuses the same Bearer-JWT / API-key flow as the REST API. Implemented as pure
-ASGI middleware (not :class:`BaseHTTPMiddleware`) so it doesn't buffer the
-streaming SSE responses FastMCP emits.
+Accepts, in order: OAuth 2.1 access tokens issued by AuthKit (the MCP-spec
+flow - discovery via RFC 9728, registration and PKCE handled by AuthKit),
+WorkOS session JWTs, and API keys - so REST credentials keep working as a
+parallel path. Implemented as pure ASGI middleware (not
+:class:`BaseHTTPMiddleware`) so it doesn't buffer the streaming SSE responses
+FastMCP emits.
 
-OAuth 2.1 dynamic client registration (the MCP-spec-preferred flow) is tracked
-separately; this middleware accepts the same credentials a REST client would.
+401 responses advertise the Protected Resource Metadata URL via
+``WWW-Authenticate`` when OAuth is configured, which is how MCP clients
+bootstrap the authorization flow.
 """
 
 import json
@@ -13,6 +17,10 @@ import json
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api_server.auth.api_key_auth import validate_api_key
+from api_server.auth.authkit_auth import (
+    resource_metadata_url,
+    verify_authkit_token,
+)
 from api_server.auth.unified_auth import AuthenticatedUser
 from api_server.auth.workos_auth import verify_workos_token
 from common import global_config
@@ -60,6 +68,14 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
     auth_header = headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.removeprefix("Bearer ").strip()
+        oauth_user = verify_authkit_token(token)
+        if oauth_user:
+            return AuthenticatedUser(
+                user_id=oauth_user.user_id,
+                email=oauth_user.email,
+                auth_method="oauth",
+                scopes=oauth_user.scopes,
+            )
         workos_user = verify_workos_token(token)
         if workos_user:
             return AuthenticatedUser(
@@ -68,7 +84,7 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
                 auth_method="jwt",
                 scopes=["*"],
             )
-        if global_config.WORKOS_CLIENT_ID:
+        if global_config.WORKOS_CLIENT_ID or global_config.WORKOS_AUTHKIT_DOMAIN:
             return None
 
     api_key = headers.get("x-api-key", "")
@@ -85,6 +101,14 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
     return None
 
 
+def _www_authenticate_value() -> bytes:
+    """Build the 401 challenge; advertise PRM discovery when OAuth is on."""
+    value = 'Bearer realm="mcp"'
+    if global_config.WORKOS_AUTHKIT_DOMAIN:
+        value += f', resource_metadata="{resource_metadata_url()}"'
+    return value.encode("latin-1")
+
+
 async def _send_unauthorized(send: Send) -> None:
     body = json.dumps(
         {
@@ -99,7 +123,7 @@ async def _send_unauthorized(send: Send) -> None:
             "status": 401,
             "headers": [
                 (b"content-type", b"application/json"),
-                (b"www-authenticate", b'Bearer realm="mcp"'),
+                (b"www-authenticate", _www_authenticate_value()),
                 (b"content-length", str(len(body)).encode()),
             ],
         }
