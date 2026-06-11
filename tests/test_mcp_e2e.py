@@ -69,13 +69,16 @@ class _McpSession:
         self._api_key = api_key
         self._session_id: str | None = None
         self._next_id = 0
+        self._protocol_version = _PROTOCOL_VERSION
 
     def _headers(self) -> dict:
         headers = {
             "Accept": "application/json, text/event-stream",
             "Host": "127.0.0.1:8080",
             "X-API-KEY": self._api_key,
-            "MCP-Protocol-Version": _PROTOCOL_VERSION,
+            # Post-initialize requests must carry the *negotiated* version,
+            # not the one the client originally requested.
+            "MCP-Protocol-Version": self._protocol_version,
         }
         if self._session_id:
             headers["mcp-session-id"] = self._session_id
@@ -118,6 +121,7 @@ class _McpSession:
                 "clientInfo": {"name": "e2e-test", "version": "0"},
             },
         )
+        self._protocol_version = result["protocolVersion"]
         self.notify("notifications/initialized")
         return result
 
