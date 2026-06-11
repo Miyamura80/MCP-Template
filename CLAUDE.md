@@ -211,6 +211,20 @@ force-include` in `pyproject.toml` so the HTML ships in the wheel.
 See `mcp_server/MCP_UI_ARCHITECTURE.md` for design rationale and
 `mcp_server/MCP_UI_EDGE_CASES.md` for the edge-case spec.
 
+### MCP testing (two tiers)
+
+- **Fast tier (default CI, pytest):** unit tests for the enhancer machinery
+  plus `tests/test_mcp_e2e.py`, which runs a full MCP session over the
+  streamable-HTTP mount and asserts the wire format (outputSchema,
+  `_meta.ui`, CallToolResult assembly). No Node needed.
+- **Conformance tier:** `make mcp_conformance` (MCPJam protocol + apps
+  suites, CI-gated, needs Node). OAuth conformance is manual - see
+  `docs/content/docs/mcp/oauth.mdx`.
+- App frontends: vitest per app (`bun run test` in `mcp_server/apps/<name>/`,
+  not in CI); each app has an `appContract.test.ts` pinning the real
+  `ext-apps` `App` surface against the `McpAppLike` mock type. Driving the
+  rendered iframe end-to-end is deliberately uncovered (#37 deferred).
+
 ## Subagents
 
 - Folder-size CI failure → spawn subagent `.claude/agents/folder-refactor-advisor.md`.
