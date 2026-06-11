@@ -1,15 +1,26 @@
 """Tests for the MCP enhancer infrastructure (EnhancedTool, registration, fallback)."""
 
 import asyncio
+import base64
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from mcp.server.elicitation import AcceptedElicitation
+from mcp.server.fastmcp import FastMCP
+from mcp.types import AudioContent, TextContent
 from pydantic import BaseModel
 
-from mcp_server.enhancers import enhance, get_enhancer
+from mcp_server._tool_factory import _build_call_tool_result, make_tool
+from mcp_server.enhancers import _enhancers, enhance, get_enhancer
 from mcp_server.enhancers.base import EnhancedTool
+from mcp_server.enhancers.config import (
+    _format_config_lines,
+    _render_config_image,
+    config_show_enhanced,
+)
+from models.config import ConfigShowInput, ConfigShowResult
+from services import _registry, get_registry, service
 from tests.test_template import TestTemplate
 
 
@@ -71,8 +82,6 @@ class TestEnhancedTool(TestTemplate):
         assert tool.can_show_app is False
 
     def test_send_text_appends_content(self):
-        from mcp.types import TextContent
-
         tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
         tool.send_text("hello")
         assert len(tool.extra_content) == 1
@@ -87,8 +96,6 @@ class TestEnhancedTool(TestTemplate):
         assert tool.extra_content[0].type == "image"
 
     def test_send_audio_appends_content(self):
-        from mcp.types import AudioContent
-
         tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
         tool.send_audio(data="UklGRg==", mime_type="audio/wav")
         assert len(tool.extra_content) == 1
@@ -140,9 +147,8 @@ class TestEnhancedTool(TestTemplate):
 
 class TestEnhancerRegistry(TestTemplate):
     def test_get_enhancer_returns_registered(self):
-        # Importing mcp_server.enhancers.config registers the config_show enhancer.
-        import mcp_server.enhancers.config  # noqa: F401
-
+        # Importing mcp_server.enhancers.config (at module top) registers the
+        # config_show enhancer.
         entry = get_enhancer("config_show")
         assert entry is not None
         assert entry.fallback == "headless"
@@ -150,8 +156,6 @@ class TestEnhancerRegistry(TestTemplate):
     def test_duplicate_registration_raises(self):
         # Use a unique service name to avoid conflicting with real services.
         # Clean up after ourselves so the test stays idempotent under repeat runs.
-        from mcp_server.enhancers import _enhancers
-
         name = "__test_dup_service"
         _enhancers.pop(name, None)
         try:
@@ -177,11 +181,6 @@ class TestEnhancerCrashFallback(TestTemplate):
 
     def _register_test_service_and_get_tool_fn(self, fallback_mode, enhancer_fn):
         """Register a throwaway service + enhancer, register the tool, return the wrapped fn."""
-        from mcp.server.fastmcp import FastMCP
-
-        from mcp_server._tool_factory import make_tool
-        from mcp_server.enhancers import _enhancers, enhance
-        from services import _registry, service
 
         class _CrashIn(BaseModel):
             x: int = 0
@@ -201,8 +200,6 @@ class TestEnhancerCrashFallback(TestTemplate):
             return _CrashOut(value=input.x * 100)
 
         enhance(svc_name, fallback=fallback_mode)(enhancer_fn)
-
-        from services import get_registry
 
         entry = next(e for e in get_registry() if e.name == svc_name)
         test_mcp = FastMCP("test_crash")
@@ -269,12 +266,6 @@ class TestEnhancerCrashFallback(TestTemplate):
             cleanup()
 
     def test_context_is_injected_and_not_published_in_schema(self):
-        from mcp.server.fastmcp import FastMCP
-
-        from mcp_server._tool_factory import make_tool
-        from mcp_server.enhancers import _enhancers
-        from services import _registry, service
-
         class _CtxIn(BaseModel):
             x: int
 
@@ -298,8 +289,6 @@ class TestEnhancerCrashFallback(TestTemplate):
             return tool.call()
 
         try:
-            from services import get_registry
-
             entry = next(e for e in get_registry() if e.name == svc_name)
             test_mcp = FastMCP("test_context_schema")
             make_tool(test_mcp, entry)
@@ -332,11 +321,6 @@ class TestHeadlessToolErrorPath(TestTemplate):
         value: int
 
     def _register_headless_service(self, svc_name, fn):
-        from mcp.server.fastmcp import FastMCP
-
-        from mcp_server._tool_factory import make_tool
-        from services import _registry, get_registry, service
-
         service(
             name=svc_name,
             description="test",
@@ -384,15 +368,11 @@ class TestBuildCallToolResultTypeGuard(TestTemplate):
     """_build_call_tool_result must reject non-BaseModel results loudly."""
 
     def test_rejects_non_basemodel_result(self):
-        from mcp_server._tool_factory import _build_call_tool_result
-
         tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
         with pytest.raises(TypeError, match="must be a Pydantic BaseModel"):
             _build_call_tool_result("not a model", tool)  # ty: ignore[invalid-argument-type]
 
     def test_accepts_basemodel_result(self):
-        from mcp_server._tool_factory import _build_call_tool_result
-
         tool = EnhancedTool(ctx=_make_mock_ctx(), input=_Input(), service_fn=_service)
         result = _build_call_tool_result(_Output(doubled=4), tool)
         assert result.structuredContent == {"doubled": 4}
@@ -402,10 +382,6 @@ class TestConfigImageEnhancer(TestTemplate):
     """The config_show enhancer renders a PNG of the config tree."""
 
     def test_returns_base64_png_data(self):
-        import base64
-
-        from mcp_server.enhancers.config import _render_config_image
-
         data = _render_config_image({"a": 1, "b": {"c": "hello"}})
         assert data is not None
         decoded = base64.b64decode(data)
@@ -413,15 +389,11 @@ class TestConfigImageEnhancer(TestTemplate):
         assert decoded[:8] == b"\x89PNG\r\n\x1a\n"
 
     def test_handles_empty_config(self):
-        from mcp_server.enhancers.config import _render_config_image
-
         data = _render_config_image({})
         assert data is not None  # still produces a (small) image
 
     def test_handles_deeply_nested_config(self):
         """Depth limiter should kick in past 4 levels - should not infinite-recurse."""
-        from mcp_server.enhancers.config import _format_config_lines
-
         nested: dict = {"a": 1}
         cur = nested
         for i in range(20):
@@ -432,9 +404,6 @@ class TestConfigImageEnhancer(TestTemplate):
         assert any("..." in line for line in lines)
 
     def test_enhancer_attaches_image_when_capability_allows(self):
-        from mcp_server.enhancers.config import config_show_enhanced
-        from models.config import ConfigShowInput, ConfigShowResult
-
         def fake_service(_input: ConfigShowInput) -> ConfigShowResult:
             return ConfigShowResult(config={"hello": "world"})
 

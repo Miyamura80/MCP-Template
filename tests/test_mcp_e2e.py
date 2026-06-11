@@ -23,8 +23,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api_server.auth.api_key_auth import create_api_key
+from api_server.server import app
 from db import engine as db_engine
 from db.base import Base
+from mcp_server._tool_factory import make_tool
+from mcp_server.enhancers import _enhancers, enhance
+from mcp_server.server import mcp
+from services import _registry, get_registry, service
 from tests.test_template import TestTemplate
 
 _PROTOCOL_VERSION = "2025-03-26"
@@ -136,8 +141,6 @@ def _wire_session(user_id: str):
             with session_factory() as s:
                 raw_key, _ = create_api_key(s, user_id=user_id, scopes=["*"])
 
-            from api_server.server import app
-
             with TestClient(app) as client:
                 session = _McpSession(client, raw_key)
                 session.handshake()
@@ -200,12 +203,6 @@ class TestMCPWireE2E(TestTemplate):
         """Register a throwaway enhanced tool and call it through the wire,
         asserting the CallToolResult parts (text + extra content, _meta.ui,
         structuredContent) as serialized - not via in-process imports."""
-        from mcp.server.fastmcp import FastMCP  # noqa: F401  (import guard)
-
-        from mcp_server._tool_factory import make_tool
-        from mcp_server.enhancers import _enhancers, enhance
-        from mcp_server.server import mcp
-        from services import _registry, get_registry, service
 
         class _In(BaseModel):
             x: int = 0

@@ -1,6 +1,7 @@
 """Tests for telemetry integration: notice shown once, events recorded, opt-out respected."""
 
 import json
+import threading
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -10,6 +11,13 @@ from src.cli.app import (
     _register_builtin_commands,
     _register_user_commands,
     app,
+)
+from src.cli.telemetry import (
+    _MAX_EVENTS,
+    _post_event,
+    is_enabled,
+    record_event,
+    show_first_run_notice,
 )
 from tests.test_template import TestTemplate
 
@@ -31,8 +39,6 @@ class TestTelemetryNotice(TestTemplate):
             patch("src.cli.telemetry.load_state", return_value={}),
             patch("src.cli.telemetry.save_state") as mock_save,
         ):
-            from src.cli.telemetry import show_first_run_notice
-
             show_first_run_notice()
             mock_save.assert_called_once()
             saved = mock_save.call_args[0][0]
@@ -47,8 +53,6 @@ class TestTelemetryNotice(TestTemplate):
             ),
             patch("src.cli.telemetry.save_state") as mock_save,
         ):
-            from src.cli.telemetry import show_first_run_notice
-
             show_first_run_notice()
             mock_save.assert_not_called()
 
@@ -59,8 +63,6 @@ class TestTelemetryNotice(TestTemplate):
             patch("src.cli.telemetry.save_state") as mock_save,
             patch("src.cli.telemetry.is_enabled", return_value=False),
         ):
-            from src.cli.telemetry import show_first_run_notice
-
             show_first_run_notice()
             # State is still marked as shown so we don't re-check every run
             mock_save.assert_called_once()
@@ -80,8 +82,6 @@ class TestRecordEvent(TestTemplate):
             patch("src.cli.telemetry.is_enabled", return_value=True),
             patch("src.cli.telemetry._post_event"),
         ):
-            from src.cli.telemetry import record_event
-
             record_event(command="greet", duration=0.123, success=True)
 
             events = json.loads(tel_file.read_text())
@@ -98,23 +98,17 @@ class TestRecordEvent(TestTemplate):
             patch("src.cli.telemetry._TELEMETRY_FILE", tel_file),
             patch("src.cli.telemetry.is_enabled", return_value=False),
         ):
-            from src.cli.telemetry import record_event
-
             record_event(command="greet", duration=0.1, success=True)
 
             assert not tel_file.exists()
 
     def test_opt_out_via_env_var(self):
         with patch.dict("os.environ", {"CLI_TELEMETRY_DISABLED": "1"}):
-            from src.cli.telemetry import is_enabled
-
             assert is_enabled() is False
 
     def test_max_events_cap(self, tmp_path):
         tel_file = tmp_path / "telemetry.json"
         # Seed with _MAX_EVENTS existing events
-        from src.cli.telemetry import _MAX_EVENTS
-
         existing = [{"command": f"old-{i}"} for i in range(_MAX_EVENTS)]
         tel_file.write_text(json.dumps(existing))
 
@@ -124,8 +118,6 @@ class TestRecordEvent(TestTemplate):
             patch("src.cli.telemetry.is_enabled", return_value=True),
             patch("src.cli.telemetry._post_event"),
         ):
-            from src.cli.telemetry import record_event
-
             record_event(command="new", duration=0.01, success=True)
 
             events = json.loads(tel_file.read_text())
@@ -146,8 +138,6 @@ class TestPostEvent(TestTemplate):
             patch("src.cli.telemetry.is_enabled", return_value=True),
             patch("src.cli.telemetry._post_event") as mock_post,
         ):
-            from src.cli.telemetry import record_event
-
             record_event(command="config", duration=0.05, success=True)
 
             mock_post.assert_called_once()
@@ -156,14 +146,10 @@ class TestPostEvent(TestTemplate):
 
     def test_post_skipped_when_no_endpoint(self):
         with patch("src.cli.telemetry._get_endpoint", return_value=None):
-            from src.cli.telemetry import _post_event
-
             # Should not raise
             _post_event({"command": "test"})
 
     def test_post_failure_does_not_raise(self):
-        import threading
-
         threads_started = []
         _real_thread_cls = threading.Thread
 
@@ -184,8 +170,6 @@ class TestPostEvent(TestTemplate):
             ),
             patch("threading.Thread", _SyncThread),
         ):
-            from src.cli.telemetry import _post_event
-
             # Best-effort: should not raise even when urlopen fails
             _post_event({"command": "test"})
             assert len(threads_started) == 1

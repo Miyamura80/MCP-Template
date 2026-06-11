@@ -9,6 +9,8 @@ from loguru import logger as log
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
+from api_server.billing.stripe_config import reset_stripe_on_auth_error
+
 # Map HTTP status codes to error code strings
 _STATUS_CODE_MAP: dict[int, str] = {
     400: "bad_request",
@@ -191,10 +193,6 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             # Sanitize Stripe errors
             if _is_stripe_error(exc):
                 if _is_stripe_auth_error(exc):
-                    from api_server.billing.stripe_config import (
-                        reset_stripe_on_auth_error,
-                    )
-
                     reset_stripe_on_auth_error()
                 return _build_error_response(
                     502,

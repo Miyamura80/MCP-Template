@@ -5,11 +5,18 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api_server.billing.limits import LimitStatus, ensure_daily_limit
+from api_server.billing.stripe_config import (
+    get_included_units,
+    get_meter_event_name,
+    get_stripe_price_id,
+    get_webhook_secret,
+)
 from db.base import Base
 from db.models.subscription_types import SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
@@ -68,8 +75,6 @@ class TestEnsureDailyLimit(TestTemplate):
         )
         session.add(sub)
         session.commit()
-
-        from fastapi import HTTPException
 
         with (
             patch(
@@ -131,13 +136,6 @@ class TestSubscriptionModel(TestTemplate):
 class TestStripeGracefulDegradation(TestTemplate):
     def test_stripe_config_functions_exist(self):
         """Stripe config module exposes the expected API."""
-        from api_server.billing.stripe_config import (
-            get_included_units,
-            get_meter_event_name,
-            get_stripe_price_id,
-            get_webhook_secret,
-        )
-
         # These should not raise when called (graceful degradation)
         assert isinstance(get_stripe_price_id(), str)
         assert isinstance(get_meter_event_name(), str)

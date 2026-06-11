@@ -21,8 +21,13 @@ from loguru import logger as log
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
+from api_server.auth.api_key_auth import get_user_id_for_key_hash
+from api_server.auth.workos_auth import verify_workos_token
+
 # Paths that bypass rate limiting.
 from api_server.billing.stripe_config import STRIPE_WEBHOOK_PATH
+from db.engine import use_db_session
+from db.models.user_subscriptions import UserSubscription
 
 _EXEMPT_PATHS = frozenset({"/health", "/mcp", STRIPE_WEBHOOK_PATH})
 _EXEMPT_PREFIXES = ("/mcp/",)
@@ -39,7 +44,10 @@ def _build_storage() -> Storage:
     """Use Redis when REDIS_URL is set, otherwise in-memory."""
     redis_url = None
     try:
-        from common import global_config
+        # Deliberately lazy: config load happens per-call inside this
+        # try so a failing/pruned config degrades to memory storage
+        # (see the ImportError handler below) instead of crashing import.
+        from common import global_config  # noqa: PLC0415
 
         redis_url = getattr(global_config, "REDIS_URL", None)
     except (ImportError, AttributeError):
@@ -47,7 +55,9 @@ def _build_storage() -> Storage:
 
     if redis_url:
         try:
-            from limits.storage import RedisStorage
+            # Deliberately lazy: RedisStorage pulls in the optional redis
+            # backend; an ImportError must degrade to MemoryStorage below.
+            from limits.storage import RedisStorage  # noqa: PLC0415
 
             return RedisStorage(redis_url)
         except Exception as exc:  # noqa: BLE001
@@ -70,7 +80,9 @@ def _build_storage() -> Storage:
 def _get_tier_limits(tier: str) -> dict:
     """Get rate limit values for a subscription tier from config."""
     try:
-        from common import global_config
+        # Deliberately lazy: config failures fall back to default limits
+        # via the except (ImportError, ...) below (see _build_storage).
+        from common import global_config  # noqa: PLC0415
 
         rate_limit_cfg = getattr(global_config, "rate_limit", None)
         if rate_limit_cfg and hasattr(rate_limit_cfg, "tiers"):
@@ -88,7 +100,9 @@ def _get_tier_limits(tier: str) -> dict:
 def _trust_proxy_headers() -> bool:
     """Return True when the deployment sits behind a trusted reverse proxy."""
     try:
-        from common import global_config
+        # Deliberately lazy: config failures fall back to "don't trust
+        # proxy headers" via the except (ImportError, ...) below.
+        from common import global_config  # noqa: PLC0415
 
         rate_limit_cfg = getattr(global_config, "rate_limit", None)
         if rate_limit_cfg and hasattr(rate_limit_cfg, "trust_proxy_headers"):
@@ -134,8 +148,6 @@ async def _identity(request: Request) -> str:
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         try:
-            from api_server.auth.workos_auth import verify_workos_token
-
             workos_user = await asyncio.to_thread(verify_workos_token, token)
             if workos_user:
                 request.state._rl_user_id = workos_user.user_id
@@ -183,15 +195,10 @@ def _lookup_tier_sync(cache_key: str, *, user_id: str | None = None) -> str:
 
     tier = "default"
     try:
-        from db.engine import use_db_session
-        from db.models.user_subscriptions import UserSubscription
-
         with use_db_session() as session:
             resolved_user_id = user_id
             if resolved_user_id is None:
                 # Reuse the canonical key validity check from api_key_auth
-                from api_server.auth.api_key_auth import get_user_id_for_key_hash
-
                 resolved_user_id = get_user_id_for_key_hash(session, cache_key)
 
             if resolved_user_id:
@@ -254,8 +261,6 @@ async def _resolve_tier(request: Request) -> str:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             try:
-                from api_server.auth.workos_auth import verify_workos_token
-
                 token = auth_header.removeprefix("Bearer ").strip()
                 workos_user = await asyncio.to_thread(verify_workos_token, token)
                 if workos_user:
@@ -384,7 +389,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if self._testing:
             return True
         try:
-            from common import global_config
+            # Deliberately lazy: config failures must not disable the
+            # exemption check; the except (ImportError, ...) below applies.
+            from common import global_config  # noqa: PLC0415
 
             rate_limit_cfg = getattr(global_config, "rate_limit", None)
             if (

@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session
 
 from api_server.auth import AuthenticatedUser
 from api_server.auth.scopes import BILLING_WRITE, require_scopes
-from api_server.billing.stripe_config import ensure_stripe, get_stripe_price_id
+from api_server.billing.stripe_config import (
+    ensure_stripe,
+    get_stripe_price_id,
+    reset_stripe_on_auth_error,
+)
+from common import global_config
 from db.engine import get_db_session
 from db.models.subscription_types import SubscriptionStatus, SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
@@ -27,7 +32,9 @@ def _delete_orphaned_customer(orphaned_id: str, user_id: str, winner_id: str) ->
         winner_id,
     )
     try:
-        import stripe
+        # Deliberately lazy: routes must import (and the app boot) without
+        # the stripe SDK; billing endpoints 503 via ensure_stripe() instead.
+        import stripe  # noqa: PLC0415
 
         stripe.Customer.delete(orphaned_id)
     except Exception:  # noqa: BLE001
@@ -98,7 +105,8 @@ def _ensure_stripe_customer(
 
     Returns ``(customer_id, sub)`` where *sub* may be newly created.
     """
-    import stripe
+    # Deliberately lazy: stripe SDK optional (see _delete_orphaned_customer).
+    import stripe  # noqa: PLC0415
 
     customer_id = sub.stripe_customer_id if sub else None
     if customer_id:
@@ -191,7 +199,8 @@ def create_checkout(
     if not ensure_stripe():
         raise HTTPException(status_code=503, detail="Billing not configured")
 
-    import stripe
+    # Deliberately lazy: stripe SDK optional (see _delete_orphaned_customer).
+    import stripe  # noqa: PLC0415
 
     # Check for existing active subscription
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
@@ -209,8 +218,6 @@ def create_checkout(
     price_id = get_stripe_price_id()
     if not price_id:
         raise HTTPException(status_code=503, detail="Stripe price ID not configured")
-
-    from common import global_config
 
     frontend_url = global_config.FRONTEND_URL.rstrip("/")
 
@@ -244,7 +251,8 @@ def cancel_subscription(
     if not ensure_stripe():
         raise HTTPException(status_code=503, detail="Billing not configured")
 
-    import stripe
+    # Deliberately lazy: stripe SDK optional (see _delete_orphaned_customer).
+    import stripe  # noqa: PLC0415
 
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
     if not sub or not sub.stripe_subscription_id:
@@ -262,8 +270,6 @@ def cancel_subscription(
             cancel_at_period_end=True,
         )
     except stripe.AuthenticationError:
-        from api_server.billing.stripe_config import reset_stripe_on_auth_error
-
         reset_stripe_on_auth_error()
         raise HTTPException(
             status_code=503, detail="Stripe authentication failed; please retry"

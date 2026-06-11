@@ -5,15 +5,13 @@ from fastapi import APIRouter, Depends
 from api_server.auth import AuthenticatedUser
 from api_server.auth.scopes import SERVICES_EXECUTE, require_scopes
 from api_server.billing.limits import ensure_daily_limit
-from services import ServiceEntry
+from services import ServiceEntry, discover_services, get_registry
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
 
 def _register_service_routes() -> None:
     """Discover all service modules and create one route per service."""
-    from services import discover_services, get_registry
-
     discover_services()
     for entry in get_registry():
         _make_route(entry)

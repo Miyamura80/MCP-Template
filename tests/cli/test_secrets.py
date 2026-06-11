@@ -3,6 +3,7 @@
 from contextlib import ExitStack
 from unittest.mock import patch
 
+import keyring.errors
 from typer.testing import CliRunner
 
 from src.cli.app import _register_builtin_commands, _register_user_commands, app
@@ -28,8 +29,6 @@ class FakeKeyring:
         self.store[(service, key)] = value
 
     def delete_password(self, service: str, key: str) -> None:
-        import keyring.errors
-
         if (service, key) not in self.store:
             raise keyring.errors.PasswordDeleteError(f"No password for {key}")
         del self.store[(service, key)]

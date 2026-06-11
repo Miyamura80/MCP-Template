@@ -7,6 +7,7 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from db.models.api_keys import APIKey
@@ -84,8 +85,6 @@ def get_user_id_for_key_hash(session: Session, key_hash: str) -> str | None:
     Shared by auth validation and rate-limit tier lookup to keep validity
     checks in a single place.
     """
-    from sqlalchemy import or_
-
     row = (
         session.query(APIKey.user_id)
         .filter(

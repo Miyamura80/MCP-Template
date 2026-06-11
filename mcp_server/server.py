@@ -21,6 +21,7 @@ from loguru import logger as log
 from mcp.server.fastmcp import FastMCP
 
 from mcp_server._tool_factory import make_tool
+from services import discover_services, get_registry
 
 _APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -56,9 +57,11 @@ def build_mcp_server() -> FastMCP:
     if _populated:
         return mcp
 
-    from mcp_server.app_tools import discover_app_tools
-    from mcp_server.enhancers import discover_enhancers
-    from services import discover_services, get_registry
+    # Deferred by design (see CLAUDE.md): discovery imports app_tools /
+    # enhancer modules at registration time, and those modules import this
+    # module's `mcp` singleton back, so the packages must only load here.
+    from mcp_server.app_tools import discover_app_tools  # noqa: PLC0415
+    from mcp_server.enhancers import discover_enhancers  # noqa: PLC0415
 
     discover_services()
     discover_enhancers()

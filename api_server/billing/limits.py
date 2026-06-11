@@ -9,6 +9,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from common import global_config
 from db.engine import use_db_session
 from db.models.subscription_types import SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
@@ -64,8 +65,6 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
     load.  Uses ``daily_quota_reset_at`` (not ``current_period_start``) for
     day-boundary tracking so the Stripe billing period is never corrupted.
     """
-    from common import global_config
-
     cfg = global_config.subscription_config
 
     with use_db_session() as session:

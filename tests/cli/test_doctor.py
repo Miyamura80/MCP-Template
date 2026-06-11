@@ -4,12 +4,13 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from models.doctor import CheckResultModel
+from models.doctor import CheckResultModel, DoctorInput
 from services.doctor_svc import (
     _check_env_exists,
     _check_git_repo,
     _check_python_version,
     _check_uv_installed,
+    doctor,
 )
 from src.cli.app import _register_builtin_commands, _register_user_commands, app
 from tests.test_template import TestTemplate
@@ -87,9 +88,6 @@ class TestDoctor(TestTemplate):
         assert cr.fixable is True
 
     def test_check_status_values(self):
-        from models.doctor import DoctorInput
-        from services.doctor_svc import doctor
-
         dr = doctor(DoctorInput())
         for check in dr.checks:
             assert check.status in ("pass", "fail", "warn"), (

@@ -14,6 +14,7 @@ bootstrap the authorization flow.
 
 import json
 
+import anyio
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api_server.auth.api_key_auth import validate_api_key
@@ -55,8 +56,6 @@ class MCPAuthMiddleware:
 
 async def _authenticate_async(scope: Scope) -> AuthenticatedUser | None:
     """Run blocking auth I/O in a thread to avoid blocking the event loop."""
-    import anyio
-
     return await anyio.to_thread.run_sync(lambda: _authenticate(scope))  # ty: ignore[unresolved-attribute]
 
 

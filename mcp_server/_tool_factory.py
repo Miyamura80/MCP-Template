@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
 from mcp_server.enhancers.base import EnhancedTool, build_app_meta
 from services import ServiceEntry
+from src.utils.current_user import current_user
 
 
 def _check_scopes() -> None:
@@ -30,13 +31,13 @@ def _check_scopes() -> None:
 
     Skips silently when no authenticated user is bound (CLI / stdio).
     """
-    from src.utils.current_user import current_user
-
     user = current_user()
     if user is None:
         return
 
-    from api_server.auth.scopes import SERVICES_EXECUTE, check_scopes
+    # Circular import: api_server.server mounts mcp_server.server, which
+    # imports this module - api_server.* must only load at call time.
+    from api_server.auth.scopes import SERVICES_EXECUTE, check_scopes  # noqa: PLC0415
 
     if not check_scopes([SERVICES_EXECUTE], user.scopes):
         raise PermissionError(
@@ -50,13 +51,13 @@ def _check_quota() -> None:
     Skips silently when no authenticated user is bound (CLI / stdio).
     Called *after* input validation so malformed requests don't burn quota.
     """
-    from src.utils.current_user import current_user
-
     user = current_user()
     if user is None:
         return
 
-    from api_server.billing.limits import ensure_daily_limit
+    # Circular import: api_server.server mounts mcp_server.server, which
+    # imports this module - api_server.* must only load at call time.
+    from api_server.billing.limits import ensure_daily_limit  # noqa: PLC0415
 
     ensure_daily_limit(user.user_id)
 
@@ -79,8 +80,6 @@ def _make_headless_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
     def tool_fn(**kwargs):
         _check_scopes()
         if "user_id" in input_model.model_fields:  # ty: ignore[unresolved-attribute]
-            from src.utils.current_user import current_user
-
             user = current_user()
             if user is not None:
                 kwargs["user_id"] = user.user_id
@@ -105,8 +104,6 @@ def _make_enhanced_tool(
     async def tool_fn(ctx: Context, **kwargs) -> CallToolResult:
         _check_scopes()
         if "user_id" in input_model.model_fields:  # ty: ignore[unresolved-attribute]
-            from src.utils.current_user import current_user
-
             user = current_user()
             if user is not None:
                 kwargs["user_id"] = user.user_id

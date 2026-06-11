@@ -28,8 +28,10 @@ def main(
         typer.echo(f"[DRY RUN] Would greet {name}")
         return
 
-    from models.greet import GreetInput
-    from services.greet import greet
+    # Lazy by design: this module is imported on every CLI startup; keep
+    # model/service imports out of it so `--help` stays fast.
+    from models.greet import GreetInput  # noqa: PLC0415
+    from services.greet import greet  # noqa: PLC0415
 
     result = greet(GreetInput(name=name or "", shout=shout, times=times))
 

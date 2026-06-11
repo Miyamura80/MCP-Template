@@ -1,5 +1,7 @@
 """Tests for service layer - pure business logic, no transport."""
 
+import pytest
+
 from models.config import ConfigGetInput, ConfigShowInput
 from models.doctor import DoctorInput
 from models.greet import GreetInput
@@ -35,8 +37,6 @@ class TestConfigService(TestTemplate):
         assert result.key == "llm_config.cache_enabled"
 
     def test_config_get_nonexistent(self):
-        import pytest
-
         with pytest.raises(KeyError):
             config_get(ConfigGetInput(key="nonexistent.key"))
 

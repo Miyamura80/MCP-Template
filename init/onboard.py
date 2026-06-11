@@ -1876,8 +1876,8 @@ def _check_gemini_key() -> bool:
 def _run_media_generation(choice: str, project_name: str, theme: str) -> list[str]:
     """Run the selected media generation and return list of generated file paths."""
     # Import here to avoid requiring GEMINI_API_KEY for non-media commands
-    from init.generate_banner import generate_banner as gen_banner
-    from init.generate_logo import generate_logo as gen_logo
+    from init.generate_banner import generate_banner as gen_banner  # noqa: PLC0415
+    from init.generate_logo import generate_logo as gen_logo  # noqa: PLC0415
 
     generated_files: list[str] = []
 

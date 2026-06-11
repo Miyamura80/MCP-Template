@@ -11,6 +11,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from common import global_config
+
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 
@@ -21,8 +23,6 @@ def _init_engine() -> Engine:
 
     if _engine is not None:
         return _engine
-
-    from common import global_config
 
     uri = global_config.BACKEND_DB_URI
     if not uri:

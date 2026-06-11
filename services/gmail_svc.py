@@ -30,6 +30,7 @@ from common import global_config
 from db.engine import use_db_session
 from db.models.google_tokens import GoogleToken
 from models.gmail import (
+    AttachmentInput,
     GmailConnectInput,
     GmailConnectResult,
     GmailDisconnectInput,
@@ -226,7 +227,10 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
         # Best-effort decrypt + remote revoke. Failures here are non-fatal:
         # the row is still marked revoked locally below.
         try:
-            from common.token_encryption import require_encryption
+            # Call-time import: tests patch
+            # common.token_encryption.require_encryption, so binding it at
+            # module import would bypass the patch.
+            from common.token_encryption import require_encryption  # noqa: PLC0415
 
             enc = require_encryption()
             refresh_token = enc.decrypt(row.refresh_token_enc)
@@ -303,10 +307,14 @@ def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource 
         if now < expires_at:
             return client
 
-    from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
+    # Deliberate deferral: the Google SDK (discovery machinery) is heavy -
+    # only load it when a Gmail API call is actually made, not at service
+    # discovery / module import.
+    from google.oauth2.credentials import Credentials  # noqa: PLC0415
+    from googleapiclient.discovery import build  # noqa: PLC0415
 
-    from common.token_encryption import require_encryption
+    # Call-time import: tests patch common.token_encryption.require_encryption.
+    from common.token_encryption import require_encryption  # noqa: PLC0415
 
     with _get_db_session() as session:
         row = _load_token_row(session, user_id)
@@ -352,8 +360,6 @@ def _build_raw_message(
     the text body as the first part and each attachment as a subsequent part.
     Each attachment object must have ``filename``, ``mime_type``, and ``data_base64``.
     """
-    from models.gmail import AttachmentInput
-
     msg = EmailMessage()
     msg["To"] = to
     if cc:

@@ -22,8 +22,10 @@ from src.utils.current_user import current_user
 
 def guard_user_id(claimed_user_id: str) -> str:
     """Enforce scopes + quota, return the user_id the caller may act on."""
-    # Local import to avoid pulling api_server.* into mcp_server module-import.
-    from mcp_server._tool_factory import _check_quota, _check_scopes
+    # Deliberate local import: _check_scopes/_check_quota reach api_server.*
+    # at call time, and api_server.server circularly imports mcp_server - keep
+    # the registration machinery out of app_tools module-import.
+    from mcp_server._tool_factory import _check_quota, _check_scopes  # noqa: PLC0415
 
     _check_scopes()
     user = current_user()

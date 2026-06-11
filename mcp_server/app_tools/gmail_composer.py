@@ -35,6 +35,7 @@ from services.gmail_drafts_svc import (
 from services.gmail_messages_svc import (
     gmail_get_thread as _gmail_get_thread,
 )
+from services.gmail_svc import _get_gmail_client
 
 _APP_META = {"ui": {"visibility": ["app"]}}
 
@@ -139,8 +140,6 @@ def get_thread(thread_id: str, user_id: str = "") -> GmailThread:
 )
 def get_attachment(message_id: str, attachment_id: str, user_id: str = "") -> dict:
     """Return ``{data_base64}`` for the given attachment."""
-    from services.gmail_svc import _get_gmail_client
-
     uid = guard_user_id(user_id)
     svc = _get_gmail_client(uid)
     att = (

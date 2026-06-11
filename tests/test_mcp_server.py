@@ -1,23 +1,25 @@
 """Tests for MCP server tool registration."""
 
 import asyncio
+from pathlib import Path
 
+from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
+
+from mcp_server.server import _register_app_resource, mcp
+from services import get_registry
 from tests.test_template import TestTemplate
 
 
 class TestMCPServer(TestTemplate):
     def test_server_imports(self):
-        from mcp_server.server import mcp
-
         assert mcp is not None
 
     def test_all_services_registered_as_tools(self):
-        # Importing server.py triggers service module imports + registration.
-        # Some services are deliberately not exposed through the default MCP
-        # surface, but they remain available to CLI/API transports.
-        import mcp_server.server  # noqa: F401
-        from services import get_registry
-
+        # Importing mcp_server.server (at module top) triggers service module
+        # imports + registration. Some services are deliberately not exposed
+        # through the default MCP surface, but they remain available to
+        # CLI/API transports.
         registry = get_registry()
         service_names = {entry.name for entry in registry}
 
@@ -26,9 +28,6 @@ class TestMCPServer(TestTemplate):
         assert "doctor" in service_names
 
     def test_registry_entries_have_models(self):
-        import mcp_server.server  # noqa: F401
-        from services import get_registry
-
         for entry in get_registry():
             assert entry.input_model is not None
             assert entry.output_model is not None
@@ -36,15 +35,11 @@ class TestMCPServer(TestTemplate):
             assert entry.description
 
     def test_default_mcp_surface_excludes_admin_and_demo_tools(self):
-        from mcp_server.server import mcp
-
         tools = mcp._tool_manager._tools
         for tool_name in ("config_get", "config_set", "config_show", "doctor", "greet"):
             assert tool_name not in tools
 
     def test_enhanced_tools_publish_output_schema(self):
-        from mcp_server.server import mcp
-
         for tool_name in ("gmail_compose", "gmail_curate_inbox", "gmail_get_thread"):
             tool = mcp._tool_manager._tools.get(tool_name)
             assert tool is not None, f"{tool_name} not registered"
@@ -55,11 +50,6 @@ class TestMCPServer(TestTemplate):
         # the published schema is byte-for-byte the service output model's
         # schema, not just non-None, so an SDK upgrade that breaks the patch
         # path fails loudly here.
-        from pydantic import BaseModel
-
-        from mcp_server.server import mcp
-        from services import get_registry
-
         by_name = {e.name: e for e in get_registry()}
         for tool_name in ("gmail_compose", "gmail_curate_inbox", "gmail_get_thread"):
             tool = mcp._tool_manager._tools[tool_name]
@@ -75,10 +65,6 @@ class TestMCPServer(TestTemplate):
         # ui:// resource in their tools/list _meta so hosts can pre-fetch the
         # HTML and apply CSP before the first call (found by MCPJam's
         # `apps conformance` check).
-        import asyncio
-
-        from mcp_server.server import mcp
-
         app_tools = {
             "gmail_compose",
             "gmail_update_draft",
@@ -101,8 +87,6 @@ class TestMCPServer(TestTemplate):
         assert tools["gmail_inbox.refresh"].meta == {"ui": {"visibility": ["app"]}}
 
     def test_enhanced_tools_do_not_publish_context_as_input(self):
-        from mcp_server.server import mcp
-
         for tool_name in ("gmail_compose", "gmail_curate_inbox", "gmail_get_thread"):
             tool = mcp._tool_manager._tools.get(tool_name)
             assert tool is not None, f"{tool_name} not registered"
@@ -115,8 +99,6 @@ class TestMCPServerIntegration(TestTemplate):
     """End-to-end integration tests calling tools through the registered FastMCP wrapper."""
 
     def test_app_resources_registered_and_serve_html(self):
-        from mcp_server.server import mcp
-
         resources = asyncio.run(mcp.list_resources())
         uris = {str(r.uri) for r in resources}
         # gmail_composer / gmail_inbox apps are added in later phases; here we
@@ -132,12 +114,6 @@ class TestMCPServerIntegration(TestTemplate):
     def test_missing_app_build_serves_stub_comment(self):
         # Edge case A1 (mcp_server/MCP_UI_EDGE_CASES.md): an app dir without a
         # built dist/mcp-app.html must serve an HTML comment stub, not crash.
-        from pathlib import Path
-
-        from mcp.server.fastmcp import FastMCP
-
-        from mcp_server.server import _register_app_resource
-
         test_mcp = FastMCP("test_stub")
         missing = Path("/nonexistent/test_app/dist/mcp-app.html")
         _register_app_resource(
@@ -152,8 +128,6 @@ class TestMCPServerIntegration(TestTemplate):
         assert "make build_apps" in text
 
     def test_model_visible_focus_tool_returns_pydantic_model_directly(self):
-        from mcp_server.server import mcp
-
         tool_fn = mcp._tool_manager._tools["gmail_get_focused_email"].fn
         result = tool_fn(user_id="test-user")
         assert result.focused is False

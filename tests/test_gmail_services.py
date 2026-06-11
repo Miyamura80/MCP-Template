@@ -35,17 +35,22 @@ from models.gmail import (
     GmailUpdateDraftInput,
 )
 from services.gmail_drafts_svc import (
+    GmailReplyInput,
     gmail_compose,
     gmail_discard_draft,
     gmail_get_draft,
     gmail_list_drafts,
+    gmail_reply_to_thread,
     gmail_send,
     gmail_update_draft,
 )
 from services.gmail_messages_svc import (
+    GmailThreadModifyInput,
+    gmail_archive_thread,
     gmail_curate_inbox,
     gmail_get_thread,
     gmail_list_inbox,
+    gmail_mark_thread_read,
 )
 from services.gmail_svc import (
     GmailNotConnectedError,
@@ -824,11 +829,6 @@ class TestDraftRoundTrip(TestTemplate):
 
 class TestGmailMarkThreadRead(TestTemplate):
     def test_calls_threads_modify_with_remove_unread_label(self):
-        from services.gmail_messages_svc import (
-            GmailThreadModifyInput,
-            gmail_mark_thread_read,
-        )
-
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
@@ -854,11 +854,6 @@ class TestGmailMarkThreadRead(TestTemplate):
 
 class TestGmailArchiveThread(TestTemplate):
     def test_calls_threads_modify_with_remove_inbox_label(self):
-        from services.gmail_messages_svc import (
-            GmailThreadModifyInput,
-            gmail_archive_thread,
-        )
-
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
@@ -900,8 +895,6 @@ class TestGmailReplyToThread(TestTemplate):
         return mock
 
     def test_derives_to_and_subject_from_last_message(self):
-        from services.gmail_drafts_svc import GmailReplyInput, gmail_reply_to_thread
-
         with _patch_db() as factory:
             _seed_token(factory)
             mock = self._patch_reply(
@@ -941,8 +934,6 @@ class TestGmailReplyToThread(TestTemplate):
         assert mime["Subject"] == "Re: Original Subject"
 
     def test_does_not_double_prefix_re_when_already_present(self):
-        from services.gmail_drafts_svc import GmailReplyInput, gmail_reply_to_thread
-
         with _patch_db() as factory:
             _seed_token(factory)
             mock = self._patch_reply(
@@ -974,8 +965,6 @@ class TestGmailReplyToThread(TestTemplate):
         assert mime["Subject"] == "Re: already a reply"
 
     def test_raises_when_thread_has_no_messages(self):
-        from services.gmail_drafts_svc import GmailReplyInput, gmail_reply_to_thread
-
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()

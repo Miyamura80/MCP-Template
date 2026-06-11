@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import socket
+import threading
 from datetime import UTC, datetime
 
 import typer
@@ -87,7 +88,10 @@ def record_event(command: str, duration: float, success: bool) -> None:
 def _get_endpoint() -> str | None:
     """Read the telemetry endpoint from global config, if configured."""
     try:
-        from common import global_config
+        # Lazy by design: importing `common` triggers the full pydantic-settings
+        # config load; keep that off the CLI startup path. ImportError is
+        # handled below so a missing/broken config never breaks telemetry.
+        from common import global_config  # noqa: PLC0415
 
         ep = global_config.telemetry.endpoint
         return ep if ep else None
@@ -101,11 +105,11 @@ def _post_event(event: dict) -> None:
     if not endpoint:
         return
 
-    import threading
-
     def _send() -> None:
         try:
-            import urllib.request
+            # Lazy by design: urllib.request is slow to import and only needed
+            # when a telemetry endpoint is configured; keep it off CLI startup.
+            import urllib.request  # noqa: PLC0415
 
             data = json.dumps(event).encode()
             req = urllib.request.Request(

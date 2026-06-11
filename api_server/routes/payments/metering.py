@@ -14,8 +14,10 @@ from api_server.billing.stripe_config import (
     ensure_stripe,
     get_included_units,
     get_meter_event_name,
+    reset_stripe_on_auth_error,
 )
-from db.engine import get_db_session
+from common import global_config
+from db.engine import get_db_session, use_db_session
 from db.models.processed_stripe_events import ProcessedStripeEvent
 from db.models.subscription_types import SubscriptionTier
 from db.models.user_subscriptions import UserSubscription
@@ -45,7 +47,9 @@ def _report_to_stripe(
             user_id,
         )
         return False
-    import stripe
+    # Deliberately lazy: routes must import (and the app boot) without the
+    # stripe SDK; the ensure_stripe() gate above degrades billing instead.
+    import stripe  # noqa: PLC0415
 
     try:
         stripe.billing.MeterEvent.create(
@@ -59,8 +63,6 @@ def _report_to_stripe(
         # auth on AuthError, and return False so the caller rolls back the
         # dedup record and can retry.
         if isinstance(exc, stripe.AuthenticationError):
-            from api_server.billing.stripe_config import reset_stripe_on_auth_error
-
             reset_stripe_on_auth_error()
         log.warning(
             "Failed to report meter event for customer {}; "
@@ -136,8 +138,6 @@ def report_usage(
     # in sync.  The Stripe call runs between flush (dedup) and commit
     # so that on Stripe failure the dedup record is also rolled back,
     # allowing the caller to retry with the same idempotency key.
-    from db.engine import use_db_session
-
     with use_db_session() as dedup_session:
         try:
             dedup_session.add(
@@ -185,8 +185,6 @@ def get_current_usage(
     session: Session = Depends(get_db_session),
 ):
     """Return current period usage, daily quota limit, and billing overage info."""
-    from common import global_config
-
     sub_cfg = global_config.subscription_config
     sub = session.query(UserSubscription).filter_by(user_id=user.user_id).first()
 

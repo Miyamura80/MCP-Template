@@ -43,12 +43,17 @@ class PaymentRegistry:
             if self._initialized:
                 return
 
-            from common import global_config
+            # Lazy by design (see class docstring): config and protocol modules
+            # are imported only when needed so module import stays side-effect
+            # free and startup stays fast when payments are disabled.
+            from common import global_config  # noqa: PLC0415
 
             cfg = global_config.payments
 
             if cfg.x402.enabled:
-                from src.payments.x402.protocol import X402Protocol
+                # Lazy by design (see class docstring): import the protocol
+                # module only when the protocol is enabled in config.
+                from src.payments.x402.protocol import X402Protocol  # noqa: PLC0415
 
                 self._protocols[PaymentProtocolName.X402] = X402Protocol(cfg.x402)
                 log.info("x402 protocol registered")

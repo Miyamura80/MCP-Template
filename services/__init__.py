@@ -1,5 +1,7 @@
 """Service registry - pure business logic with no transport awareness."""
 
+import importlib
+import pkgutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -44,12 +46,7 @@ def discover_services() -> None:
     global _discovered
     if _discovered:
         return
-    import importlib
-    import pkgutil
-
-    import services as _pkg
-
-    for module_info in pkgutil.iter_modules(_pkg.__path__):
+    for module_info in pkgutil.iter_modules(__path__):
         importlib.import_module(f"services.{module_info.name}")  # noqa: TID251 - service auto-discovery so @service decorators register on startup
     _discovered = True
 

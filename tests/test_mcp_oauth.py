@@ -19,6 +19,7 @@ from api_server.auth.authkit_auth import (
     resource_metadata_url,
     verify_authkit_token,
 )
+from api_server.server import app
 from tests.test_template import TestTemplate
 
 AUTHKIT_DOMAIN = "https://test-env.authkit.app"
@@ -188,8 +189,6 @@ class TestResourceUrls(TestTemplate):
 
 class TestProtectedResourceMetadata(TestTemplate):
     def _client(self) -> TestClient:
-        from api_server.server import app
-
         # No lifespan needed: these routes never reach the MCP sub-app.
         return TestClient(app)
 
@@ -217,8 +216,6 @@ class TestProtectedResourceMetadata(TestTemplate):
 
 class TestUnauthorizedDiscoveryHint(TestTemplate):
     def _post_mcp_unauthenticated(self):
-        from api_server.server import app
-
         # No lifespan: mcp_auth short-circuits before the MCP sub-app.
         client = TestClient(app)
         return client.post(
@@ -266,8 +263,6 @@ class TestMCPInitializeWithOAuthToken(TestTemplate):
         private_key, public_key = _generate_rsa_keypair()
         _patch_jwks(mock_jwks, public_key)
         token = _make_token(private_key)
-
-        from api_server.server import app
 
         with TestClient(app) as client:
             resp = client.post(

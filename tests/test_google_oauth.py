@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -15,6 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from api_server.server import app
 from common import global_config
 from common.token_encryption import PlaintextEncryption
 from db import engine as db_engine
@@ -168,8 +170,6 @@ class TestGmailStatusService(TestTemplate):
         assert result.scopes == ["openid", "email"]
 
     def test_not_connected_when_revoked(self):
-        from datetime import UTC, datetime
-
         with _patch_db() as factory:
             s = factory()
             s.add(
@@ -236,8 +236,6 @@ class TestGmailDisconnectService(TestTemplate):
 
 
 def _client():
-    from api_server.server import app
-
     return TestClient(app)
 
 

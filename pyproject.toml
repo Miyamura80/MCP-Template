@@ -102,7 +102,10 @@ line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "C901", "FIX", "BLE", "TID"]
+# E402 (module-level import not at top of file) comes with "E"; PLC0415 bans
+# imports inside functions - keep all imports at the top of the file, or
+# `# noqa: PLC0415` with a justification comment for deliberate lazy imports.
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "C901", "FIX", "BLE", "TID", "PLC0415"]
 ignore = ["E501", "UP015", "B008"]
 
 [tool.ruff.lint.mccabe]

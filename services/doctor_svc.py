@@ -6,6 +6,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 from models.doctor import CheckResultModel, DoctorInput, DoctorResult
 from services import service
 
@@ -74,7 +76,9 @@ def _check_deps_synced() -> CheckResultModel:
 
 def _check_config_parseable() -> CheckResultModel:
     try:
-        from common import global_config
+        # Import inside the check on purpose: a failing config load (yaml /
+        # validation / import error) is exactly what this check must report.
+        from common import global_config  # noqa: PLC0415
 
         _ = global_config.to_dict()
         return CheckResultModel(
@@ -137,8 +141,6 @@ def _check_api_keys() -> CheckResultModel:
             status="fail",
             message=".env missing - cannot check keys",
         )
-
-    from dotenv import dotenv_values
 
     env_vals = dotenv_values(env_path)
     example_vals = dotenv_values(example_path)

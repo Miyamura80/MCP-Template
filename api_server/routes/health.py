@@ -62,13 +62,17 @@ def _cached_check(name: str, check_fn: collections.abc.Callable[[], dict]) -> di
 def _check_database() -> dict:
     """Check database connectivity using the app's singleton engine."""
     try:
-        from common import global_config
+        # Deliberately lazy: probe imports live inside the try so a pruned
+        # or broken config/DB stack reports a status instead of breaking
+        # the /health route at import time.
+        from common import global_config  # noqa: PLC0415
 
         if not global_config.BACKEND_DB_URI:
             return {"status": "not_configured"}
-        from sqlalchemy import text
+        # (same probe rationale as above)
+        from sqlalchemy import text  # noqa: PLC0415
 
-        from db.engine import use_db_session
+        from db.engine import use_db_session  # noqa: PLC0415
 
         with use_db_session() as session:
             session.execute(text("SELECT 1"))
@@ -105,13 +109,17 @@ def _get_redis_health_client():
             return None
         if val is not None:
             return val
-        from common import global_config
+        # Deliberately lazy: callers (_check_redis) treat ImportError like
+        # any other probe failure, so a pruned config or redis package
+        # degrades to an error status instead of breaking module import.
+        from common import global_config  # noqa: PLC0415
 
         redis_url = getattr(global_config, "REDIS_URL", None)
         if not redis_url:
             _redis_health_client = _REDIS_NOT_CONFIGURED
             return None
-        import redis
+        # (same probe rationale as above)
+        import redis  # noqa: PLC0415
 
         _redis_health_client = redis.from_url(
             redis_url, socket_connect_timeout=2, socket_timeout=2
@@ -143,7 +151,10 @@ def _check_stripe() -> dict:
     from frequent health probes.
     """
     try:
-        from common import global_config
+        # Deliberately lazy: the except below explicitly maps "Stripe SDK /
+        # config / import failure" to a status string; imports must stay
+        # inside the try for that to hold when billing is pruned.
+        from common import global_config  # noqa: PLC0415
 
         has_key = bool(
             getattr(global_config, "STRIPE_SECRET_KEY", None)
@@ -152,7 +163,8 @@ def _check_stripe() -> dict:
         if not has_key:
             return {"status": "not_configured"}
 
-        from api_server.billing.stripe_config import ensure_stripe
+        # (same probe rationale as above)
+        from api_server.billing.stripe_config import ensure_stripe  # noqa: PLC0415
 
         if not ensure_stripe():
             return {"status": "error", "message": "initialization_failed"}
