@@ -1,0 +1,33 @@
+---
+// Edison "Hackbox": a cyan wireframe container with a solid cyan tag anchored
+// flush to one inner corner. Content-driven (secondary) variant: fixed 28px tag
+// height, 40% tag width, pt-12 clearance so content never collides with the tag.
+type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+interface Props {
+  tag: string;
+  corner?: Corner;
+  class?: string;
+}
+
+const { tag, corner = "top-left", class: className = "" } = Astro.props;
+
+// Anchor flush to the inner corner, covering the 2px border at that corner.
+const cornerPos: Record<Corner, string> = {
+  "top-left": "top-[-2px] left-[-2px]",
+  "top-right": "top-[-2px] right-[-2px]",
+  "bottom-left": "bottom-[-2px] left-[-2px]",
+  "bottom-right": "bottom-[-2px] right-[-2px]",
+};
+---
+
+<div class={`relative border-2 border-accent bg-bg ${className}`}>
+  <span
+    class={`absolute z-10 flex h-7 w-[40%] items-center justify-center bg-accent px-2 font-mono text-[11px] font-semibold uppercase tracking-widest text-accent-fg ${cornerPos[corner]}`}
+  >
+    {tag}
+  </span>
+  <div class="px-7 pt-12 pb-7">
+    <slot />
+  </div>
+</div>
