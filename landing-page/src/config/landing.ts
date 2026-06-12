@@ -472,7 +472,7 @@ export const pricing: { enabled: boolean; heading: string; subhead: string; tier
       description: "Self-host the full template, forever.",
       features: ["All three transports", "OAuth + billing scaffolding", "Community support"],
       cta: "Get started",
-      href: "#install",
+      href: "#how-it-works",
     },
     {
       name: "Pro",
@@ -481,7 +481,7 @@ export const pricing: { enabled: boolean; heading: string; subhead: string; tier
       description: "Hosted, managed, and monitored.",
       features: ["Managed deployment", "Usage analytics", "Priority support"],
       cta: "Start free trial",
-      href: "#install",
+      href: "#how-it-works",
       featured: true,
     },
     {
@@ -490,7 +490,7 @@ export const pricing: { enabled: boolean; heading: string; subhead: string; tier
       description: "For teams running agents in production.",
       features: ["SSO + audit logs", "SLA", "Dedicated support"],
       cta: "Contact sales",
-      href: "#install",
+      href: "#how-it-works",
     },
   ],
 };

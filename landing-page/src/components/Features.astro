@@ -115,6 +115,10 @@ import FeatureVisual from "./FeatureVisual.astro";
   function initFeatureScroll() {
     const root = document.querySelector<HTMLElement>("[data-feature-scroll]");
     if (!root) return;
+    // Idempotent: bail if already wired (data-enhanced is set below), so a
+    // repeat call (e.g. astro:page-load after a client navigation) doesn't
+    // attach a second IntersectionObserver.
+    if (root.dataset.enhanced === "true") return;
 
     const steps = Array.from(
       root.querySelectorAll<HTMLElement>("[data-step]"),

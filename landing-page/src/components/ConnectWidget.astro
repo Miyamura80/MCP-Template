@@ -158,6 +158,11 @@ const selected = enriched.find((t) => t.id === defaultId) ?? enriched[0];
 <script>
   function initConnect() {
     document.querySelectorAll<HTMLElement>("[data-connect]").forEach((root) => {
+      // Idempotent: skip roots already wired so a repeat call (e.g.
+      // astro:page-load after a client navigation) doesn't attach duplicate
+      // toggle/document/root listeners.
+      if (root.dataset.connectReady === "true") return;
+      root.dataset.connectReady = "true";
       const dd = root.querySelector<HTMLElement>("[data-dropdown]");
       const toggle = root.querySelector<HTMLButtonElement>("[data-dropdown-toggle]");
       const menu = root.querySelector<HTMLElement>("[data-dropdown-menu]");

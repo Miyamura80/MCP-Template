@@ -33,6 +33,8 @@ const maskStyle = (logo: string) =>
         <button
           type="button"
           role="tab"
+          id={`tab-${c.id}`}
+          aria-controls={`panel-${c.id}`}
           aria-selected={c.id === defaultId ? "true" : "false"}
           data-client-tab={c.id}
           class="client-tab flex items-center justify-center gap-1.5 border-r-2 border-border px-2 py-2 text-xs font-medium text-fg-muted transition last:border-r-0 hover:text-fg aria-selected:bg-accent aria-selected:text-accent-fg"
@@ -44,12 +46,14 @@ const maskStyle = (logo: string) =>
     }
   </div>
 
-  <!-- Shells; only the active one is shown -->
-  <div aria-hidden="true">
-    <div data-shell="claude" hidden={defaultId !== "claude"}><ClaudeShell /></div>
-    <div data-shell="chatgpt" hidden={defaultId !== "chatgpt"}><ChatGptShell /></div>
-    <div data-shell="goose" hidden={defaultId !== "goose"}><GooseShell /></div>
-    <div data-shell="vscode" hidden={defaultId !== "vscode"}><VsCodeShell /></div>
+  <!-- Shells; only the active one is shown. Each is the tabpanel for its toggle
+       tab (role/aria-labelledby), so the active panel is exposed to assistive
+       tech rather than hidden. -->
+  <div>
+    <div role="tabpanel" id="panel-claude" aria-labelledby="tab-claude" tabindex="0" data-shell="claude" hidden={defaultId !== "claude"}><ClaudeShell /></div>
+    <div role="tabpanel" id="panel-chatgpt" aria-labelledby="tab-chatgpt" tabindex="0" data-shell="chatgpt" hidden={defaultId !== "chatgpt"}><ChatGptShell /></div>
+    <div role="tabpanel" id="panel-goose" aria-labelledby="tab-goose" tabindex="0" data-shell="goose" hidden={defaultId !== "goose"}><GooseShell /></div>
+    <div role="tabpanel" id="panel-vscode" aria-labelledby="tab-vscode" tabindex="0" data-shell="vscode" hidden={defaultId !== "vscode"}><VsCodeShell /></div>
   </div>
 </div>
 

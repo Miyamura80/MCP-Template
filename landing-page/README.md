@@ -54,4 +54,4 @@ src/
 public/favicon.svg
 ```
 
-Sections, in order: Nav → Hero → Trust strip → How it works → Features → Terminal demo → Testimonials → Pricing → FAQ → Final CTA → Footer.
+Sections, in order: Nav → Hero → TrustStrip → GetStarted → Features → Testimonials → Pricing → AskAi → Faq → FinalCta → Footer.
