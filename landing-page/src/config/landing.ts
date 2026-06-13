@@ -61,7 +61,7 @@ export const site = {
   description:
     "YourMCP is a Model Context Protocol server that gives your AI agent real capabilities: one codebase exposed over CLI, MCP, and HTTP.",
   // TODO: the canonical deployed URL (also set `site` in astro.config.mjs).
-  url: "https://example.com",
+  url: "https://gmailmcp.com",
   // TODO: links used across nav, footer, and CTAs.
   docsUrl: "https://example.com/docs",
   githubUrl: "https://github.com/Miyamura80/MCP-Template",
