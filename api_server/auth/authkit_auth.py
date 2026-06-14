@@ -86,18 +86,51 @@ def verify_authkit_token(token: str) -> AuthKitUser | None:
     if not user_id:
         return None
 
-    if "scope" in payload:
-        raw = payload["scope"]
-        if isinstance(raw, str):
-            scopes = raw.split()
-        elif isinstance(raw, list):
-            scopes = [str(s) for s in raw]
-        else:
-            # Malformed scope claim: reject the token instead of erroring.
-            return None
-    else:
-        # No scope claim: the user authorized the whole resource, mirroring
-        # how unified_auth treats interactive JWT users.
-        scopes = ["*"]
+    scopes = _resolve_scopes(payload.get("scope"))
+    if scopes is None:
+        # Malformed scope claim: reject the token instead of erroring.
+        return None
 
     return AuthKitUser(user_id=user_id, email=payload.get("email"), scopes=scopes)
+
+
+def _resolve_scopes(raw: object) -> list[str] | None:
+    """Map an AuthKit access-token ``scope`` claim onto this server's scopes.
+
+    AuthKit access tokens carry OIDC *identity* scopes (``openid``, ``profile``,
+    ``email``, ``offline_access``) that are orthogonal to this server's
+    ``services:*`` *authorization* namespace. We honor only scopes that belong
+    to our namespace; when the token carries none of them - the normal case for
+    an interactive OAuth login, where WorkOS issues only identity scopes - the
+    user consented to the whole resource and gets full access (``["*"]``),
+    mirroring how ``unified_auth`` treats interactive first-party JWT users.
+    Genuine down-scoping still works: a token that *does* carry our scopes
+    (e.g. WorkOS configured to issue ``services:read``) is restricted to them.
+
+    Returns ``None`` for a malformed (non-string, non-list) claim so the caller
+    can reject the token.
+    """
+    if raw is None:
+        return ["*"]
+    if isinstance(raw, str):
+        requested = raw.split()
+    elif isinstance(raw, list):
+        requested = [str(s) for s in raw]
+    else:
+        return None
+
+    # Lazy import: api_server.auth.scopes pulls in the FastAPI dependency graph,
+    # and this module is imported early by middleware.
+    from api_server.auth.scopes import ALL_SCOPES  # noqa: PLC0415
+
+    known_prefixes = {s.split(":")[0] for s in ALL_SCOPES if ":" in s}
+
+    def _is_authz_scope(s: str) -> bool:
+        if s == "*" or s in ALL_SCOPES:
+            return True
+        return (
+            s.endswith(":*") and s.count(":") == 1 and s.split(":")[0] in known_prefixes
+        )
+
+    granted = [s for s in requested if _is_authz_scope(s)]
+    return granted or ["*"]
