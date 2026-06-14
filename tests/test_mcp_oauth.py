@@ -141,6 +141,19 @@ class TestAuthKitTokenVerification(TestTemplate):
 
     @patch("api_server.auth.authkit_auth.global_config")
     @patch("api_server.auth.authkit_auth._get_jwks_client")
+    def test_multi_colon_namespace_scope_rejected(self, mock_jwks, mock_config):
+        # Extra colons must not let a namespace-targeting value slip past the
+        # fail-closed check (services:foo:bar is still our namespace, invalid).
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_config.MCP_PUBLIC_URL = RESOURCE
+        private_key, public_key = _generate_rsa_keypair()
+        _patch_jwks(mock_jwks, public_key)
+
+        token = _make_token(private_key, scope="services:foo:bar")
+        assert verify_authkit_token(token) is None
+
+    @patch("api_server.auth.authkit_auth.global_config")
+    @patch("api_server.auth.authkit_auth._get_jwks_client")
     def test_malformed_scope_claim_rejected(self, mock_jwks, mock_config):
         mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
         mock_config.MCP_PUBLIC_URL = RESOURCE

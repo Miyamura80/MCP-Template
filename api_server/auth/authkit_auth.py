@@ -138,7 +138,8 @@ def _resolve_scopes(raw: object) -> list[str] | None:
     def _targets_authz_namespace(s: str) -> bool:
         # Looks like it addresses our namespace (``<known>:<anything>``) even if
         # it is not a valid scope - used to detect misconfigured down-scoping.
-        return s == "*" or (s.count(":") == 1 and s.split(":")[0] in known_prefixes)
+        # Match any colon count so ``services:foo:bar`` can't slip past.
+        return s == "*" or (":" in s and s.split(":", 1)[0] in known_prefixes)
 
     granted = [s for s in requested if _is_authz_scope(s)]
     if granted:

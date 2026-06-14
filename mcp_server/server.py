@@ -60,12 +60,16 @@ def _transport_security() -> TransportSecuritySettings:
     loopback_origins = [
         "http://localhost",
         "http://127.0.0.1",
+        "http://[::1]",
         "http://localhost:*",
         "http://127.0.0.1:*",
+        "http://[::1]:*",
         "https://localhost",
         "https://127.0.0.1",
+        "https://[::1]",
         "https://localhost:*",
         "https://127.0.0.1:*",
+        "https://[::1]:*",
     ]
     origins: list[str] = [*loopback_origins, *global_config.server.allowed_origins]
     public = global_config.MCP_PUBLIC_URL
