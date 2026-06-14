@@ -53,13 +53,14 @@ class GmailNotConnectedError(Exception):
 # Constants
 # ---------------------------------------------------------------------------
 
+# gmail.modify is a restricted scope that already grants read, compose-draft,
+# and send. Requesting readonly/compose/send on top is redundant and Google's
+# OAuth verification rejects apps asking for broader-than-needed scopes, so we
+# request the single minimal superset. See docs/.../oauth verification notes.
 GMAIL_SCOPES: list[str] = [
     "openid",
     "email",
     "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.compose",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
