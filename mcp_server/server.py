@@ -16,10 +16,13 @@ See ``mcp_server/MCP_UI_ARCHITECTURE.md`` and ``mcp_server/MCP_UI_EDGE_CASES.md`
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from loguru import logger as log
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
+from common import global_config
 from mcp_server._tool_factory import make_tool
 from services import discover_services, get_registry
 
@@ -37,7 +40,39 @@ _MCP_INSTRUCTIONS = (
     "to one brief sentence."
 )
 
-mcp: FastMCP = FastMCP("mymcp", instructions=_MCP_INSTRUCTIONS)
+
+def _transport_security() -> TransportSecuritySettings:
+    """DNS-rebinding allowlist for the streamable-HTTP transport.
+
+    FastMCP enables DNS-rebinding protection and, when constructed with the
+    default loopback host, only whitelists localhost - so any real deployment
+    behind a custom domain gets ``421 Misdirected Request`` on ``/mcp``. We keep
+    the protection on but additionally allow the public host derived from
+    ``MCP_PUBLIC_URL`` (so it auto-tracks whatever domain the server is deployed
+    at) plus loopback for stdio/local dev and the test client.
+    """
+    hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*", "localhost", "127.0.0.1"]
+    origins: list[str] = list(global_config.server.allowed_origins)
+    public = global_config.MCP_PUBLIC_URL
+    if public:
+        parts = urlsplit(public)
+        if parts.netloc:
+            # Exact entry covers the default-port (443/80) case where the Host
+            # header carries no port; the ":*" entry covers explicit ports.
+            hosts.extend([parts.netloc, f"{parts.netloc}:*"])
+            origins.append(f"{parts.scheme or 'https'}://{parts.netloc}")
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+    )
+
+
+mcp: FastMCP = FastMCP(
+    "mymcp",
+    instructions=_MCP_INSTRUCTIONS,
+    transport_security=_transport_security(),
+)
 
 _populated: bool = False
 _EXCLUDED_DEFAULT_MCP_SERVICES = frozenset(
