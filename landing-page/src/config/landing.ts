@@ -55,11 +55,11 @@ export interface FooterColumn {
 
 export const site = {
   // TODO: product identity
-  name: "YourMCP",
+  name: "GmailMCP",
   tagline: "An MCP server starter",
   // Used for <title>, meta description, and OG tags.
   description:
-    "YourMCP is a Model Context Protocol server that gives your AI agent real capabilities: one codebase exposed over CLI, MCP, and HTTP.",
+    "GmailMCP is a Model Context Protocol server that gives your AI agent real capabilities: one codebase exposed over CLI, MCP, and HTTP.",
   // TODO: the canonical deployed URL (also set `site` in astro.config.mjs).
   url: "https://gmailmcp.com",
   // TODO: links used across nav, footer, and CTAs.
@@ -67,9 +67,9 @@ export const site = {
   githubUrl: "https://github.com/Miyamura80/MCP-Template",
   // TODO: the deployed streamable-HTTP MCP endpoint users add to their client.
   // This is the URL you paste / one-click-install into Claude, Cursor, etc.
-  mcpUrl: "https://your-app.up.railway.app/mcp",
+  mcpUrl: "https://mcp.gmailmcp.com/mcp",
   // Server name used in client configs / deep links (no spaces).
-  serverName: "your-mcp",
+  serverName: "gmail-mcp",
 } as const;
 
 export const nav: {
@@ -123,7 +123,7 @@ export const hero: {
   // Keep the headline short (< ~44 chars) and benefit/identity-driven.
   headline: "Give your AI agent real tools.",
   subhead:
-    "YourMCP is a Model Context Protocol server you can ship today. One service registry, exposed identically over CLI, MCP, and HTTP, so any agent that speaks MCP can call it.",
+    "GmailMCP is a Model Context Protocol server you can ship today. One service registry, exposed identically over CLI, MCP, and HTTP, so any agent that speaks MCP can call it.",
 };
 
 /**
@@ -299,13 +299,13 @@ cd MCP-Template && make all`,
         "No install required: the HTTP API is live at your deployment URL. Authenticate with a bearer token and call it from anything.",
       setupKind: "code",
       setupLang: "bash",
-      setupCode: `export YOURMCP_URL=https://your-app.up.railway.app
+      setupCode: `export GMAILMCP_URL=https://mcp.gmailmcp.com
 export TOKEN=sk-...   # OAuth 2.1 bearer`,
       callTitle: "Call a tool",
       callBody:
         "Hit the same service over plain HTTP: identical inputs and outputs as the CLI and MCP.",
       callLang: "bash",
-      callCode: `$ curl -s $YOURMCP_URL/api/v1/services/gmail_curate_inbox \\
+      callCode: `$ curl -s $GMAILMCP_URL/api/v1/services/gmail_curate_inbox \\
     -H "Authorization: Bearer $TOKEN" \\
     -H "Content-Type: application/json" \\
     -d '{ "limit": 3 }'
