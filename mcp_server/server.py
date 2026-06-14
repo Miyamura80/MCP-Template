@@ -52,7 +52,26 @@ def _transport_security() -> TransportSecuritySettings:
     at) plus loopback for stdio/local dev and the test client.
     """
     hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*", "localhost", "127.0.0.1"]
-    origins: list[str] = list(global_config.server.allowed_origins)
+    # Loopback origins (any port) mirror the loopback hosts above: stdio/local
+    # dev, the test client, and the conformance harness (which drives /mcp from
+    # http://127.0.0.1:<port>) send an Origin header that must be allowed, or
+    # the DNS-rebinding middleware answers 403. A remote attacker cannot forge a
+    # loopback Origin, so this does not weaken cross-origin protection.
+    loopback_origins = [
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://[::1]",
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "http://[::1]:*",
+        "https://localhost",
+        "https://127.0.0.1",
+        "https://[::1]",
+        "https://localhost:*",
+        "https://127.0.0.1:*",
+        "https://[::1]:*",
+    ]
+    origins: list[str] = [*loopback_origins, *global_config.server.allowed_origins]
     public = global_config.MCP_PUBLIC_URL
     if public:
         parts = urlsplit(public)
