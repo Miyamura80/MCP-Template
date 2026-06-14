@@ -107,8 +107,11 @@ def _resolve_scopes(raw: object) -> list[str] | None:
     Genuine down-scoping still works: a token that *does* carry our scopes
     (e.g. WorkOS configured to issue ``services:read``) is restricted to them.
 
-    Returns ``None`` for a malformed (non-string, non-list) claim so the caller
-    can reject the token.
+    Fails closed when the token references our namespace but no value resolves
+    to a real scope (a typo/misconfiguration such as ``services:exceute``):
+    returns ``None`` so the caller rejects the token instead of silently
+    upgrading a botched down-scoping to full access. Also returns ``None`` for a
+    malformed (non-string, non-list) claim.
     """
     if raw is None:
         return ["*"]
@@ -132,5 +135,14 @@ def _resolve_scopes(raw: object) -> list[str] | None:
             s.endswith(":*") and s.count(":") == 1 and s.split(":")[0] in known_prefixes
         )
 
+    def _targets_authz_namespace(s: str) -> bool:
+        # Looks like it addresses our namespace (``<known>:<anything>``) even if
+        # it is not a valid scope - used to detect misconfigured down-scoping.
+        return s == "*" or (s.count(":") == 1 and s.split(":")[0] in known_prefixes)
+
     granted = [s for s in requested if _is_authz_scope(s)]
-    return granted or ["*"]
+    if granted:
+        return granted
+    if any(_targets_authz_namespace(s) for s in requested):
+        return None
+    return ["*"]
