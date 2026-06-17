@@ -99,6 +99,28 @@ export type McpAppLike = {
 
 type InboxProps = { mcpApp: McpAppLike };
 
+// Tracks whether the app is rendered in a narrow viewport (e.g. a phone-sized
+// chat client). Drives the Gmail-mobile-style single-column navigation: the
+// list and the reader occupy the full width and you navigate between them,
+// instead of the cramped side-by-side two-pane layout used on wide screens.
+function useIsNarrow(breakpoint = 640): boolean {
+  const query = `(max-width: ${breakpoint}px)`;
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(query).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(query);
+    const handler = (e: MediaQueryListEvent) => setNarrow(e.matches);
+    setNarrow(mq.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [query]);
+  return narrow;
+}
+
 export type ComposerDraft = {
   draft_id: string;
   to?: string;
@@ -130,6 +152,7 @@ function extractDraft(raw: unknown): ComposerDraft | null {
 }
 
 export function Inbox({ mcpApp }: InboxProps) {
+  const narrow = useIsNarrow();
   const [viewMode, setViewMode] = useState<"inbox" | "reader">("inbox");
   const [threads, setThreads] = useState<CuratedThread[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -143,6 +166,18 @@ export function Inbox({ mcpApp }: InboxProps) {
   const [composerDraft, setComposerDraft] = useState<ComposerDraft | null>(null);
   const composerDraftRef = useRef<ComposerDraft | null>(null);
   useEffect(() => { composerDraftRef.current = composerDraft; }, [composerDraft]);
+  // On narrow screens the reader/composer is a separate full-screen view, so
+  // opening a composer draft must navigate there - otherwise it stays hidden
+  // behind the inbox list.
+  useEffect(() => {
+    if (narrow && composerDraft) setViewMode("reader");
+  }, [narrow, composerDraft]);
+  // On wide viewports the layout is always two-pane (the selected thread shows
+  // in the right pane), so the full-screen "reader" view must not persist when
+  // a narrow viewport widens - otherwise the user is stranded in single-pane.
+  useEffect(() => {
+    if (!narrow && viewMode === "reader") setViewMode("inbox");
+  }, [narrow, viewMode]);
   // Monotonic id for openThread; only the most-recent request may mutate state.
   const openSeqRef = useRef(0);
 
@@ -276,6 +311,7 @@ export function Inbox({ mcpApp }: InboxProps) {
     setSelectedId(null);
     setThread(null);
     pushThreadContext(null);
+    if (narrow) setViewMode("inbox");
     try {
       await mcpApp.callServerTool({
         name: "gmail_inbox.archive",
@@ -355,6 +391,7 @@ export function Inbox({ mcpApp }: InboxProps) {
       setSelectedId(null);
       setThread(null);
       pushThreadContext(null);
+      if (narrow) setViewMode("inbox");
     }
     try {
       await mcpApp.callServerTool({
@@ -516,15 +553,17 @@ export function Inbox({ mcpApp }: InboxProps) {
 
   if (viewMode === "reader") {
     return (
-      <div style={{ ...appStyle, flexDirection: "column" }}>
+      <div style={{ ...(narrow ? appStyleNarrow : appStyle), flexDirection: "column" }}>
         <style>{aiReplyStyles}</style>
         {threads && threads.length > 0 && (
-          <button
-            onClick={() => setViewMode("inbox")}
-            style={composerBackBtnStyle}
-          >
-            ← Back to inbox
-          </button>
+          <div style={readerTopBarStyle}>
+            <button
+              onClick={() => setViewMode("inbox")}
+              style={readerBackBtnStyle}
+            >
+              <CaretLeft size={18} weight="bold" /> Inbox
+            </button>
+          </div>
         )}
         <main style={{ ...readerPaneStyle, flex: 1 }}>
           {readerContent}
@@ -534,9 +573,9 @@ export function Inbox({ mcpApp }: InboxProps) {
   }
 
   return (
-    <div style={appStyle}>
+    <div style={narrow ? appStyleNarrow : appStyle}>
       <style>{aiReplyStyles}</style>
-      <aside style={listPaneStyle}>
+      <aside style={narrow ? listPaneNarrowStyle : listPaneStyle}>
         <header style={listHeaderStyle}>
           <strong style={{ fontSize: 14 }}>Curated inbox</strong>
           <div style={{ display: "flex", gap: 4 }}>
@@ -566,7 +605,7 @@ export function Inbox({ mcpApp }: InboxProps) {
               return (
                 <li
                   key={t.thread_id}
-                  onClick={() => { setViewMode("inbox"); openThread(t.thread_id); }}
+                  onClick={() => { setViewMode(narrow ? "reader" : "inbox"); openThread(t.thread_id); }}
                   style={{
                     ...rowStyle,
                     background: isSelected ? "#e8f0fe" : "transparent",
@@ -639,9 +678,11 @@ export function Inbox({ mcpApp }: InboxProps) {
           </ul>
         )}
       </aside>
-      <main style={readerPaneStyle}>
-        {readerContent}
-      </main>
+      {!narrow && (
+        <main style={readerPaneStyle}>
+          {readerContent}
+        </main>
+      )}
     </div>
   );
 }
@@ -1955,12 +1996,51 @@ const appStyle: React.CSSProperties = {
   colorScheme: "light",
 };
 
+// Single-column variant for narrow viewports: fill the available height so the
+// list (and, after navigation, the reader) gets the full screen, Gmail-style.
+const appStyleNarrow: React.CSSProperties = {
+  ...appStyle,
+  height: "min(100vh, 640px)",
+  maxHeight: 640,
+};
+
 const listPaneStyle: React.CSSProperties = {
   width: "38%",
   borderRight: "1px solid #e0e0e0",
   display: "flex",
   flexDirection: "column",
   overflow: "hidden",
+};
+
+const listPaneNarrowStyle: React.CSSProperties = {
+  ...listPaneStyle,
+  width: "100%",
+  borderRight: "none",
+};
+
+// Sticky top app bar shown above the reader on narrow screens, mirroring the
+// Gmail mobile "back to inbox" affordance.
+const readerTopBarStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  padding: "6px 8px",
+  borderBottom: "1px solid #e0e0e0",
+  flexShrink: 0,
+  background: "#fff",
+};
+
+const readerBackBtnStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  background: "none",
+  border: "none",
+  color: "#1a73e8",
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 500,
+  padding: "4px 8px",
+  fontFamily: "'Google Sans', Roboto, Arial, sans-serif",
 };
 
 const listHeaderStyle: React.CSSProperties = {
