@@ -172,6 +172,12 @@ export function Inbox({ mcpApp }: InboxProps) {
   useEffect(() => {
     if (narrow && composerDraft) setViewMode("reader");
   }, [narrow, composerDraft]);
+  // On wide viewports the layout is always two-pane (the selected thread shows
+  // in the right pane), so the full-screen "reader" view must not persist when
+  // a narrow viewport widens - otherwise the user is stranded in single-pane.
+  useEffect(() => {
+    if (!narrow && viewMode === "reader") setViewMode("inbox");
+  }, [narrow, viewMode]);
   // Monotonic id for openThread; only the most-recent request may mutate state.
   const openSeqRef = useRef(0);
 
