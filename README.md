@@ -120,6 +120,22 @@ uv run mymcp-serve        # start the server (HTTP API + MCP at /mcp on one port
 uv run mymcp-mcp          # legacy: stdio MCP only, for local Claude Desktop / dev
 ```
 
+## One-click deploy
+
+Both targets provision the backend (FastAPI + MCP at `/mcp`) as a Docker service plus a managed Postgres database, run Alembic migrations, and prompt for the required secrets.
+
+### Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Miyamura80/MCP-Template)
+
+Driven by [`render.yaml`](render.yaml). The database and `SESSION_SECRET_KEY` are wired automatically; you're prompted for the WorkOS and Google OAuth secrets. After the first deploy, set `MCP_PUBLIC_URL` to `https://<your-render-host>/mcp` and `GOOGLE_REDIRECT_URI` to `https://<your-render-host>/api/v1/auth/google/callback` (also add that callback to your Google OAuth client), then redeploy.
+
+### Railway
+
+Railway templates are authored in the dashboard (the CLI can't publish them). From a project running this repo: **Settings → Generate Template from Project → confirm in the composer → Publish**. The committed [`railway.json`](railway.json) already pins the Docker build, pre-deploy migrations, and health check, so the generated template inherits them. Reference deploy-time values with `${{RAILWAY_PUBLIC_DOMAIN}}` (e.g. `MCP_PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}/mcp`).
+
+See [`.env.example`](.env.example) for the full list of optional integrations (LLM keys, Stripe, LangFuse, …).
+
 ## CLI Usage
 
 Global flags go **before** the subcommand:
