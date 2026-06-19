@@ -132,7 +132,9 @@ Driven by [`render.yaml`](render.yaml). The database and `SESSION_SECRET_KEY` ar
 
 ### Railway
 
-Railway templates are authored in the dashboard (the CLI can't publish them). From a project running this repo: **Settings → Generate Template from Project → confirm in the composer → Publish**. The committed [`railway.json`](railway.json) already pins the Docker build, pre-deploy migrations, and health check, so the generated template inherits them. Reference deploy-time values with `${{RAILWAY_PUBLIC_DOMAIN}}` (e.g. `MCP_PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}/mcp`).
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/ihRiyZ?referralCode=YbnX2i&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+The committed [`railway.json`](railway.json) pins the Docker build, pre-deploy migrations, and health check, so the template inherits them. Reference deploy-time values with `${{RAILWAY_PUBLIC_DOMAIN}}` (e.g. `MCP_PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}/mcp`). To re-generate or update the template: **project Settings → Generate Template from Project → Publish** (dashboard only; the CLI can't publish templates).
 
 See [`.env.example`](.env.example) for the full list of optional integrations (LLM keys, Stripe, LangFuse, …).
 

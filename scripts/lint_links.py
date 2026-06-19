@@ -21,6 +21,9 @@ import time
 BOT_BLOCKED_DOMAINS = [
     r"https://www\.mastercard\.com/.*",
     r"https://news\.ycombinator\.com/.*",
+    # Railway template deploy links are browser-only SPA routes; they 404 for
+    # non-browser HTTP clients even though they resolve fine in a browser.
+    r"https://railway\.com/deploy/.*",
 ]
 
 MAX_RETRIES = 3
