@@ -134,7 +134,37 @@ Driven by [`render.yaml`](render.yaml). The database and `SESSION_SECRET_KEY` ar
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/ihRiyZ?referralCode=YbnX2i&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
-The committed [`railway.json`](railway.json) pins the Docker build, pre-deploy migrations, and health check, so the template inherits them. Reference deploy-time values with `${{RAILWAY_PUBLIC_DOMAIN}}` (e.g. `MCP_PUBLIC_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}/mcp`). To re-generate or update the template: **project Settings → Generate Template from Project → Publish** (dashboard only; the CLI can't publish templates).
+The committed [`railway.json`](railway.json) pins the Docker build, pre-deploy migrations, and health check, so the template inherits them. To re-generate or update the template: **project Settings → Generate Template from Project → Publish** (dashboard only; the CLI can't publish templates).
+
+<details>
+<summary><strong>Forking the Railway template? Variable map for the backend service</strong></summary>
+
+The template has two services: a **Postgres** service (use Railway's standard Postgres defaults) and the **backend**. Set the backend's variables as follows.
+
+**Auto-resolve / auto-generate** (paste as defaults so it deploys with zero input):
+
+| Variable | Value |
+|---|---|
+| `DEV_ENV` | `prod` |
+| `BACKEND_DB_URI` | `${{Postgres.DATABASE_URL}}` (private URL; matches your Postgres service name) |
+| `MCP_PUBLIC_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}/mcp` |
+| `GOOGLE_REDIRECT_URI` | `https://${{RAILWAY_PUBLIC_DOMAIN}}/api/v1/auth/google/callback` |
+| `SESSION_SECRET_KEY` | `${{ secret(32) }}` |
+| `GOOGLE_TOKEN_ENC_KEY` | `${{ secret(43, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") }}=` |
+
+The trailing `=` on `GOOGLE_TOKEN_ENC_KEY` is literal (outside the `${{ }}`): 43 base64url chars + `=` decodes to the 32 bytes Fernet requires. Railway generates `secret(...)` values **once** and persists them, so redeploys don't invalidate the session secret or break stored Gmail tokens.
+
+**Leave empty; the deployer must paste their own** (per-deployment credentials that can't be pre-baked):
+
+`WORKOS_CLIENT_ID` · `WORKOS_API_KEY` · `WORKOS_AUTHKIT_DOMAIN` · `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET`
+
+**Gotchas:**
+
+- `DEV_ENV` must be `prod`. The Dockerfile sets it, but an empty template var *overrides* it back to blank, silently disabling prod token encryption and the prod config overlay.
+- The backend service needs a **public domain** enabled, or `${{RAILWAY_PUBLIC_DOMAIN}}` resolves to empty and both URLs break.
+- After deploy, register the `GOOGLE_REDIRECT_URI` value in your Google Cloud OAuth client's authorized redirect URIs, and point your WorkOS redirect/resource at `MCP_PUBLIC_URL`. (Inherent to OAuth; can't be automated.)
+
+</details>
 
 See [`.env.example`](.env.example) for the full list of optional integrations (LLM keys, Stripe, LangFuse, …).
 
