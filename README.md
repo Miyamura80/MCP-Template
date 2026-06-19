@@ -41,12 +41,6 @@ curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/script
 bash install-skills.sh && rm install-skills.sh
 ```
 
----
-
-<p align="center">
-  <img src="media/cli_demo.gif" alt="CLI Demo" width="600">
-</p>
-
 ## App Distribution
 
 - MCP server with OAuth
