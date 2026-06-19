@@ -5,6 +5,8 @@
 
 Both targets provision the backend (FastAPI + MCP at `/mcp`) as a Docker service plus a managed Postgres database, run Alembic migrations, and prompt for the required secrets. The landing page (`landing-page/`) deploys separately and is not included.
 
+> **Forking this repo?** The buttons point at the canonical upstream template. To deploy your own fork, change the Render button's `repo=` URL to your fork and re-create the Railway template from your project (its deploy link is fixed to a published template). Render's button takes an absolute repo URL, so it can't auto-follow a fork.
+
 ## Render
 
 Driven by [`render.yaml`](../render.yaml). The database and `SESSION_SECRET_KEY` are wired automatically; you're prompted for the WorkOS and Google OAuth secrets. After the first deploy, set `MCP_PUBLIC_URL` to `https://<your-render-host>/mcp` and `GOOGLE_REDIRECT_URI` to `https://<your-render-host>/api/v1/auth/google/callback` (also add that callback to your Google OAuth client), then redeploy.
