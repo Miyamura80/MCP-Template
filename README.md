@@ -15,7 +15,14 @@
   <a href="#cli-usage">CLI Usage</a> •
   <a href="#adding-commands">Adding Commands</a> •
   <a href="#configuration">Configuration</a> •
+  <a href="manual_docs/deploy.md">Deploy</a> •
   <a href="#credits">Credits</a>
+</p>
+
+<p align="center">
+  <a href="https://railway.com/deploy/ihRiyZ?referralCode=YbnX2i&utm_medium=integration&utm_source=template&utm_campaign=generic"><img alt="Deploy on Railway" src="https://railway.com/button.svg" height="32"></a>
+  &nbsp;
+  <a href="https://render.com/deploy?repo=https://github.com/Miyamura80/MCP-Template"><img alt="Deploy to Render" src="https://render.com/images/deploy-to-render-button.svg" height="32"></a>
 </p>
 
 <p align="center">
@@ -40,12 +47,6 @@ pip install mcp-template
 curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh -o install-skills.sh
 bash install-skills.sh && rm install-skills.sh
 ```
-
----
-
-<p align="center">
-  <img src="media/cli_demo.gif" alt="CLI Demo" width="600">
-</p>
 
 ## App Distribution
 
@@ -119,6 +120,10 @@ uv run mymcp init my_command  # scaffold a new command
 uv run mymcp-serve        # start the server (HTTP API + MCP at /mcp on one port)
 uv run mymcp-mcp          # legacy: stdio MCP only, for local Claude Desktop / dev
 ```
+
+## Deploy
+
+One-click deploy to Railway or Render (backend + managed Postgres, migrations run automatically). See **[deployment docs](manual_docs/deploy.md)** for the per-platform setup, the Railway template variable map, and OAuth/secret wiring.
 
 ## CLI Usage
 
