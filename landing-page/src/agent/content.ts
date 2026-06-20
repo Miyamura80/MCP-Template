@@ -137,9 +137,38 @@ ${faqBlock}
 - llms-full.txt: ${o}/llms-full.txt
 - agents.md: ${o}/agents.md
 - Agent skills (JSON): ${o}/.well-known/agent-skills/index.json
+- Agent skills (shell pointer): ${o}/skills.sh
 - MCP discovery (JSON): ${o}/.well-known/mcp.json
 - Sitemap: ${o}/sitemap.xml
 - Schema map: ${o}/schemamap.xml
+`;
+}
+
+/**
+ * skills.sh - shell-friendly agent skill discovery pointer.
+ *
+ * Not a formal standard (the canonical index is the Agent Skills Discovery
+ * JSON below); this exists so scanners that probe /skills.sh get a real 200
+ * with the discovery URLs instead of an SPA fallback. It is read-only and
+ * makes no changes when run.
+ */
+export function buildSkillsSh(origin: string): string {
+  const o = trimSlash(origin);
+  return `#!/usr/bin/env sh
+# ${site.name} - agent skill discovery
+#
+# ${site.name} is an MCP server. The machine-readable skill index lives at the
+# path below (Agent Skills Discovery, schema 0.2.0). This script only prints
+# pointers; it makes no changes to your system.
+
+SKILLS_INDEX="${o}/.well-known/agent-skills/index.json"
+MCP_ENDPOINT="${site.mcpUrl}"
+
+echo "Skill index:  $SKILLS_INDEX"
+echo "MCP endpoint: $MCP_ENDPOINT (server name: ${site.serverName})"
+echo
+echo "Fetch the skill index:"
+echo "  curl -fsSL $SKILLS_INDEX"
 `;
 }
 
@@ -184,6 +213,7 @@ Full matrix: ${o}/compare
 
 - Full description for LLMs: ${o}/llms-full.txt
 - Skills (JSON): ${o}/.well-known/agent-skills/index.json
+- Skills (shell pointer): ${o}/skills.sh
 - Human docs: ${site.docsUrl}
 - Source: ${site.githubUrl}
 `;
