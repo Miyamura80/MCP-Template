@@ -87,11 +87,8 @@ action. Read it before changing anything. The enums and `OnboardingConfig`
 
 ## Guardrails
 
-- Do not delete auth, DB, API, MCP, docs, payment code, example apps, the
-  landing page, or deploy configs without explicit user confirmation.
+- Do not delete auth, DB, API, MCP, docs, payment code, example apps, the landing page, or deploy configs without explicit user confirmation.
 - Do not push to `main`, force-push, or run destructive git commands.
-- Treat MCP behavior as current-spec-sensitive; verify current docs before
-  designing new MCP semantics.
+- Treat MCP behavior as current-spec-sensitive; verify current docs before designing new MCP semantics.
 - When editing shared skills or agents, run `make sync-agent-config`.
-- Keep Gmail/Google OAuth, the agentic-payment research docs, and the
-  landing page framed as examples/marketing, not core template infrastructure.
+- Keep Gmail/Google OAuth, the agentic-payment research docs, and the landing page framed as examples/marketing, not core template infrastructure.
