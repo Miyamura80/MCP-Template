@@ -5,7 +5,7 @@
  * surface: llms.txt, llms-full.txt, agents.md and the in-page agent view.
  * Rebranding the site (editing landing.ts) keeps all of these in sync.
  */
-import { site, hero, features, getStarted, faq, compatibility, connect, comparison } from "../config/landing";
+import { site, hero, features, getStarted, faq, compatibility, connect, comparison, pricing } from "../config/landing";
 
 /** Strip a trailing slash so we can safely append paths. */
 function trimSlash(url: string): string {
@@ -137,6 +137,7 @@ ${faqBlock}
 - llms-full.txt: ${o}/llms-full.txt
 - agents.md: ${o}/agents.md
 - auth.md (agent auth manifest): ${o}/auth.md
+- pricing.md (machine-readable pricing): ${o}/pricing.md
 - Agent skills (JSON): ${o}/.well-known/agent-skills/index.json
 - Agent skills (shell pointer): ${o}/skills.sh
 - MCP discovery (JSON): ${o}/.well-known/mcp.json
@@ -213,6 +214,7 @@ Full matrix: ${o}/compare
 ## More
 
 - Agent auth (auth.md): ${o}/auth.md
+- Pricing (pricing.md): ${o}/pricing.md
 - Full description for LLMs: ${o}/llms-full.txt
 - Skills (JSON): ${o}/.well-known/agent-skills/index.json
 - Skills (shell pointer): ${o}/skills.sh
@@ -290,5 +292,57 @@ support lands in the upstream authorization server.
 - Agent guide: ${o}/agents.md
 - Full description for LLMs: ${o}/llms-full.txt
 - Source: ${site.githubUrl}
+`;
+}
+
+/**
+ * pricing.md - machine-readable pricing manifest served at the canonical
+ * `/pricing.md` path.
+ *
+ * AI agents comparing products and making purchase recommendations need
+ * pricing as plain markdown, not scraped from an HTML pricing page. This is
+ * generated from the `pricing` block in landing.ts regardless of
+ * `pricing.enabled` (that flag only controls the on-page section), so the
+ * machine-readable manifest exists even when the human pricing section is
+ * deferred to a separate page.
+ */
+export function buildPricingMd(origin: string): string {
+  const o = trimSlash(origin);
+  const tierBlock = pricing.tiers
+    .map((t) => {
+      const price = `${t.price}${t.cadence ?? ""}`;
+      const featureLines = t.features.map((f) => `- ${f}`).join("\n");
+      return (
+        `## ${t.name}${t.featured ? " (recommended)" : ""}\n\n` +
+        `- Price: ${price}\n` +
+        `- Summary: ${t.description}\n\n` +
+        `Includes:\n${featureLines}`
+      );
+    })
+    .join("\n\n");
+
+  return `# ${site.name} - pricing
+
+> Machine-readable pricing for ${site.name}, for AI agents comparing products
+> and making purchase recommendations. ${pricing.subhead}
+
+- Service: ${site.name}
+- Website: ${site.url}
+- Source code (open source, self-hostable): ${site.githubUrl}
+
+${tierBlock}
+
+## Notes
+
+${site.name} is open source and self-hostable, so the full server can be run on
+your own infrastructure at no license cost; paid tiers cover hosting, support
+and team features. Prices are denominated as shown above. For current,
+authoritative pricing always check ${site.url}.
+
+## More
+
+- Full description for LLMs: ${o}/llms-full.txt
+- Agent guide: ${o}/agents.md
+- Agent auth (auth.md): ${o}/auth.md
 `;
 }
