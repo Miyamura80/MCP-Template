@@ -96,11 +96,13 @@ export const serverCard = {
   // repository.source value the MCP registry expects ("github" | "gitlab" | ...).
   repositorySource: "github",
   /**
-   * The LLM-facing tool surface, advertised in the SEP-2127 server card so
-   * agents can preview what the server can do BEFORE opening a connection.
-   * This is a static mirror of the live registry (the deployed `/mcp` server
-   * serves the authoritative list at `/.well-known/mcp/server-card.json`);
-   * keep it in step when you add, remove, or rename a service.
+   * The LLM-facing tool surface advertised in the SEP-2127 server card.
+   *
+   * Source of truth is the Python `@service` registry: `gen-discovery.ts`
+   * snapshots the live list from the API's `/.well-known/mcp/server-card.json`
+   * at build time. This array is only the OFFLINE FALLBACK used when that fetch
+   * fails (e.g. a build with the API unreachable), so it need not be exhaustive -
+   * but keep it roughly current so offline builds stay representative.
    */
   tools: [
     { name: "gmail_connect", description: "Begin the Google OAuth flow to link a Gmail account" },

@@ -11,6 +11,11 @@
  *
  * Single source of truth: edit branding in `landing.ts` (`site` + `serverCard`),
  * never hand-edit the generated JSON. Run `bun run gen:discovery` to refresh.
+ *
+ * The `tools[]` surface is NOT branding - its real source of truth is the Python
+ * `@service` registry. We snapshot it from the running API at build time (same
+ * strategy as `gen-openapi.ts`) so the static card can't drift from the live
+ * server; `serverCard.tools` in `landing.ts` is only the offline-build fallback.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,6 +34,56 @@ const icon = {
 const repository = { url: site.githubUrl, source: serverCard.repositorySource };
 const remotes = [{ type: "streamable-http", url: site.mcpUrl }];
 
+interface Tool {
+  name: string;
+  description: string;
+}
+
+/**
+ * Resolve the tool surface from the live registry, falling back to the committed
+ * list in `landing.ts` on an offline build.
+ *
+ * The API mounts the same FastAPI app as `/mcp` and serves the authoritative,
+ * registry-derived `tools[]` at `/.well-known/mcp/server-card.json`. Fetching it
+ * server-to-server (no CORS) keeps the static card in step with the real tools
+ * without hand-maintaining descriptions in two places.
+ */
+async function resolveTools(): Promise<readonly Tool[]> {
+  const fallback = serverCard.tools;
+  const url = new URL("/.well-known/mcp/server-card.json", site.apiUrl).href;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      console.warn(`⚠ ${url} returned ${res.status}; using fallback tool list`);
+      return fallback;
+    }
+    const live = (await res.json()) as { tools?: unknown };
+    const tools = live.tools;
+    const usable =
+      Array.isArray(tools) &&
+      tools.length > 0 &&
+      tools.every((t) => {
+        const o = t as Record<string, unknown>;
+        return typeof o.name === "string" && typeof o.description === "string";
+      });
+    if (!usable) {
+      console.warn(`⚠ ${url} had no usable tools[]; using fallback tool list`);
+      return fallback;
+    }
+    console.log(`✓ tool surface from ${url} (${(tools as Tool[]).length} tools)`);
+    return (tools as Tool[]).map((t) => ({ name: t.name, description: t.description }));
+  } catch (err) {
+    console.warn(`⚠ could not fetch ${url} (${String(err)}); using fallback tool list`);
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const tools = await resolveTools();
+
 // SEP-2127 Server Card (the pre-connect discovery document). No `$schema`: the
 // draft server-card schema is not published yet (the URL 404s), so emitting it
 // would only break validators - matching the bare /.well-known/mcp.json doc.
@@ -45,7 +100,7 @@ const card = {
   repository,
   icons: [icon],
   remotes,
-  tools: serverCard.tools,
+  tools,
 };
 
 // MCP registry server.json (same identity, registry schema).
