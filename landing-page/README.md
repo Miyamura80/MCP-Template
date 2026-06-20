@@ -16,6 +16,16 @@ Search that file for `TODO` to find every placeholder (product name, tagline, in
 
 Design tokens (colors, fonts, the accent) live in `src/styles/global.css` under the `@theme` block.
 
+### Social-share image (`public/og.png`)
+
+The `og:image` / `twitter:image` card is a committed 1200×630 PNG at `public/og.png` (the production build does **not** regenerate it). After changing the brand copy or tokens, regenerate and commit it:
+
+```bash
+uv run --with pillow python scripts/gen-og.py
+```
+
+`scripts/gen-og.py` mirrors the `@theme` colors and the `landing.ts` copy, and pulls the Archivo typeface at run time. To use a different card per page, pass `image="/my-og.png"` (and optionally `imageAlt`) to `Base.astro`.
+
 ## Develop
 
 ```bash
@@ -51,7 +61,9 @@ src/
   layouts/Base.astro     # <head>, meta, OG/Twitter tags
   components/            # one component per page section
   pages/index.astro      # assembles the sections in order
+scripts/gen-og.py        # ← regenerates public/og.png (dev-only)
 public/favicon.svg
+public/og.png            # ← social-share card (committed, 1200×630)
 ```
 
 Sections, in order: Nav → Hero → TrustStrip → GetStarted → Features → Testimonials → Pricing → AskAi → Faq → FinalCta → Footer.
