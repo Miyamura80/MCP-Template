@@ -42,6 +42,29 @@ mycli --dry-run greet Alice          # preview without executing
 mycli --debug config get bad.key     # full tracebacks on error
 ```
 
+## Scripting & agents
+
+The CLI is built to be driven non-interactively (by scripts and AI agents):
+
+- **Non-interactive by default.** Prompts only appear on an interactive
+  terminal. When stdin is not a TTY, missing required values fail fast with an
+  actionable error instead of hanging on a prompt.
+- **Values accept stdin.** Anywhere a value is taken, pass `-` as the value or
+  add `--stdin` to read it from stdin - handy for piping:
+
+  ```bash
+  echo true | mycli config set llm_config.cache_enabled --stdin
+  echo "$API_KEY" | mycli secrets set OPENAI_API_KEY --stdin
+  cat .env | mycli secrets import --stdin
+  ```
+
+- **`--dry-run` previews destructive actions** (`config set`, `secrets set`,
+  `secrets delete`, `secrets import`) without writing anything.
+- **Idempotent where it counts.** Deleting an absent secret is a no-op success,
+  so retries are safe.
+- **Examples in every `--help`.** Run `mycli <command> --help` to see concrete
+  invocations to pattern-match off.
+
 <Cards>
   <Card title="Commands" href="/docs/cli/commands" />
   <Card title="Output & Errors" href="/docs/cli/output" />

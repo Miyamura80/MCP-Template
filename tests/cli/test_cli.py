@@ -54,6 +54,30 @@ class TestCLI(TestTemplate):
     def test_config_get_nonexistent(self):
         result = runner.invoke(app, ["config", "get", "nonexistent.key"])
         assert result.exit_code == 1
+        # Actionable error points at the discovery command.
+        assert "config show" in result.output
+
+    def test_config_set_dry_run(self):
+        result = runner.invoke(
+            app,
+            ["--dry-run", "config", "set", "llm_config.cache_enabled", "true"],
+        )
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+
+    def test_config_set_via_stdin_dry_run(self):
+        result = runner.invoke(
+            app,
+            ["--dry-run", "config", "set", "llm_config.cache_enabled", "--stdin"],
+            input="true\n",
+        )
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+
+    def test_config_set_missing_value_errors(self):
+        result = runner.invoke(app, ["config", "set", "some.key"], input="")
+        assert result.exit_code == 1
+        assert "no value" in result.output
 
     def test_format_json(self):
         result = runner.invoke(app, ["--format", "json", "config", "show"])

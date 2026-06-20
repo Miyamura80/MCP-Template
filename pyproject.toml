@@ -162,6 +162,8 @@ exclude = [
     "utils/llm/",
     "common/",
     "src/utils/logging_config.py",
+    "src/utils/cli_help.py",
+    "src/utils/stdin.py",
     "src/utils/context.py",
     "src/utils/current_user.py",
     "src/utils/interactive.py",

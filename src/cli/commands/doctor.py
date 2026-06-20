@@ -6,9 +6,16 @@ import typer
 from rich.console import Console
 
 from src.cli.state import is_quiet, is_verbose
+from src.utils.cli_help import examples_epilog
 from src.utils.output import render
 
 console = Console(stderr=True)
+
+EPILOG = examples_epilog(
+    "mymcp doctor",
+    "mymcp doctor --fix",
+    "mymcp doctor --format json",
+)
 
 
 def main(

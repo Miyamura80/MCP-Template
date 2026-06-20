@@ -76,7 +76,9 @@ class TestSecrets(TestTemplate):
             _apply_patches(stack, fake)
             result = runner.invoke(app, ["secrets", "get", "NONEXISTENT"])
             assert result.exit_code == 1
-            assert "Not found" in result.output
+            assert "not found" in result.output
+            # Actionable error points at the discovery command.
+            assert "secrets list" in result.output
 
     def test_delete(self):
         fake = FakeKeyring()
@@ -88,11 +90,71 @@ class TestSecrets(TestTemplate):
             assert "Deleted" in result.output
 
     def test_delete_not_found(self):
+        # Delete is idempotent: removing an absent secret is a no-op success.
         fake = FakeKeyring()
         with ExitStack() as stack:
             _apply_patches(stack, fake)
             result = runner.invoke(app, ["secrets", "delete", "NONEXISTENT"])
+            assert result.exit_code == 0
+            assert "No-op" in result.output
+
+    def test_set_via_stdin(self):
+        fake = FakeKeyring()
+        with ExitStack() as stack:
+            _apply_patches(stack, fake)
+            result = runner.invoke(
+                app, ["secrets", "set", "STDIN_KEY", "--stdin"], input="piped_value\n"
+            )
+            assert result.exit_code == 0
+            result = runner.invoke(app, ["secrets", "get", "STDIN_KEY", "--reveal"])
+            assert "piped_value" in result.output
+
+    def test_set_missing_value_non_interactive_errors(self):
+        # No value, no tty, no stdin flag: fail fast instead of hanging on a prompt.
+        fake = FakeKeyring()
+        with ExitStack() as stack:
+            _apply_patches(stack, fake)
+            result = runner.invoke(app, ["secrets", "set", "NO_VAL"], input="")
             assert result.exit_code == 1
+            assert "no secret value" in result.output
+
+    def test_set_dry_run(self):
+        fake = FakeKeyring()
+        with ExitStack() as stack:
+            _apply_patches(stack, fake)
+            result = runner.invoke(
+                app, ["--dry-run", "secrets", "set", "DRY_KEY", "val"]
+            )
+            assert result.exit_code == 0
+            assert "DRY RUN" in result.output
+            # Nothing was actually written.
+            assert all(key != "DRY_KEY" for _service, key in fake.store)
+
+    def test_delete_dry_run(self):
+        fake = FakeKeyring()
+        with ExitStack() as stack:
+            _apply_patches(stack, fake)
+            runner.invoke(app, ["secrets", "set", "KEEP_KEY", "val"])
+            result = runner.invoke(app, ["--dry-run", "secrets", "delete", "KEEP_KEY"])
+            assert result.exit_code == 0
+            assert "DRY RUN" in result.output
+            # Still present afterwards.
+            result = runner.invoke(app, ["secrets", "get", "KEEP_KEY", "--reveal"])
+            assert "val" in result.output
+
+    def test_import_via_stdin(self):
+        fake = FakeKeyring()
+        with ExitStack() as stack:
+            _apply_patches(stack, fake)
+            result = runner.invoke(
+                app,
+                ["secrets", "import", "--stdin"],
+                input="PIPED_KEY=piped_secret\n",
+            )
+            assert result.exit_code == 0
+            assert "Imported 1" in result.output
+            result = runner.invoke(app, ["secrets", "get", "PIPED_KEY", "--reveal"])
+            assert "piped_secret" in result.output
 
     def test_list_empty(self):
         fake = FakeKeyring()
