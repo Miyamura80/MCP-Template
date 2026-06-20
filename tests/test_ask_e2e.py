@@ -100,6 +100,30 @@ class TestAskE2E(TestTemplate):
             resp = client.post("/ask", json={"query": "x", "streaming": False})
         assert resp.status_code == 404
 
+    def test_streaming_failure_still_completes(self, tmp_path):
+        async def _boom(self, **_kwargs):
+            raise ValueError("no API key configured")
+
+        with (
+            _enabled_ask(tmp_path),
+            patch("api_server.ask.core.DSPYInference.run", _boom),
+            TestClient(app) as client,
+            client.stream(
+                "post", "/ask", json={"query": "install", "streaming": True}
+            ) as resp,
+        ):
+            assert resp.status_code == 200
+            events = [
+                json.loads(line.removeprefix("data:").strip())
+                for line in resp.iter_lines()
+                if line.startswith("data:")
+            ]
+        types = [e["message_type"] for e in events]
+        # Stream still closes cleanly with a complete event carrying the error.
+        assert types[0] == "start"
+        assert types[-1] == "complete"
+        assert events[-1]["_meta"]["error"] == "answer generation failed"
+
     def test_get_invalid_mode_returns_422(self):
         # Literal-typed query param is validated at the boundary -> clean 422,
         # not a route-time crash. Validation happens before the enabled guard.

@@ -8,6 +8,8 @@ api_server-only feature.
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+from loguru import logger as log
+
 from api_server.ask.retriever import DocChunk, get_retriever
 from api_server.ask.signatures import AnswerFromDocs
 from common import global_config
@@ -94,15 +96,15 @@ def _summary_item(answer: str) -> dict:
     }
 
 
-def _complete_event(query_id: str) -> dict:
-    return {
-        "message_type": "complete",
-        "_meta": {
-            "response_type": "nlws",
-            "version": "0.1",
-            "session_context": {"conversation_id": query_id},
-        },
+def _complete_event(query_id: str, error: str | None = None) -> dict:
+    meta: dict = {
+        "response_type": "nlws",
+        "version": "0.1",
+        "session_context": {"conversation_id": query_id},
     }
+    if error is not None:
+        meta["error"] = error
+    return {"message_type": "complete", "_meta": meta}
 
 
 async def stream_events(inp: AskInput) -> AsyncIterator[dict]:
@@ -115,12 +117,22 @@ async def stream_events(inp: AskInput) -> AsyncIterator[dict]:
     query_id = _resolve_query_id(inp)
     site = _resolve_site(inp)
     yield _start_event(query_id)
-    chunks = get_retriever().search(inp.query, global_config.ask.top_k)
     index = 0
-    for chunk in chunks:
-        yield _result_event(index, _chunk_to_item(chunk, site).schema_object)
-        index += 1
-    if inp.mode != "list":
-        answer = await _generate_answer(inp.query, _build_context(chunks))
-        yield _result_event(index, _summary_item(answer))
-    yield _complete_event(query_id)
+    error: str | None = None
+    try:
+        chunks = get_retriever().search(inp.query, global_config.ask.top_k)
+        for chunk in chunks:
+            yield _result_event(index, _chunk_to_item(chunk, site).schema_object)
+            index += 1
+        if inp.mode != "list":
+            answer = await _generate_answer(inp.query, _build_context(chunks))
+            yield _result_event(index, _summary_item(answer))
+    except Exception as exc:  # noqa: BLE001
+        # Defensive boundary: an SSE generator must always close with a
+        # `complete` event. Surface failures (missing LLM key, provider
+        # errors, etc.) as a generic error in the terminal event - the real
+        # cause is logged server-side, not leaked to the client - instead of
+        # abruptly terminating the stream.
+        log.warning("ask stream failed (query_id={}): {}", query_id, exc)
+        error = "answer generation failed"
+    yield _complete_event(query_id, error=error)
