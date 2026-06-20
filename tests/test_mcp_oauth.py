@@ -10,7 +10,9 @@ import json
 import time
 from unittest.mock import patch
 
+import httpx
 import jwt as pyjwt
+import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
@@ -19,6 +21,7 @@ from api_server.auth.authkit_auth import (
     resource_metadata_url,
     verify_authkit_token,
 )
+from api_server.routes import well_known
 from api_server.server import app
 from tests.test_template import TestTemplate
 
@@ -261,33 +264,85 @@ class TestProtectedResourceMetadata(TestTemplate):
 
 
 class TestAuthorizationServerMetadata(TestTemplate):
-    """RFC 8414 redirect to AuthKit for clients probing the RS origin."""
+    """RFC 8414 metadata mirrored at the resource server's well-known path.
+
+    Compatibility shim for clients/scanners that look for AS metadata on the
+    resource server and do not follow the redirect to the authorization server.
+    """
+
+    _AS_DOC = {
+        "issuer": AUTHKIT_DOMAIN,
+        "authorization_endpoint": f"{AUTHKIT_DOMAIN}/oauth2/authorize",
+        "token_endpoint": f"{AUTHKIT_DOMAIN}/oauth2/token",
+    }
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        # Module-level cache is keyed by issuer; clear it so each test fetches.
+        well_known._as_metadata_cache.clear()
+        yield
+        well_known._as_metadata_cache.clear()
 
     def _client(self) -> TestClient:
         return TestClient(app)
 
+    @patch("api_server.routes.well_known.httpx.get")
     @patch("api_server.auth.authkit_auth.global_config")
-    def test_redirects_to_authkit_when_configured(self, mock_config):
+    def test_metadata_served_when_configured(self, mock_config, mock_get):
         mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
-        mock_config.MCP_PUBLIC_URL = RESOURCE
-        expected = f"{AUTHKIT_DOMAIN}/.well-known/oauth-authorization-server"
+        mock_get.return_value.json.return_value = self._AS_DOC
+        mock_get.return_value.raise_for_status.return_value = None
+
         for path in (
             "/.well-known/oauth-authorization-server/mcp",
             "/.well-known/oauth-authorization-server",
         ):
-            resp = self._client().get(path, follow_redirects=False)
-            assert resp.status_code == 307, path
-            assert resp.headers["location"] == expected, path
+            resp = self._client().get(path)
+            assert resp.status_code == 200, path
+            body = resp.json()
+            assert body["issuer"] == AUTHKIT_DOMAIN
+            assert (
+                body["authorization_endpoint"] == f"{AUTHKIT_DOMAIN}/oauth2/authorize"
+            )
+            assert body["token_endpoint"] == f"{AUTHKIT_DOMAIN}/oauth2/token"
+            assert resp.headers["access-control-allow-origin"] == "*"
+
+    @patch("api_server.routes.well_known.httpx.get")
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_cached_across_requests(self, mock_config, mock_get):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_get.return_value.json.return_value = self._AS_DOC
+        mock_get.return_value.raise_for_status.return_value = None
+
+        client = self._client()
+        client.get("/.well-known/oauth-authorization-server")
+        client.get("/.well-known/oauth-authorization-server")
+        assert mock_get.call_count == 1
 
     @patch("api_server.auth.authkit_auth.global_config")
-    def test_404_when_unconfigured(self, mock_config):
+    def test_metadata_404_when_unconfigured(self, mock_config):
         mock_config.WORKOS_AUTHKIT_DOMAIN = None
-        for path in (
-            "/.well-known/oauth-authorization-server/mcp",
-            "/.well-known/oauth-authorization-server",
-        ):
-            resp = self._client().get(path, follow_redirects=False)
-            assert resp.status_code == 404, path
+        resp = self._client().get("/.well-known/oauth-authorization-server")
+        assert resp.status_code == 404
+
+    @patch("api_server.routes.well_known.httpx.get")
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_502_on_upstream_error(self, mock_config, mock_get):
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_get.side_effect = httpx.HTTPError("boom")
+        resp = self._client().get("/.well-known/oauth-authorization-server")
+        assert resp.status_code == 502
+
+    @patch("api_server.routes.well_known.httpx.get")
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_502_on_non_json_upstream(self, mock_config, mock_get):
+        # A non-JSON upstream body must be treated as a fetch failure (502),
+        # not crash the endpoint with a 500.
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_get.return_value.raise_for_status.return_value = None
+        mock_get.return_value.json.side_effect = ValueError("not json")
+        resp = self._client().get("/.well-known/oauth-authorization-server")
+        assert resp.status_code == 502
 
 
 class TestUnauthorizedDiscoveryHint(TestTemplate):

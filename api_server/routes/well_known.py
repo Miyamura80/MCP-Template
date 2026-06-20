@@ -1,6 +1,6 @@
 """Well-known discovery documents for the /mcp endpoint.
 
-Two documents live here:
+Three documents live here:
 
 * **OAuth 2.0 Protected Resource Metadata** (RFC 9728) - tells MCP clients
   where the authorization server is. Required of resource servers by the MCP
@@ -10,14 +10,17 @@ Two documents live here:
   configured, so unauthenticated discovery cleanly signals "no authorization
   server" instead of advertising a broken flow.
 
-* **OAuth 2.0 Authorization Server Metadata** (RFC 8414) - the authorization
-  server in this template is AuthKit, which publishes its own RFC 8414 document
-  at its issuer origin. The spec-correct path is PRM (above) -> AuthKit, but in
-  practice many MCP clients and registry crawlers probe
-  ``/.well-known/oauth-authorization-server`` against the *resource server*
-  origin directly. We redirect those requests to AuthKit's authoritative
-  metadata so the auth flow bootstraps regardless of which origin a client
-  probes. Returns 404 when OAuth is not configured, mirroring the PRM endpoints.
+* **OAuth 2.0 Authorization Server Metadata** (RFC 8414) - mirrors the
+  authorization server's (AuthKit's) ``issuer`` / ``authorization_endpoint`` /
+  ``token_endpoint`` document at *this* resource server's well-known path.
+  Compliant clients follow the RFC 9728 pointer above to the AS and read its
+  metadata there, so strictly this is *not* the canonical discovery path. But
+  many MCP clients and registry scanners look for RFC 8414 metadata directly on
+  the resource server and do **not** follow a redirect to the AS - they then
+  report "no OAuth metadata available". An earlier revision answered this path
+  with a 307 redirect to AuthKit, but the scanners that motivated it do not
+  follow the redirect; serving the document inline as a 200 is what actually
+  satisfies them. The upstream document is fetched once and cached.
 
 * **MCP Server Card** (SEP-2127) - pre-connect *branding*: the name, title,
   description, and icon a registry or client shows before anyone connects.
@@ -25,17 +28,24 @@ Two documents live here:
   ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
 """
 
+import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
+import httpx
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
 from common import global_config
 from common.config_models import IconConfig
 
 router = APIRouter(tags=["well-known"])
+
+# AuthKit's RFC 8414 document is effectively static; cache per issuer so the
+# resource server does not make an outbound call on every discovery request.
+_AS_METADATA_TTL_SECONDS = 3600.0
+_as_metadata_cache: dict[str, tuple[float, dict]] = {}
 
 
 def _server_version() -> str:
@@ -101,22 +111,51 @@ def protected_resource_metadata_root() -> dict:
     return _metadata()
 
 
-def _authorization_server_redirect() -> RedirectResponse:
+def _authorization_server_metadata() -> dict:
+    """Return AuthKit's RFC 8414 metadata document, cached per issuer.
+
+    404 when OAuth is unconfigured (mirrors the PRM routes); 502 when the
+    upstream authorization server cannot be reached, so callers see a clear
+    "try again" signal rather than a cached or partial document.
+    """
     domain = authkit_domain()
     if not domain:
         raise HTTPException(status_code=404, detail="OAuth is not configured")
-    # 307 keeps the request a GET (metadata is always fetched with GET) while
-    # signaling a temporary redirect, since the target depends on configuration.
-    return RedirectResponse(
-        url=f"{domain}/.well-known/oauth-authorization-server", status_code=307
-    )
+
+    now = time.monotonic()
+    cached = _as_metadata_cache.get(domain)
+    if cached and now - cached[0] < _AS_METADATA_TTL_SECONDS:
+        return cached[1]
+
+    url = f"{domain}/.well-known/oauth-authorization-server"
+    try:
+        resp = httpx.get(url, timeout=5.0, follow_redirects=True)
+        resp.raise_for_status()
+        metadata = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        # ValueError covers a non-JSON body (json.JSONDecodeError subclasses it);
+        # treat a malformed upstream document the same as a fetch failure.
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to fetch authorization server metadata",
+        ) from exc
+
+    _as_metadata_cache[domain] = (now, metadata)
+    return metadata
 
 
 @router.get("/.well-known/oauth-authorization-server/mcp")
-def authorization_server_metadata_for_mcp() -> RedirectResponse:
-    return _authorization_server_redirect()
+def authorization_server_metadata_for_mcp() -> JSONResponse:
+    # Public discovery: registry/scanner crawlers read this cross-origin.
+    return JSONResponse(
+        _authorization_server_metadata(),
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
 
 
 @router.get("/.well-known/oauth-authorization-server")
-def authorization_server_metadata_root() -> RedirectResponse:
-    return _authorization_server_redirect()
+def authorization_server_metadata_root() -> JSONResponse:
+    return JSONResponse(
+        _authorization_server_metadata(),
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
