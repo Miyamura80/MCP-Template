@@ -9,12 +9,12 @@
     "gen:openapi": "bun run scripts/gen-openapi.ts",
     "build": "bun run scripts/gen-discovery.ts && bun run scripts/gen-openapi.ts && astro build",
     "preview": "astro preview",
-    "start": "sirv dist --host 0.0.0.0 --port ${PORT:-8080} --single --quiet --cors",
+    "start": "bun server.ts",
     "astro": "astro"
   },
   "dependencies": {
     "astro": "^5.6.1",
-    "sirv-cli": "^3.0.0"
+    "sirv": "^3.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.5",
