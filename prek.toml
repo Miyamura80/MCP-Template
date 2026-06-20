@@ -26,13 +26,14 @@ hooks = [
 ]
 
 # Keep the landing-page tool-surface snapshot in step with the @service registry.
-# Runs only when Python changes (the surface can only change then); regenerates
-# tool-surface.generated.json and fails the commit if it drifted, so the static
-# server card can never go stale.
+# always_run (like sync-agent-config) so it also catches drift introduced without
+# a Python change - e.g. a hand-edited snapshot or one left stale by an earlier
+# --no-verify commit. Regenerates tool-surface.generated.json and fails the
+# commit if it drifted, so the static server card can never go stale.
 [[repos]]
 repo = "local"
 hooks = [
-    { id = "export-tool-surface", name = "export MCP tool surface; fail if drift was fixed", entry = "uv run python scripts/export_tool_surface.py --check", language = "system", pass_filenames = false, files = "\\.(py)$" },
+    { id = "export-tool-surface", name = "export MCP tool surface; fail if drift was fixed", entry = "uv run python scripts/export_tool_surface.py --check", language = "system", pass_filenames = false, always_run = true },
 ]
 
 # ── Source-size guardrails (mirror GitHub Actions) ────────────────
