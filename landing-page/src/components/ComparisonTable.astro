@@ -28,17 +28,18 @@ const MARK: Record<MatrixCell["state"], { glyph: string; cls: string; label: str
   <table class="w-full min-w-[640px] border-collapse text-left">
     <thead>
       <tr class="border-b-2 border-border">
-        <th class="py-4 pr-4 align-bottom text-sm font-medium text-fg-muted">
+        <th scope="col" class="py-4 pr-4 align-bottom text-sm font-medium text-fg-muted">
           Capability
         </th>
         <th
+          scope="col"
           class="border-x-2 border-accent bg-accent/10 px-4 py-4 align-bottom text-sm font-bold text-fg"
         >
           GmailMCP
         </th>
         {
           competitors.map((c) => (
-            <th class="px-4 py-4 align-bottom text-sm font-semibold text-fg-muted">
+            <th scope="col" class="px-4 py-4 align-bottom text-sm font-semibold text-fg-muted">
               <a href={`/vs/${c.id}`} class="transition hover:text-fg">
                 {c.name}
               </a>
@@ -51,12 +52,12 @@ const MARK: Record<MatrixCell["state"], { glyph: string; cls: string; label: str
       {
         matrix.map((row) => (
           <tr class="border-b border-border/60 align-top">
-            <td class="py-4 pr-4">
+            <th scope="row" class="py-4 pr-4 text-left font-normal">
               <div class="font-medium text-fg">{row.capability}</div>
               {row.detail && (
                 <div class="mt-1 text-sm text-fg-muted">{row.detail}</div>
               )}
-            </td>
+            </th>
             <td class="border-x-2 border-accent bg-accent/10 px-4 py-4">
               <span class={`text-lg font-bold ${MARK[row.us.state].cls}`} aria-label={MARK[row.us.state].label}>
                 {MARK[row.us.state].glyph}
