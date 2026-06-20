@@ -1,5 +1,4 @@
 {
-  "$schema": "https://modelcontextprotocol.io/schemas/well-known/mcp.json",
   "name": "gmail-mcp",
   "description": "GmailMCP is a Model Context Protocol server: one shared service registry exposed identically over CLI, MCP, and HTTP.",
   "servers": [
