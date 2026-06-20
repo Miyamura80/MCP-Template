@@ -45,12 +45,20 @@ def main() -> int:
     ]
     content = json.dumps(tools, indent=2) + "\n"
     previous = OUT_PATH.read_text(encoding="utf-8") if OUT_PATH.exists() else None
+    changed = content != previous
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(content, encoding="utf-8")
-    print(f"✓ wrote {len(tools)} tools to {OUT_PATH.relative_to(REPO_ROOT)}")
+    rel = OUT_PATH.relative_to(REPO_ROOT)
+    # Only write when the content actually changed: the hook fires on every
+    # services/ commit, but most don't touch a tool name/description, so this
+    # avoids needlessly rewriting (and bumping the mtime of) a generated file.
+    if changed:
+        OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        OUT_PATH.write_text(content, encoding="utf-8")
+        print(f"✓ wrote {len(tools)} tools to {rel}")
+    else:
+        print(f"✓ {rel} already up to date ({len(tools)} tools)")
 
-    if args.check and content != previous:
+    if args.check and changed:
         print(
             "tool-surface snapshot was regenerated; stage it and commit again.",
             file=sys.stderr,
