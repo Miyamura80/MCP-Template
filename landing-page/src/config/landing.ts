@@ -83,8 +83,10 @@ export const site = {
  * show your server's name, icon, and description BEFORE anyone connects.
  *
  * Title, description, website, repo URL, icon, and the MCP endpoint are all
- * derived from `site` above so you brand the product in one place. The three
- * fields below have no marketing-copy equivalent, so they live here:
+ * derived from `site` above so you brand the product in one place. The fields
+ * below have no marketing-copy equivalent, so they live here. (The advertised
+ * `tools[]` surface is NOT here - it is generated from the Python `@service`
+ * registry into `tool-surface.generated.json`; see `scripts/gen-discovery.ts`.)
  */
 export const serverCard = {
   // Reverse-DNS registry identity, exactly one slash. Usually io.github.<owner>/<repo>.

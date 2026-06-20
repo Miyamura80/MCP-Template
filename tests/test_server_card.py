@@ -23,13 +23,40 @@ class TestServerCard:
         assert resp.headers["content-type"].startswith("application/json")
 
         body = resp.json()
-        # The three fields the registry audit checks for: name, description, icon.
+        # The fields the registry audit checks for: name, description, icon.
         assert body["name"] == "io.github.Miyamura80/MCP-Template"
         assert body["title"]
         assert body["description"]
+        assert body["version"]
         assert body["icons"] and body["icons"][0]["src"].startswith("https://")
         # No $schema: the draft SEP-2127 server-card schema URL is unpublished (404).
         assert "$schema" not in body
+
+    def test_card_advertises_tool_surface(self):
+        # Pre-connect discovery: agents preview the tool surface before connecting.
+        body = self._client().get(CARD_PATH).json()
+        tools = body["tools"]
+        assert tools, "server card must advertise tools[] for pre-connect discovery"
+        assert all(t["name"] and t["description"] for t in tools)
+        names = {t["name"] for t in tools}
+        # A representative public Gmail tool is exposed...
+        assert "gmail_curate_inbox" in names
+        # ...while CLI-only defaults are not part of the MCP tool surface.
+        assert "doctor" not in names
+        assert "config_set" not in names
+
+    def test_card_advertises_server_url_when_public(self, monkeypatch):
+        url = "https://mcp.example.com/mcp"
+        monkeypatch.setattr(well_known.global_config, "MCP_PUBLIC_URL", url)
+        body = self._client().get(CARD_PATH).json()
+        # `serverUrl` (flat) and `remotes` (SEP shape) name the same endpoint.
+        assert body["serverUrl"] == url
+        assert body["remotes"][0] == {"type": "streamable-http", "url": url}
+
+    def test_card_omits_server_url_without_public_url(self, monkeypatch):
+        monkeypatch.setattr(well_known.global_config, "MCP_PUBLIC_URL", None)
+        body = self._client().get(CARD_PATH).json()
+        assert "serverUrl" not in body
 
     def test_card_omits_remote_without_public_url(self, monkeypatch):
         # MCP_PUBLIC_URL unset (e.g. deployed no-OAuth server): the card must not

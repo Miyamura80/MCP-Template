@@ -22,10 +22,11 @@ Three documents live here:
   follow the redirect; serving the document inline as a 200 is what actually
   satisfies them. The upstream document is fetched once and cached.
 
-* **MCP Server Card** (SEP-2127) - pre-connect *branding*: the name, title,
-  description, and icon a registry or client shows before anyone connects.
-  Always available (branding has no auth dependency) and served with
-  ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
+* **MCP Server Card** (SEP-2127) - pre-connect *discovery*: the identity
+  (name, title, description, version, icon) plus the endpoint (``serverUrl`` /
+  ``remotes``) and tool surface (``tools[]``) a registry or agent previews
+  before opening a transport. Always available (no auth dependency) and served
+  with ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
 """
 
 import time
@@ -63,9 +64,26 @@ def _icon(icon: IconConfig) -> dict:
     return out
 
 
+def _tool_surface() -> list[dict]:
+    """The LLM-facing MCP tool surface, as ``{name, description}`` summaries.
+
+    Derived from the live service registry so the card can never drift from the
+    tools the server actually exposes. Imported lazily: ``mcp_server.server``
+    builds the FastMCP singleton at import time, so we defer it to request time
+    to keep this route module cheap to import.
+    """
+    from mcp_server.server import llm_tool_surface  # noqa: PLC0415
+
+    return [{"name": e.name, "description": e.description} for e in llm_tool_surface()]
+
+
 @router.get("/.well-known/mcp/server-card.json")
 def mcp_server_card() -> JSONResponse:
-    """SEP-2127 Server Card - pre-connect registry/client branding.
+    """SEP-2127 Server Card - pre-connect registry/client discovery.
+
+    Lets agents preview the server before opening a transport: identity
+    (``name``/``title``/``description``/``version``/``icons``), where to connect
+    (``serverUrl`` + ``remotes``), and the tool surface (``tools[]``).
 
     No ``$schema`` is emitted: the draft SEP-2127 server-card schema is not yet
     published (the URL 404s), so advertising it would only break validators.
@@ -79,13 +97,18 @@ def mcp_server_card() -> JSONResponse:
         "websiteUrl": b.website_url,
         "repository": {"url": b.repository_url, "source": b.repository_source},
         "icons": [_icon(i) for i in b.icons],
+        "tools": _tool_surface(),
     }
-    # Only advertise a remote when a real public URL is configured. mcp_resource_url()
-    # falls back to localhost when MCP_PUBLIC_URL is unset (e.g. a deployed no-OAuth
-    # server), and publishing localhost would point registries at a dead endpoint.
+    # Only advertise the endpoint when a real public URL is configured.
+    # mcp_resource_url() falls back to localhost when MCP_PUBLIC_URL is unset
+    # (e.g. a deployed no-OAuth server), and publishing localhost would point
+    # registries at a dead endpoint. `serverUrl` (flat, what pre-connect crawlers
+    # read) and `remotes` (SEP-2127 / registry shape) name the same endpoint.
     public_url = global_config.MCP_PUBLIC_URL
     if public_url:
-        card["remotes"] = [{"type": "streamable-http", "url": public_url.rstrip("/")}]
+        url = public_url.rstrip("/")
+        card["serverUrl"] = url
+        card["remotes"] = [{"type": "streamable-http", "url": url}]
     # Public branding: any registry crawler (cross-origin) must be able to read it.
     return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
 
