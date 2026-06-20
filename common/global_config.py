@@ -272,6 +272,10 @@ class Config(BaseSettings):
             self.WORKOS_AUTHKIT_DOMAIN = self.WORKOS_AUTHKIT_DOMAIN.strip() or None
         if self.MCP_PUBLIC_URL is not None:
             self.MCP_PUBLIC_URL = self.MCP_PUBLIC_URL.strip() or None
+        # Same normalization for the API host: a trailing space would produce a
+        # broken servers[0].url in the published OpenAPI spec.
+        if self.API_PUBLIC_URL is not None:
+            self.API_PUBLIC_URL = self.API_PUBLIC_URL.strip() or None
         # Tokens are audience-bound to MCP_PUBLIC_URL; without it the resource
         # URI falls back to localhost and OAuth silently breaks in production.
         if (
