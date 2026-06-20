@@ -161,6 +161,24 @@ class BrandingConfig(BaseModel):
     )
 
 
+class WebBotAuthConfig(BaseModel):
+    """Web Bot Auth signing-key directory configuration.
+
+    Drives ``/.well-known/http-message-signatures-directory``
+    (draft-meunier-http-message-signatures-directory), which publishes this
+    agent's Ed25519 public signing key(s) as a JWK Set so origins can verify
+    HTTP Message Signatures it sends. The private key is supplied out of band
+    via the ``WEB_BOT_AUTH_PRIVATE_KEY`` secret (a base64url-encoded 32-byte
+    Ed25519 seed); when that is unset the route returns 404, cleanly signalling
+    "no signing identity" instead of advertising an empty directory.
+
+    ``key_lifetime_days`` sets the per-key ``exp`` (relative to first publish);
+    ``nbf`` is the publish time.
+    """
+
+    key_lifetime_days: int = 365
+
+
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration."""
 

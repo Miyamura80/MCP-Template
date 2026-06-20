@@ -32,13 +32,25 @@ Four documents live here:
   crawlers at this server's OpenAPI description via an RFC 9264 linkset. Always
   available and CORS-readable, so function-calling agents can find the
   machine-readable API contract without prior knowledge of the spec path.
+
+* **Web Bot Auth key directory**
+  (draft-meunier-http-message-signatures-directory) - publishes this agent's
+  Ed25519 public signing key(s) as a JWK Set so origins can verify the HTTP
+  Message Signatures it sends. Served only when ``WEB_BOT_AUTH_PRIVATE_KEY`` is
+  configured (404 otherwise), so a key-less template signals "no signing
+  identity" rather than advertising an empty directory.
 """
 
+import base64
+import hashlib
+import json
 import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -52,6 +64,14 @@ router = APIRouter(tags=["well-known"])
 # resource server does not make an outbound call on every discovery request.
 _AS_METADATA_TTL_SECONDS = 3600.0
 _as_metadata_cache: dict[str, tuple[float, dict]] = {}
+
+# Media type for the Web Bot Auth key directory (the JWKS variant defined by
+# draft-meunier-http-message-signatures-directory).
+_WEB_BOT_AUTH_MEDIA_TYPE = "application/http-message-signatures-directory+json"
+# The directory is deterministic for a given key, so build it once and reuse it
+# (keyed by the configured seed). Caching also pins ``nbf``/``exp`` to first
+# publish instead of drifting on every request.
+_directory_cache: dict[str, dict] = {}
 
 
 def _server_version() -> str:
@@ -149,6 +169,91 @@ def api_catalog(request: Request) -> JSONResponse:
     return JSONResponse(
         catalog,
         media_type="application/linkset+json",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+def _b64url(data: bytes) -> str:
+    """base64url-encode without padding (the JOSE convention)."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(value: str) -> bytes:
+    """Decode base64url, tolerating missing padding."""
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _jwk_thumbprint(x: str) -> str:
+    """RFC 7638 JWK SHA-256 thumbprint for an Ed25519 (OKP) public key.
+
+    The required members are serialized as compact JSON with lexicographically
+    sorted keys, then SHA-256'd and base64url-encoded - this is the ``kid`` form
+    the web-bot-auth architecture mandates for Ed25519 keys.
+    """
+    canonical = json.dumps(
+        {"crv": "Ed25519", "kty": "OKP", "x": x},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return _b64url(hashlib.sha256(canonical.encode("utf-8")).digest())
+
+
+def _web_bot_auth_directory() -> dict:
+    """Build the Ed25519 JWK Set for /.well-known/http-message-signatures-directory.
+
+    Returns 404 when no signing key is configured; 500 when the configured seed
+    is not a valid 32-byte Ed25519 private key (a deployment misconfiguration we
+    surface loudly rather than serving a bad directory).
+    """
+    seed_b64 = global_config.WEB_BOT_AUTH_PRIVATE_KEY
+    if not seed_b64:
+        raise HTTPException(status_code=404, detail="Web Bot Auth is not configured")
+    seed_b64 = seed_b64.strip()
+
+    cached = _directory_cache.get(seed_b64)
+    if cached is not None:
+        return cached
+
+    try:
+        private_key = Ed25519PrivateKey.from_private_bytes(_b64url_decode(seed_b64))
+    except ValueError as exc:
+        # binascii.Error (bad base64) subclasses ValueError, as does an
+        # incorrectly sized seed - both mean the secret is misconfigured.
+        raise HTTPException(
+            status_code=500,
+            detail="WEB_BOT_AUTH_PRIVATE_KEY is not a valid Ed25519 seed",
+        ) from exc
+
+    public_bytes = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    x = _b64url(public_bytes)
+    issued = int(time.time())
+    jwk = {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": x,
+        "kid": _jwk_thumbprint(x),
+        "use": "sig",
+        "alg": "EdDSA",
+        "nbf": issued,
+        "exp": issued + global_config.web_bot_auth.key_lifetime_days * 86_400,
+    }
+    directory = {"keys": [jwk]}
+    _directory_cache[seed_b64] = directory
+    return directory
+
+
+@router.get("/.well-known/http-message-signatures-directory")
+def web_bot_auth_directory() -> JSONResponse:
+    """Web Bot Auth key directory - the agent's Ed25519 public signing keys.
+
+    Public discovery: any origin verifying this agent's HTTP Message Signatures
+    reads it cross-origin, so it is served with ``Access-Control-Allow-Origin:
+    *`` and the directory-specific JWKS media type.
+    """
+    return JSONResponse(
+        _web_bot_auth_directory(),
+        media_type=_WEB_BOT_AUTH_MEDIA_TYPE,
         headers={"Access-Control-Allow-Origin": "*"},
     )
 

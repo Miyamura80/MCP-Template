@@ -123,6 +123,15 @@ branding:
       sizes: ["any"]
 
 ########################################################
+# Web Bot Auth (HTTP Message Signatures key directory)
+########################################################
+# Published at /.well-known/http-message-signatures-directory as an Ed25519 JWK
+# Set. The signing key itself is the WEB_BOT_AUTH_PRIVATE_KEY secret (base64url
+# 32-byte seed); set it to advertise a verifiable agent identity. Unset -> 404.
+web_bot_auth:
+  key_lifetime_days: 365   # per-key exp, relative to first publish
+
+########################################################
 # CLI
 ########################################################
 telemetry:
