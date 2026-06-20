@@ -37,7 +37,7 @@ or cheapen the assessment. **They cannot.** The cost and time of CASA come from
   ($0). Running XBOW here makes it *more* expensive, not less.
 - **(b) the LOV is the real, mandatory cost** and **only an App Defense
   Alliance authorized lab can issue it** (TAC Security, DEKRA, Leviathan,
-  Prescient, …). An AI pentest report has **zero standing** with Google's OAuth
+  Prescient, ...). An AI pentest report has **zero standing** with Google's OAuth
   team regardless of quality. No AI can substitute for the lab.
 - The annual re-certification fee (one authorized-lab fee per year) is an
   **unavoidable floor**. No tooling removes it.
@@ -70,11 +70,11 @@ the same ground at $0; we don't need a paid AI pentester for it.
 
 | Item | Time | Cost |
 |---|---|---|
-| Gate 1 - brand/consent verification | ~2–3 business days (longer if branding changed) | $0 |
+| Gate 1 - brand/consent verification | ~2-3 business days (longer if branding changed) | $0 |
 | Public pages + domain verification (homepage, privacy policy w/ Limited Use, ToS) | Dev time | $0 (uses existing deploy domains) |
 | Demo video (consent + each restricted action) | Dev time | $0 |
 | Gate 2 - DAST scan (OWASP ZAP, self-run) | Dev time | **$0** |
-| Gate 2 - **CASA Tier 2 Letter of Validation (authorized lab)** | **Several weeks to a few months** | **~$few-hundred to ~$1k (TAC "Lab Scan", cheapest) up to $15k–$75k (full third-party assessor)** |
+| Gate 2 - **CASA Tier 2 Letter of Validation (authorized lab)** | **Several weeks to a few months** | **~$few-hundred to ~$1k (TAC "Lab Scan", cheapest) up to $15k-$75k (full third-party assessor)** |
 | **Annual re-certification** | Recurring, every 12 months | Same lab fee, recurring |
 
 **Realistic cheapest path:** self-run OWASP ZAP ($0) → fix findings → TAC
