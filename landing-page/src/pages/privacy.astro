@@ -2,11 +2,10 @@
 import Base from "../layouts/Base.astro";
 import { site } from "../config/landing";
 
-// TODO(legal): confirm the exact registered legal entity name + address and the
-// effective date before this goes live for Google OAuth verification.
-const operator = "Edison Watch";
+const operator = "GPU-EVM LTD";
+const operatorAddress = "3rd Floor, 86-90 Paul Street, London, England, EC2A 4NE";
 const supportEmail = "support@gmailmcp.com";
-const effectiveDate = "June 14, 2026";
+const effectiveDate = "June 20, 2026";
 ---
 
 <Base
@@ -136,6 +135,10 @@ const effectiveDate = "June 14, 2026";
     <p class="mt-3">
       Questions about this policy or your data:
       <a class="underline" href={`mailto:${supportEmail}`}>{supportEmail}</a>.
+    </p>
+    <p class="mt-3">
+      The Service is operated by {operator}, a company registered in England and
+      Wales, at {operatorAddress}.
     </p>
 
     <p class="mt-12">

@@ -18,6 +18,7 @@ from pydantic_settings import (
 from .config_models import (
     AgenticPaymentsConfig,
     AskConfig,
+    BrandingConfig,
     CliConfig,
     DefaultLlm,
     ExampleParent,
@@ -185,6 +186,7 @@ class Config(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig())
     cli: CliConfig = Field(default_factory=lambda: CliConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
+    branding: BrandingConfig = Field(default_factory=lambda: BrandingConfig())
     subscription_config: SubscriptionConfig = Field(
         default_factory=lambda: SubscriptionConfig()
     )

@@ -5,7 +5,7 @@
  * surface: llms.txt, llms-full.txt, agents.md and the in-page agent view.
  * Rebranding the site (editing landing.ts) keeps all of these in sync.
  */
-import { site, hero, features, getStarted, faq, compatibility, connect } from "../config/landing";
+import { site, hero, features, getStarted, faq, compatibility, connect, comparison } from "../config/landing";
 
 /** Strip a trailing slash so we can safely append paths. */
 function trimSlash(url: string): string {
@@ -27,6 +27,7 @@ ${hero.subhead}
 ## Documentation for LLMs
 - [llms-full.txt](${o}/llms-full.txt): Full, expanded description of what ${site.name} is and how to use every transport.
 - [agents.md](${o}/agents.md): Agent-oriented capability and skills summary.
+- [How it compares](${o}/compare): ${site.name} vs other Gmail MCP servers (GongRzhe, Composio, Zapier/Pipedream, Google Workspace MCP).
 
 ## Resources
 - [Documentation](${site.docsUrl})
@@ -53,6 +54,20 @@ export function buildLlmsFullTxt(origin: string): string {
     .join("\n\n");
   const faqBlock = faq.items.map((i) => `### ${i.q}\n${i.a}`).join("\n\n");
   const clients = compatibility.clients.map((c) => c.name).join(", ");
+
+  const pillarsBlock = comparison.pillars
+    .map((p) => `- **${p.title}**: ${p.body}`)
+    .join("\n");
+  const competitorBlock = comparison.competitors
+    .map(
+      (c) =>
+        `### ${site.name} vs ${c.name}\n` +
+        `${c.headline} ${c.summary}\n\n` +
+        `- Choose ${site.name} if: ${c.pickUs}\n` +
+        `- Choose ${c.name} if: ${c.pickThem}\n` +
+        `- Full comparison: ${o}/vs/${c.id}`,
+    )
+    .join("\n\n");
 
   return `# ${site.name} - ${site.tagline}
 
@@ -84,6 +99,17 @@ ${transportBlock}
 
 ${featureBlock}
 
+## How it compares
+
+${comparison.subhead}
+
+What makes ${site.name} different (as of ${comparison.asOf}):
+${pillarsBlock}
+
+${competitorBlock}
+
+See the full comparison and capability matrix at ${o}/compare.
+
 ## Compatible clients
 
 Works with every MCP client, including: ${clients}.
@@ -111,9 +137,38 @@ ${faqBlock}
 - llms-full.txt: ${o}/llms-full.txt
 - agents.md: ${o}/agents.md
 - Agent skills (JSON): ${o}/.well-known/agent-skills/index.json
+- Agent skills (shell pointer): ${o}/skills.sh
 - MCP discovery (JSON): ${o}/.well-known/mcp.json
 - Sitemap: ${o}/sitemap.xml
 - Schema map: ${o}/schemamap.xml
+`;
+}
+
+/**
+ * skills.sh - shell-friendly agent skill discovery pointer.
+ *
+ * Not a formal standard (the canonical index is the Agent Skills Discovery
+ * JSON below); this exists so scanners that probe /skills.sh get a real 200
+ * with the discovery URLs instead of an SPA fallback. It is read-only and
+ * makes no changes when run.
+ */
+export function buildSkillsSh(origin: string): string {
+  const o = trimSlash(origin);
+  return `#!/usr/bin/env sh
+# ${site.name} - agent skill discovery
+#
+# ${site.name} is an MCP server. The machine-readable skill index lives at the
+# path below (Agent Skills Discovery, schema 0.2.0). This script only prints
+# pointers; it makes no changes to your system.
+
+SKILLS_INDEX="${o}/.well-known/agent-skills/index.json"
+MCP_ENDPOINT="${site.mcpUrl}"
+
+echo "Skill index:  $SKILLS_INDEX"
+echo "MCP endpoint: $MCP_ENDPOINT (server name: ${site.serverName})"
+echo
+echo "Fetch the skill index:"
+echo "  curl -fsSL $SKILLS_INDEX"
 `;
 }
 
@@ -142,10 +197,23 @@ tools rather than scraping this page.
 The same tools are also reachable over a CLI and a plain HTTP API; behaviour
 is identical across all three transports.
 
+## How it compares
+
+${site.name} is a dedicated Gmail MCP, not a thin API wrapper or a generic
+multi-app gateway. Its differentiators: interactive in-chat UI (MCP Apps),
+one codebase exposed over CLI + MCP + HTTP, and an open-source, self-hostable
+server. Head-to-head comparisons:
+${comparison.competitors
+  .map((c) => `- vs ${c.name}: ${o}/vs/${c.id}`)
+  .join("\n")}
+
+Full matrix: ${o}/compare
+
 ## More
 
 - Full description for LLMs: ${o}/llms-full.txt
 - Skills (JSON): ${o}/.well-known/agent-skills/index.json
+- Skills (shell pointer): ${o}/skills.sh
 - Human docs: ${site.docsUrl}
 - Source: ${site.githubUrl}
 `;

@@ -6,6 +6,8 @@ Each model corresponds to a section in the global_config.yaml file and provides
 type validation and structure for the configuration data.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -119,6 +121,44 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
     allowed_origins: list[str] = ["http://localhost:3000"]
+
+
+class IconConfig(BaseModel):
+    """A sized icon for pre-connect branding (MCP icons spec).
+
+    ``src`` must be an HTTPS URL. ``sizes`` accepts ``WxH`` entries or
+    ``"any"`` (for SVG); ``theme`` is ``"light"``/``"dark"`` when an icon is
+    tuned for one mode.
+    """
+
+    src: str
+    mime_type: str = "image/svg+xml"
+    sizes: list[str] = Field(default_factory=lambda: ["any"])
+    theme: Literal["light", "dark"] | None = None
+
+
+class BrandingConfig(BaseModel):
+    """Pre-connect registry branding (SEP-2127 Server Card / MCP registry).
+
+    Single source of truth for the server's public identity: the reverse-DNS
+    ``name`` a registry indexes by, and the ``title``/``description``/``icons``
+    a client shows in its "add server" UI *before* anyone connects. Surfaced
+    verbatim at ``/.well-known/mcp/server-card.json``. The deployed MCP endpoint
+    URL is not configured here - it is derived from ``MCP_PUBLIC_URL`` so the
+    card and the OAuth resource metadata can never disagree.
+    """
+
+    name: str = "io.github.Miyamura80/MCP-Template"
+    title: str = "GmailMCP"
+    description: str = (
+        "Give your AI agent real tools - one service registry over CLI, MCP, and HTTP."
+    )
+    website_url: str = "https://gmailmcp.com"
+    repository_url: str = "https://github.com/Miyamura80/MCP-Template"
+    repository_source: str = "github"
+    icons: list[IconConfig] = Field(
+        default_factory=lambda: [IconConfig(src="https://gmailmcp.com/favicon.svg")]
+    )
 
 
 class RateLimitConfig(BaseModel):
