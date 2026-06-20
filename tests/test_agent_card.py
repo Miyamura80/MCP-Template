@@ -41,6 +41,9 @@ class TestAgentCard:
         assert body["description"]
         assert body["url"].startswith("https://")
         assert body["provider"]["organization"]
+        # Discovery card advertises A2A's default JSONRPC binding, not the
+        # HTTP+JSON REST binding (whose endpoints the template doesn't implement).
+        assert body["preferredTransport"] == "JSONRPC"
 
     def test_skills_mirror_the_service_registry(self):
         discover_services()

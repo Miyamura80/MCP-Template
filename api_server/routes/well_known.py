@@ -94,12 +94,14 @@ def mcp_server_card() -> JSONResponse:
 
 
 def _agent_endpoint_url(b: BrandingConfig) -> str:
-    """Resolve the public HTTP endpoint to advertise as the agent's ``url``.
+    """Resolve the public host to advertise as the agent's ``url``.
 
-    A2A requires ``url``, so unlike the Server Card's optional remote we always
-    emit something. Prefer a configured public host; fall back to the branding
-    website (a real HTTPS URL) rather than the localhost dev default, which would
-    point A2A clients at a dead endpoint.
+    A2A requires ``url`` (and per spec the host it points to must serve the
+    declared ``preferredTransport``). This template ships the *discovery card*
+    only - the live A2A JSON-RPC transport is a tracked follow-up - so we point
+    at the public API host where that transport will mount, preferring a
+    configured public host over the branding website and never the localhost dev
+    default (which would point clients at a dead endpoint).
     """
     return (
         global_config.API_PUBLIC_URL or global_config.MCP_PUBLIC_URL or b.website_url
@@ -124,7 +126,13 @@ def _service_skills() -> list[A2AAgentSkill]:
 
 @router.get("/.well-known/agent-card.json")
 def a2a_agent_card() -> JSONResponse:
-    """A2A Agent Card (spec v0.3.0) - pre-connect agent discovery document."""
+    """A2A Agent Card (spec v0.3.0) - pre-connect agent discovery document.
+
+    Discovery only: it advertises this agent's identity and skills so A2A
+    registries/clients can find it. The backing A2A transport at ``url`` is a
+    tracked follow-up, so the declared ``preferredTransport`` is aspirational
+    until that lands.
+    """
     b = global_config.branding
     card = A2AAgentCard(
         name=b.title,
@@ -135,8 +143,10 @@ def a2a_agent_card() -> JSONResponse:
         default_input_modes=["application/json", "text/plain"],
         default_output_modes=["application/json", "text/plain"],
         skills=_service_skills(),
-        # We expose services over HTTP/JSON (FastAPI) rather than A2A JSON-RPC.
-        preferred_transport="HTTP+JSON",
+        # JSONRPC is A2A's default/simplest binding. We advertise it (rather than
+        # the HTTP+JSON REST binding) because the live A2A transport - whichever
+        # binding it lands on - is a tracked follow-up; the card is discovery only.
+        preferred_transport="JSONRPC",
         provider=A2AAgentProvider(organization=b.title, url=b.website_url),
         icon_url=b.icons[0].src if b.icons else None,
         documentation_url=b.website_url,
