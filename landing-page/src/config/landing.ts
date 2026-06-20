@@ -712,36 +712,57 @@ export const testimonials: { enabled: boolean; heading: string; items: Testimoni
 };
 
 export const pricing: { enabled: boolean; heading: string; subhead: string; tiers: PricingTier[] } = {
-  // Most dev-tool pages defer pricing to a separate page - flip to false to hide.
-  enabled: false,
-  heading: "Simple, honest pricing",
-  subhead: "Start free. Upgrade when you ship.",
+  // Surfaced on the homepage AND in the machine-readable /pricing.md manifest.
+  // Flip to false to hide the on-page section (the manifest still generates).
+  enabled: true,
+  heading: "Pricing & licensing",
+  subhead:
+    "Open source under the MIT license and free to self-host - no setup fee, no seat minimum. Pay only when you want us to run and scale it for you.",
   tiers: [
     {
       name: "Open Source",
       price: "$0",
-      description: "Self-host the full template, forever.",
-      features: ["All three transports", "OAuth + billing scaffolding", "Community support"],
-      cta: "Get started",
-      href: "#how-it-works",
+      cadence: "forever",
+      description:
+        "MIT-licensed. Self-host the full server on your own infrastructure - zero setup cost, no license fee.",
+      features: [
+        "MIT license - fork, modify, and ship freely",
+        "All three transports: CLI, MCP, HTTP API",
+        "Interactive MCP Apps (composer + ranked inbox)",
+        "Your own OAuth credentials & encrypted tokens",
+        "Community support",
+      ],
+      cta: "Get the source",
+      href: site.githubUrl,
     },
     {
-      name: "Pro",
+      name: "Hosted Pro",
       price: "$20",
       cadence: "/mo",
-      description: "Hosted, managed, and monitored.",
-      features: ["Managed deployment", "Usage analytics", "Priority support"],
+      description:
+        "We run the streamable-HTTP server for you. No infrastructure to manage, paste-a-URL setup.",
+      features: [
+        "Managed cloud deployment (zero ops)",
+        "Hosted OAuth 2.1 & encrypted token storage",
+        "Usage analytics & monitoring",
+        "Priority support",
+      ],
       cta: "Start free trial",
-      href: "#how-it-works",
+      href: "/#how-it-works",
       featured: true,
     },
     {
       name: "Team",
       price: "Custom",
-      description: "For teams running agents in production.",
-      features: ["SSO + audit logs", "SLA", "Dedicated support"],
+      description: "For teams running agents in production, with commercial licensing options.",
+      features: [
+        "SSO + audit logs",
+        "Commercial / OEM licensing",
+        "Uptime SLA",
+        "Dedicated support & onboarding",
+      ],
       cta: "Contact sales",
-      href: "#how-it-works",
+      href: "/#how-it-works",
     },
   ],
 };
@@ -837,7 +858,8 @@ export const footer: { columns: FooterColumn[]; copyright: string } = {
         { label: "How it works", href: "/#how-it-works" },
         { label: "Compare", href: "/compare" },
         // The #pricing section only renders when pricing.enabled - don't link a dead anchor otherwise.
-        ...(pricing.enabled ? [{ label: "Pricing", href: "#pricing" }] : []),
+        // Absolute (/#pricing) so it also resolves from sub-pages like /compare and /vs/*.
+        ...(pricing.enabled ? [{ label: "Pricing", href: "/#pricing" }] : []),
       ],
     },
     {
