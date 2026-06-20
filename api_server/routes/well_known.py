@@ -132,7 +132,9 @@ def _authorization_server_metadata() -> dict:
         resp = httpx.get(url, timeout=5.0, follow_redirects=True)
         resp.raise_for_status()
         metadata = resp.json()
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError) as exc:
+        # ValueError covers a non-JSON body (json.JSONDecodeError subclasses it);
+        # treat a malformed upstream document the same as a fetch failure.
         raise HTTPException(
             status_code=502,
             detail="Failed to fetch authorization server metadata",

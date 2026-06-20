@@ -333,6 +333,17 @@ class TestAuthorizationServerMetadata(TestTemplate):
         resp = self._client().get("/.well-known/oauth-authorization-server")
         assert resp.status_code == 502
 
+    @patch("api_server.routes.well_known.httpx.get")
+    @patch("api_server.auth.authkit_auth.global_config")
+    def test_metadata_502_on_non_json_upstream(self, mock_config, mock_get):
+        # A non-JSON upstream body must be treated as a fetch failure (502),
+        # not crash the endpoint with a 500.
+        mock_config.WORKOS_AUTHKIT_DOMAIN = AUTHKIT_DOMAIN
+        mock_get.return_value.raise_for_status.return_value = None
+        mock_get.return_value.json.side_effect = ValueError("not json")
+        resp = self._client().get("/.well-known/oauth-authorization-server")
+        assert resp.status_code == 502
+
 
 class TestUnauthorizedDiscoveryHint(TestTemplate):
     def _post_mcp_unauthenticated(self):
