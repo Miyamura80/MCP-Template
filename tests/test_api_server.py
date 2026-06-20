@@ -111,6 +111,25 @@ class TestAPIServer(TestTemplate):
         assert "/api/v1/billing/usage/current" in routes
         assert "/api/v1/billing/subscription/status" in routes
 
+    def test_openapi_spec_published(self):
+        """The OpenAPI spec is served and carries an absolute servers URL."""
+        resp = self.client.get("/openapi.json")
+        assert resp.status_code == 200
+        spec = resp.json()
+        assert spec["openapi"].startswith("3.")
+        assert spec["paths"]
+        servers = spec.get("servers")
+        assert servers, "OpenAPI spec must declare an absolute servers URL"
+        assert servers[0]["url"].startswith("http")
+
+    def test_swagger_json_alias(self):
+        """The legacy /swagger.json path returns the same spec."""
+        resp = self.client.get("/swagger.json")
+        assert resp.status_code == 200
+        assert (
+            resp.json()["openapi"] == self.client.get("/openapi.json").json()["openapi"]
+        )
+
     def test_403_on_insufficient_scopes(self):
         """A key with read-only scopes should be rejected from service execution."""
         # Override auth to return a user with limited scopes

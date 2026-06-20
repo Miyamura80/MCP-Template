@@ -1,8 +1,12 @@
 """FastAPI application - CORS, session middleware, route registration."""
 
+from typing import Any
+from urllib.parse import urlsplit
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from starlette.middleware.sessions import SessionMiddleware
 
 from api_server.middleware.error_handler import (
@@ -62,8 +66,59 @@ app.include_router(subscription.router)
 app.include_router(webhooks.router)
 app.include_router(agentic_payments.router)
 
+
+# --- OpenAPI publication --------------------------------------------------
+# FastAPI serves the spec at /openapi.json, but without an absolute ``servers``
+# entry an agent/scanner that fetches it can't tell where to send requests and
+# may report the API as undiscoverable. Inject the public origin (derived from
+# MCP_PUBLIC_URL, falling back to the local bind) and alias the legacy
+# /swagger.json path that older scanners probe.
+#
+# Registered before mount_mcp_server() because the MCP app is mounted at "/"
+# and would otherwise shadow the /swagger.json route.
+
+
+def _public_api_base() -> str:
+    """Absolute public origin for the API.
+
+    Derived from ``MCP_PUBLIC_URL`` (the canonical /mcp resource URL) by
+    stripping its path, so the OpenAPI ``servers`` entry matches the host
+    clients actually reach. Falls back to the local bind in dev.
+    """
+    configured = global_config.MCP_PUBLIC_URL
+    if configured:
+        parts = urlsplit(configured.rstrip("/"))
+        if parts.scheme and parts.netloc:
+            return f"{parts.scheme}://{parts.netloc}"
+    return f"http://localhost:{global_config.server.port}"
+
+
+def custom_openapi() -> dict[str, Any]:
+    """OpenAPI schema with an absolute ``servers`` block for discoverability."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+    schema["servers"] = [{"url": _public_api_base(), "description": "API server"}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
+
+
+@app.get("/swagger.json", include_in_schema=False)
+def swagger_json() -> dict[str, Any]:
+    """Alias of /openapi.json for scanners that probe the legacy path."""
+    return app.openapi()
+
+
 # --- MCP server (streamable HTTP) -----------------------------------------
 # Mounts FastMCP at /mcp so CLI/API/MCP share one process, port, and middleware.
+# Must come last: it mounts at "/" and shadows any route registered after it.
 mount_mcp_server(app)
 
 
