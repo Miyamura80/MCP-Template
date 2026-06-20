@@ -44,8 +44,9 @@ returning errors. Don't rely on the limiter as a hard security boundary.
 
 ## Response Headers
 
-These headers are attached to **every** response (not just `429`), so you can
-proactively throttle before hitting a limit:
+Responses from rate-limited endpoints carry these headers (not just on `429`),
+so you can proactively throttle before hitting a limit. Skipped paths (e.g.
+`/health`) and fail-open responses may omit them:
 
 | Header | Example | Meaning |
 |--------|---------|---------|
