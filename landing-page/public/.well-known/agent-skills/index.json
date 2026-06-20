@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "gmail-mcp",
+      "type": "skill-md",
+      "description": "Triage and curate a Gmail inbox by connecting to the GmailMCP server over MCP and calling its typed tools.",
+      "url": "/.well-known/agent-skills/gmail-mcp/SKILL.md",
+      "digest": "sha256:ec726076d41fd6e2ee8aa7f5c01bf433de0c3dda98a0371f2e8794faff00515c"
+    }
+  ]
+}
