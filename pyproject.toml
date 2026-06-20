@@ -44,7 +44,7 @@ dependencies = [
     "openfeature-sdk>=0.10.0",
     "scrubadub>=2.0.1",
     "pydantic>=2.10.6",
-    "numpy>=2.2.2",
+    "numpy>=2.4.6",
     "typer",
     "questionary",
     "rich>=15.0.0",
