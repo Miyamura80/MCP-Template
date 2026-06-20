@@ -34,11 +34,11 @@ under `rate_limit.tiers` and are configurable per tier:
 
 Authenticated tiers (`free_tier`, `plus_tier`) ship with higher defaults
 (`10 rps / 120 rpm / 5000 rph / 10000 rpd`). The values are illustrative
-template defaults — **read the headers at runtime; don't hard-code limits.**
+template defaults - **read the headers at runtime; don't hard-code limits.**
 
 <Callout type="warn">
 If the rate-limiter's storage backend (e.g. Redis) is unavailable, the
-middleware **fails open** — requests pass through without limiting rather than
+middleware **fails open** - requests pass through without limiting rather than
 returning errors. Don't rely on the limiter as a hard security boundary.
 </Callout>
 
@@ -55,12 +55,12 @@ so you can proactively throttle before hitting a limit. Skipped paths (e.g.
 | `X-RateLimit-Reset` | `1750377600` | Unix timestamp when that window resets |
 | `RateLimit` | `limit=120, remaining=118, reset=1750377600` | [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/) combined form |
 | `RateLimit-Policy` | `5;w=1, 60;w=60, 1000;w=3600, 5000;w=86400` | All window policies |
-| `Retry-After` | `12` | **On `429`/`402` only** — seconds to wait before retrying |
+| `Retry-After` | `12` | **On `429`/`402` only** - seconds to wait before retrying |
 
 ## Handling a 429
 
 1. Read `Retry-After` and sleep at least that many seconds.
-2. Retry the identical request — `429` is safe to retry.
+2. Retry the identical request - `429` is safe to retry.
 3. Use `X-RateLimit-Remaining` on successful responses to pace yourself and
    avoid hitting the limit in the first place.
 

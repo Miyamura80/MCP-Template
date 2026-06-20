@@ -43,7 +43,7 @@ The `Idempotency-Key` header prevents duplicate charges. Each call reports one u
 Two independent throttles apply:
 
 - **Per-client rate limits** (sliding second/minute/hour/day windows) return
-  `429` when exceeded — back off and retry.
+  `429` when exceeded - back off and retry.
 - **Daily quota** per subscription tier returns `402 quota_exceeded` when your
   plan's daily allowance is used up. The response includes a `Retry-After`
   header and a `quota_reset_at` timestamp (next UTC day).
