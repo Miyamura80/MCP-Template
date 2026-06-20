@@ -23,6 +23,11 @@ Two documents live here:
   description, and icon a registry or client shows before anyone connects.
   Always available (branding has no auth dependency) and served with
   ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
+
+* **API Catalog** (RFC 9727) - a single discovery URL that points agents and
+  crawlers at this server's OpenAPI description via an RFC 9264 linkset. Always
+  available and CORS-readable, so function-calling agents can find the
+  machine-readable API contract without prior knowledge of the spec path.
 """
 
 from importlib.metadata import PackageNotFoundError
@@ -78,6 +83,38 @@ def mcp_server_card() -> JSONResponse:
         card["remotes"] = [{"type": "streamable-http", "url": public_url.rstrip("/")}]
     # Public branding: any registry crawler (cross-origin) must be able to read it.
     return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
+
+
+@router.get("/.well-known/api-catalog")
+def api_catalog() -> JSONResponse:
+    """RFC 9727 API catalog - points agents/crawlers at the OpenAPI description.
+
+    Returns an RFC 9264 linkset whose ``service-desc`` link references this
+    server's OpenAPI document, so function-calling agents can discover the
+    machine-readable API contract from one well-known URL. Absolute URLs are
+    emitted when ``API_PUBLIC_URL`` is configured (matching the OpenAPI
+    ``servers`` block); otherwise relative hrefs let the client resolve them
+    against the request origin.
+    """
+    base = (global_config.API_PUBLIC_URL or "").rstrip("/")
+    anchor = f"{base}/" if base else "/"
+    openapi_href = f"{base}/openapi.json" if base else "/openapi.json"
+    catalog = {
+        "linkset": [
+            {
+                "anchor": anchor,
+                "service-desc": [
+                    {"href": openapi_href, "type": "application/vnd.oai.openapi+json"}
+                ],
+            }
+        ]
+    }
+    # Public discovery: any agent or registry crawler (cross-origin) must read it.
+    return JSONResponse(
+        catalog,
+        media_type="application/linkset+json",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
 
 
 def _metadata() -> dict:
