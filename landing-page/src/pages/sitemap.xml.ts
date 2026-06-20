@@ -5,6 +5,7 @@ import { site, comparison } from "../config/landing";
 const routes = [
   { path: "/", priority: "1.0", changefreq: "weekly" },
   { path: "/compare", priority: "0.8", changefreq: "monthly" },
+  { path: "/api", priority: "0.7", changefreq: "weekly" },
   // One /vs/<slug> page per competitor (generated from the comparison config).
   ...comparison.competitors.map((c) => ({
     path: `/vs/${c.id}`,

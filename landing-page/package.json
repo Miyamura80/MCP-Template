@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "astro dev",
     "gen:discovery": "bun run scripts/gen-discovery.ts",
-    "build": "bun run scripts/gen-discovery.ts && astro build",
+    "gen:openapi": "bun run scripts/gen-openapi.ts",
+    "build": "bun run scripts/gen-discovery.ts && bun run scripts/gen-openapi.ts && astro build",
     "preview": "astro preview",
     "start": "sirv dist --host 0.0.0.0 --port ${PORT:-8080} --single --quiet --cors",
     "astro": "astro"

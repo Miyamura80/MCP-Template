@@ -1,5 +1,8 @@
 """FastAPI application - CORS, session middleware, route registration."""
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +27,24 @@ from common import global_config
 from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
 
-app = FastAPI(title="mymcp-api", version="0.1.0", lifespan=mcp_lifespan)
+try:
+    _APP_VERSION = _pkg_version("mcp-template")
+except PackageNotFoundError:
+    _APP_VERSION = "0.1.0"
+
+# Advertise the public host in the OpenAPI `servers` block when configured, so
+# the published spec is self-describing (codegen, Swagger "Try it out", and the
+# landing-page API reference all target the real deployment, not a relative path).
+_openapi_servers = (
+    [{"url": global_config.API_PUBLIC_URL}] if global_config.API_PUBLIC_URL else None
+)
+
+app = FastAPI(
+    title="mymcp-api",
+    version=_APP_VERSION,
+    servers=_openapi_servers,
+    lifespan=mcp_lifespan,
+)
 
 # --- Middleware (last-added = outermost in Starlette) ---------------------
 
