@@ -1,29 +1,11 @@
 /**
- * Production static server for the landing page, with standards-compliant
- * `Accept: text/markdown` content negotiation on the canonical URL.
- *
- * Why this exists instead of plain `sirv-cli`:
- *   The site is a static Astro build. Agents increasingly probe pages with
- *   `Accept: text/markdown` (see acceptmarkdown.com) to fetch a clean,
- *   token-cheap representation of a page instead of scraping HTML. A bare
- *   static server always returns HTML, so we wrap `sirv` with a thin
- *   negotiation layer:
- *
- *     - GET/HEAD `/` (the canonical URL) with `Accept: text/markdown` ranked
- *       at or above `text/html` -> the page's markdown alternate
- *       (`buildAgentsMd`, the same doc linked via
- *       `<link rel="alternate" type="text/markdown" href="/agents.md">`).
- *     - Everything else -> static files via `sirv`.
- *
- * Crucially, *every* negotiable response advertises `Vary: Accept,
- * Accept-Encoding`. Without `Accept` in `Vary`, a shared CDN can cache the
- * HTML variant under the bare URL and then hand it to an agent that asked for
- * markdown (or vice-versa), depending on which representation populated the
- * cache first. We merge `Accept` into whatever `Vary` sirv emits (it already
- * sets `Vary: Accept-Encoding` for compressed responses) so caches key on both
- * dimensions.
- *
- * Run with bun (Railway's builder): `bun server.ts`. Honors `$PORT`.
+ * Static server for the landing page with `Accept: text/markdown` content
+ * negotiation on the canonical URL (see acceptmarkdown.com). The site is a
+ * static Astro build, so we wrap `sirv`: GET/HEAD `/` with `Accept:
+ * text/markdown` ranked >= `text/html` gets the page's markdown alternate
+ * (`buildAgentsMd`); everything else is served as static files. Negotiable
+ * responses send `Vary: Accept, Accept-Encoding` so CDNs don't cross-serve the
+ * HTML and markdown variants. Run with bun: `bun server.ts`. Honors `$PORT`.
  */
 import { createServer, type ServerResponse } from "node:http";
 import sirv from "sirv";
@@ -33,11 +15,9 @@ import { site } from "./src/config/landing.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
-// Serve the Astro build. `single` keeps the SPA-style fallback to index.html.
-// `setHeaders` re-adds the `Access-Control-Allow-Origin: *` that the old
-// sirv-cli `--cors` flag provided, so registries/clients can fetch the
-// /.well-known discovery docs cross-origin (SEP-2127). sirv@3 dropped the
-// `cors` option, so we set the header ourselves.
+// `single` = SPA fallback to index.html. sirv@3 dropped the `cors` option, so
+// `setHeaders` re-adds the `Access-Control-Allow-Origin: *` that sirv-cli's
+// `--cors` gave us (registries fetch /.well-known cross-origin, SEP-2127).
 const assets = sirv("dist", {
   single: true,
   gzip: true,
@@ -76,11 +56,9 @@ function quality(accept: string, type: string): number {
 }
 
 /**
- * True when the client explicitly asked for `text/markdown` (not merely via a
- * `*\/*` catch-all) and ranks it at least as high as `text/html`. This keeps
- * default clients - browsers (`text/html,...,*\/*;q=0.8`) and bare `curl`
- * (`*\/*`) - on the HTML representation, while honoring agents that send
- * `Accept: text/markdown`.
+ * True when the client named `text/markdown` explicitly (not via a `*\/*`
+ * catch-all) and ranks it >= `text/html`. Keeps browsers and bare `curl`
+ * (`*\/*`) on HTML while honoring agents that send `Accept: text/markdown`.
  */
 function wantsMarkdown(accept: string | undefined): boolean {
   if (!accept) return false;
@@ -107,11 +85,7 @@ function isCanonical(pathname: string): boolean {
   return pathname === "/" || pathname === "/index.html";
 }
 
-/**
- * First value of a (possibly comma-joined or repeated) header. `X-Forwarded-*`
- * can carry a chain like `host1, host2`; we want only the client-facing entry.
- * Returns undefined when empty.
- */
+/** First entry of a comma-joined or repeated header (e.g. `X-Forwarded-*`). */
 function firstHeaderToken(value: string | string[] | undefined): string | undefined {
   if (!value) return undefined;
   const raw = Array.isArray(value) ? value[0] : value;
@@ -119,11 +93,7 @@ function firstHeaderToken(value: string | string[] | undefined): string | undefi
   return first || undefined;
 }
 
-/**
- * Resolve the public origin for absolute links inside the markdown body,
- * honoring the proxy's forwarded headers and falling back to the configured
- * site URL.
- */
+/** Public origin for absolute links in the markdown body; forwarded host wins. */
 function originFor(host: string | undefined, proto: string | undefined): string {
   if (host) return `${proto || "https"}://${host}`;
   return new URL(site.url).origin;
@@ -131,11 +101,7 @@ function originFor(host: string | undefined, proto: string | undefined): string 
 
 const VARY = "Accept, Accept-Encoding";
 
-/**
- * Wrap `res.setHeader` so any `Vary` sirv sets also carries `Accept`. sirv
- * emits `Vary: Accept-Encoding` for compressible responses; we fold `Accept`
- * in so caches never cross-serve the HTML and markdown representations.
- */
+/** Fold `Accept` into any `Vary` sirv sets (it emits `Vary: Accept-Encoding`). */
 function ensureVaryAccept(res: ServerResponse): void {
   const original = res.setHeader.bind(res);
   res.setHeader = ((name: string, value: number | string | readonly string[]) => {
@@ -155,15 +121,13 @@ function ensureVaryAccept(res: ServerResponse): void {
 
 const server = createServer((req, res) => {
   const method = req.method ?? "GET";
-  // Parse only the request target for the pathname. The forwarded host is
-  // untrusted and irrelevant to the path, so we use a fixed base - a malformed
-  // host can no longer throw out of URL parsing and crash the handler.
+  // Parse the path against a fixed base (the untrusted forwarded host can't
+  // affect it, nor crash the handler). On failure leave pathname empty so a
+  // malformed target is non-canonical and falls through to static serving.
   let pathname = "";
   try {
     pathname = new URL(req.url ?? "/", "http://localhost").pathname;
   } catch {
-    // A malformed request target is never canonical: leave pathname empty so
-    // it falls through to static serving (404) instead of being coerced to "/".
     pathname = "";
   }
 
@@ -186,11 +150,8 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Only the canonical, content-negotiated route varies on Accept. Scope the
-  // `Vary: Accept` here so static assets (which are never negotiated) keep a
-  // single cache key and don't fragment. For the canonical HTML we both seed
-  // `Vary` and fold `Accept` into whatever sirv later sets, so the HTML variant
-  // is cached separately from the markdown one served above.
+  // Only the canonical route varies on Accept; scope it here so static assets
+  // keep a single cache key. Seed `Vary` and fold `Accept` into sirv's later set.
   if (negotiable) {
     ensureVaryAccept(res);
     res.setHeader("Vary", VARY);
