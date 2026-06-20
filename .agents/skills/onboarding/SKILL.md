@@ -10,7 +10,7 @@ especially when they invoke `/onboarding`, ask to run onboarding, or want to
 remove unused template systems.
 
 `init/onboard.py` is the source of truth for every choice, default, and prune
-action. Read it before changing anything — the enums and `OnboardingConfig`
+action. Read it before changing anything. The enums and `OnboardingConfig`
 (`ServiceSurface`, `PaymentStack`, `ExampleApp`, `OnboardingProfile`,
 `expanded()`) define what can be selected and how selections imply each other.
 
@@ -62,7 +62,7 @@ action. Read it before changing anything — the enums and `OnboardingConfig`
    - MCP Apps imply the MCP surface; auth implies database; `full-saas`
      implies docs.
 
-5. Let onboarding prune deterministically — do not hand-delete. A non-dry run
+5. Let onboarding prune deterministically; do not hand-delete. A non-dry run
    removes files and also rewrites `pyproject.toml` (deps, packages, scripts,
    vulture, MCP Apps force-include), `.importlinter`, `api_server/server.py`
    route registrations, `mcp_server/_tool_factory.py` scope/quota guards,
@@ -80,7 +80,7 @@ action. Read it before changing anything — the enums and `OnboardingConfig`
 7. Handle the systems onboarding does not touch, after confirming with the user:
    - `landing-page/` is a GmailMCP-branded Astro marketing site (privacy/terms,
      comparison pages, WebMCP, Server Card, llms.txt). For a real project it
-     almost always needs rebranding or removal — `make onboard` will not do this.
+     almost always needs rebranding or removal, and `make onboard` will not do this.
    - `render.yaml` and `Dockerfile` are deploy configs not wired into pruning;
      update or remove them to match the kept surfaces.
 
