@@ -313,7 +313,9 @@ export function buildPricingMd(origin: string): string {
   const o = trimSlash(origin);
   const tierBlock = pricing.tiers
     .map((t) => {
-      const price = `${t.price}${t.cadence ?? ""}`;
+      // Glue slash cadences ("$20/mo") but space-separate word cadences ("$0 forever").
+      const cadence = t.cadence ?? "";
+      const price = cadence && !cadence.startsWith("/") ? `${t.price} ${cadence}` : `${t.price}${cadence}`;
       const featureLines = t.features.map((f) => `- ${f}`).join("\n");
       return (
         `## ${t.name}${t.featured ? " (recommended)" : ""}\n\n` +
