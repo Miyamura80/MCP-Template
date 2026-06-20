@@ -15,8 +15,11 @@ cd "${CLAUDE_PROJECT_DIR:-.}"
 
 # Ensure uv-managed tools are on PATH for this and later session commands.
 export PATH="$HOME/.local/bin:$PATH"
-if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$CLAUDE_ENV_FILE"
+# Persist for later commands, but only once: SessionStart fires on resume too,
+# so guard against appending a duplicate line on every resume.
+path_line='export PATH="$HOME/.local/bin:$PATH"'
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && ! grep -qF "$path_line" "$CLAUDE_ENV_FILE" 2>/dev/null; then
+  echo "$path_line" >> "$CLAUDE_ENV_FILE"
 fi
 
 # pyproject.toml requires uv >= 0.9.17 for the relative `exclude-newer`
