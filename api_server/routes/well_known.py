@@ -1,6 +1,6 @@
 """Well-known discovery documents for the /mcp endpoint.
 
-Three documents live here:
+Four documents live here:
 
 * **OAuth 2.0 Protected Resource Metadata** (RFC 9728) - tells MCP clients
   where the authorization server is. Required of resource servers by the MCP
@@ -27,6 +27,11 @@ Three documents live here:
   ``remotes``) and tool surface (``tools[]``) a registry or agent previews
   before opening a transport. Always available (no auth dependency) and served
   with ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
+
+* **API Catalog** (RFC 9727) - a single discovery URL that points agents and
+  crawlers at this server's OpenAPI description via an RFC 9264 linkset. Always
+  available and CORS-readable, so function-calling agents can find the
+  machine-readable API contract without prior knowledge of the spec path.
 """
 
 import time
@@ -34,7 +39,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
@@ -111,6 +116,41 @@ def mcp_server_card() -> JSONResponse:
         card["remotes"] = [{"type": "streamable-http", "url": url}]
     # Public branding: any registry crawler (cross-origin) must be able to read it.
     return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
+
+
+@router.get("/.well-known/api-catalog")
+def api_catalog(request: Request) -> JSONResponse:
+    """RFC 9727 API catalog - points agents/crawlers at the OpenAPI description.
+
+    Returns an RFC 9264 linkset whose ``service-desc`` link references this
+    server's OpenAPI document, so function-calling agents can discover the
+    machine-readable API contract from one well-known URL. Absolute URLs are
+    emitted when ``API_PUBLIC_URL`` is configured (matching the OpenAPI
+    ``servers`` block); otherwise relative hrefs let the client resolve them
+    against the request origin.
+    """
+    base = (global_config.API_PUBLIC_URL or "").rstrip("/")
+    anchor = f"{base}/" if base else "/"
+    # Derive the spec path from the live app so the catalog tracks a customized
+    # ``openapi_url``; fall back to the FastAPI default if the spec is disabled.
+    openapi_path = request.app.openapi_url or "/openapi.json"
+    openapi_href = f"{base}{openapi_path}" if base else openapi_path
+    catalog = {
+        "linkset": [
+            {
+                "anchor": anchor,
+                "service-desc": [
+                    {"href": openapi_href, "type": "application/vnd.oai.openapi+json"}
+                ],
+            }
+        ]
+    }
+    # Public discovery: any agent or registry crawler (cross-origin) must read it.
+    return JSONResponse(
+        catalog,
+        media_type="application/linkset+json",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
 
 
 def _metadata() -> dict:
