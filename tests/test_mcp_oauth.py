@@ -282,10 +282,12 @@ class TestAuthorizationServerMetadata(TestTemplate):
     @patch("api_server.auth.authkit_auth.global_config")
     def test_404_when_unconfigured(self, mock_config):
         mock_config.WORKOS_AUTHKIT_DOMAIN = None
-        resp = self._client().get(
-            "/.well-known/oauth-authorization-server", follow_redirects=False
-        )
-        assert resp.status_code == 404
+        for path in (
+            "/.well-known/oauth-authorization-server/mcp",
+            "/.well-known/oauth-authorization-server",
+        ):
+            resp = self._client().get(path, follow_redirects=False)
+            assert resp.status_code == 404, path
 
 
 class TestUnauthorizedDiscoveryHint(TestTemplate):
