@@ -13,9 +13,22 @@ The API server is available on the `saas` branch. The `main` branch includes the
 
 ## Base URL
 
+Production:
+
+```
+https://api.gmailmcp.com
+```
+
+Local development:
+
 ```
 http://localhost:8000
 ```
+
+The API shares one process with the MCP server, so the production host also
+answers at `gmailmcp.com` / `mcp.gmailmcp.com`; `api.gmailmcp.com` is the
+canonical vanity host for REST traffic. The examples below use `localhost`;
+swap in the production base URL to call the deployed API.
 
 ## Quick Example
 
