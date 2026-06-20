@@ -15,6 +15,7 @@ if cairosvg is unavailable it falls back to a plain cyan square.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import urllib.request
 from pathlib import Path
@@ -24,7 +25,6 @@ from PIL import Image, ImageDraw, ImageFont
 # --- brand tokens (keep in sync with src/styles/global.css @theme) ----------
 BG = (0, 0, 0)
 GRID = (20, 20, 20)
-BORDER = (56, 56, 56)
 FG = (255, 255, 255)
 FG_MUTED = (155, 164, 166)
 ACCENT = (195, 255, 253)  # Core Cyan 500
@@ -50,11 +50,9 @@ def archivo(size: int, weight: int = 700) -> ImageFont.FreeTypeFont:
     if not FONT_CACHE.exists():
         urllib.request.urlretrieve(ARCHIVO_URL, FONT_CACHE)
     font = ImageFont.truetype(str(FONT_CACHE), size)
-    try:
-        # Archivo axes are [Weight, Width]; pin width to 100 (normal).
+    # Archivo axes are [Weight, Width]; pin width to 100 (normal).
+    with contextlib.suppress(OSError):
         font.set_variation_by_axes([weight, 100])
-    except OSError:
-        pass
     return font
 
 
