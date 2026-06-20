@@ -22,36 +22,8 @@
  * deep links are rebuilt here at build time, mirroring ConnectWidget.astro.
  */
 import { site, connect, faq } from "../config/landing";
-
-/** Build the one-click install URL for a deep-link client (mirrors ConnectWidget). */
-function deepLink(id: string): string | null {
-  const { mcpUrl, serverName } = site;
-  switch (id) {
-    case "cursor": {
-      const config = Buffer.from(JSON.stringify({ url: mcpUrl })).toString("base64");
-      return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(serverName)}&config=${encodeURIComponent(config)}`;
-    }
-    case "vscode": {
-      const payload = encodeURIComponent(
-        JSON.stringify({ name: serverName, type: "http", url: mcpUrl }),
-      );
-      return `vscode:mcp/install?${payload}`;
-    }
-    case "goose": {
-      const params = new URLSearchParams({
-        url: mcpUrl,
-        type: "streamable_http",
-        id: serverName,
-        name: serverName,
-        description: `${serverName} MCP server`,
-        timeout: "300",
-      });
-      return `goose://extension?${params.toString()}`;
-    }
-    default:
-      return null;
-  }
-}
+// Shared with ConnectWidget.astro so install URL formats can't drift.
+import { deepLink } from "../utils/deeplink";
 
 // Build-time payload the client script reads to register tools. Sourced
 // entirely from config so the agent-facing tools and the visible UI never drift.
@@ -65,7 +37,7 @@ const payload = {
     id: t.id,
     name: t.name,
     method: t.method,
-    install_url: t.method === "deeplink" ? deepLink(t.id) : null,
+    install_url: t.method === "deeplink" ? deepLink(t.id, site.mcpUrl, site.serverName) : null,
     steps: t.steps ?? null,
     note: t.note ?? null,
   })),
@@ -107,7 +79,14 @@ const payloadJson = JSON.stringify(payload).replace(/</g, "\\u003c");
     return { content: [{ type: "text" as const, text }], structuredContent };
   }
 
+  // The module script is evaluated once and persists across Astro client-side
+  // navigations, so the astro:page-load listener fires init repeatedly. Guard
+  // against re-registering: provideContext would redundantly replace the set,
+  // and registerTool throws on a duplicate tool name. The tools never change.
+  let registered = false;
+
   function initWebMcp() {
+    if (registered) return;
     const mc = getModelContext();
     if (!mc) return; // No WebMCP support in this browser - nothing to do.
 
@@ -239,6 +218,7 @@ const payloadJson = JSON.stringify(payload).replace(/</g, "\\u003c");
     } else if (typeof mc.registerTool === "function") {
       for (const tool of tools) mc.registerTool(tool, { signal: controller.signal });
     }
+    registered = true;
   }
 
   initWebMcp();
