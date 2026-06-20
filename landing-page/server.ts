@@ -158,12 +158,13 @@ const server = createServer((req, res) => {
   // Parse only the request target for the pathname. The forwarded host is
   // untrusted and irrelevant to the path, so we use a fixed base - a malformed
   // host can no longer throw out of URL parsing and crash the handler.
-  let pathname = "/";
+  let pathname = "";
   try {
     pathname = new URL(req.url ?? "/", "http://localhost").pathname;
   } catch {
-    // noqa: keep serving; a bad request target just isn't a canonical match.
-    pathname = "/";
+    // A malformed request target is never canonical: leave pathname empty so
+    // it falls through to static serving (404) instead of being coerced to "/".
+    pathname = "";
   }
 
   const negotiable = isCanonical(pathname) && (method === "GET" || method === "HEAD");
