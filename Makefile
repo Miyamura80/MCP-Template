@@ -298,6 +298,10 @@ ci: ruff vulture import_lint ty docs_lint check_deps file_len_check blind_except
 sync-agent-config: check_uv ## Sync Claude <-> Codex skills & subagents (regenerates symlinks and .codex/agents/*.toml)
 	@uv run scripts/sync_agent_config.py
 
+.PHONY: sync-skills
+sync-skills: check_uv ## Mirror skills/ into landing-page/.well-known and refresh index.json digests
+	@uv run scripts/sync_skills.py
+
 ########################################################
 # Database
 ########################################################

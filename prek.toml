@@ -23,6 +23,7 @@ hooks = [
 repo = "local"
 hooks = [
     { id = "sync-agent-config", name = "sync Claude <-> Codex skills & subagents; fail if drift was fixed", entry = "uv run scripts/sync_agent_config.py --check", language = "system", pass_filenames = false, always_run = true },
+    { id = "sync-skills", name = "sync skills/ -> landing-page/.well-known; fail if drift", entry = "uv run scripts/sync_skills.py --check", language = "system", pass_filenames = false, always_run = true },
 ]
 
 # ── Source-size guardrails (mirror GitHub Actions) ────────────────
