@@ -29,6 +29,9 @@ ${hero.subhead}
 - [agents.md](${o}/agents.md): Agent-oriented capability and skills summary.
 - [How it compares](${o}/compare): ${site.name} vs other Gmail MCP servers (GongRzhe, Composio, Zapier/Pipedream, Google Workspace MCP).
 
+## Pricing & licensing
+- [pricing.md](${o}/pricing.md): Machine-readable pricing & tiers. ${site.name} is open source (MIT license) and free to self-host with no setup cost; paid tiers cover managed hosting, support, and teams.
+
 ## Resources
 - [Documentation](${site.docsUrl})
 - [Source code](${site.githubUrl})
@@ -334,10 +337,16 @@ ${tierBlock}
 
 ## Notes
 
-${site.name} is open source and self-hostable, so the full server can be run on
-your own infrastructure at no license cost; paid tiers cover hosting, support
-and team features. Prices are denominated as shown above. For current,
-authoritative pricing always check ${site.url}.
+- Licensing model: ${site.name} is open source under the **MIT license** - free
+  to use, modify, and self-host. Commercial / OEM licensing is available on the
+  Team tier.
+- Setup cost: **none.** Self-hosting has no license or setup fee; the hosted
+  tiers are paste-a-URL onboarding with no setup charge.
+- What paid tiers cover: managed hosting, monitoring, priority/dedicated
+  support, and team features (SSO, audit logs, SLA).
+
+Prices are denominated as shown above. For current, authoritative pricing
+always check ${site.url}.
 
 ## More
 
