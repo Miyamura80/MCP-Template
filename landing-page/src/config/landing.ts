@@ -60,12 +60,12 @@ export const site = {
   // Used for <title>, meta description, and OG tags.
   description:
     "GmailMCP is a Model Context Protocol server that gives your AI agent real capabilities: one codebase exposed over CLI, MCP, and HTTP.",
-  // TODO: the canonical deployed URL (also set `site` in astro.config.mjs).
+  // The canonical deployed URL (kept in sync with `site` in astro.config.mjs).
   url: "https://gmailmcp.com",
   // TODO: links used across nav, footer, and CTAs.
   docsUrl: "https://docs.gmailmcp.com",
   githubUrl: "https://github.com/Miyamura80/MCP-Template",
-  // TODO: the deployed streamable-HTTP MCP endpoint users add to their client.
+  // The deployed streamable-HTTP MCP endpoint users add to their client.
   // This is the URL you paste / one-click-install into Claude, Cursor, etc.
   mcpUrl: "https://mcp.gmailmcp.com/mcp",
   // Server name used in client configs / deep links (no spaces).
