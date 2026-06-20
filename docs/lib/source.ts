@@ -23,7 +23,7 @@ export function getPageImage(page: ReturnType<typeof source.getPage> & {}) {
 export async function getLLMText(
   page: ReturnType<typeof source.getPage> & {}
 ): Promise<string> {
-  const processed = page.data.processedMarkdown;
+  const processed = await page.data.getText("processed");
   if (!processed) return "";
   return `# ${page.data.title}\n\n${page.data.description ?? ""}\n\n${processed}`;
 }
