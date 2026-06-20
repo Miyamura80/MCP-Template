@@ -47,14 +47,14 @@ export function buildLlmsFullTxt(origin: string): string {
     .map(
       (t) =>
         `### ${t.label}\n` +
-        `**${t.setupTitle}** — ${t.setupBody}\n\n` +
-        `**${t.callTitle}** — ${t.callBody}`,
+        `**${t.setupTitle}** - ${t.setupBody}\n\n` +
+        `**${t.callTitle}** - ${t.callBody}`,
     )
     .join("\n\n");
   const faqBlock = faq.items.map((i) => `### ${i.q}\n${i.a}`).join("\n\n");
   const clients = compatibility.clients.map((c) => c.name).join(", ");
 
-  return `# ${site.name} — ${site.tagline}
+  return `# ${site.name} - ${site.tagline}
 
 > ${site.description}
 
@@ -69,8 +69,8 @@ ${hero.headline} ${hero.subhead}
 ## What it is
 
 ${site.name} is a Model Context Protocol (MCP) server. It exposes a single
-shared service registry over three interfaces — a CLI, an MCP server
-(streamable HTTP), and a plain HTTP API — so the same typed tools behave
+shared service registry over three interfaces - a CLI, an MCP server
+(streamable HTTP), and a plain HTTP API - so the same typed tools behave
 identically no matter how they are called. Any agent that speaks MCP can
 discover and call its tools.
 
@@ -117,10 +117,10 @@ ${faqBlock}
 `;
 }
 
-/** agents.md — agent/skills oriented capability summary. */
+/** agents.md - agent/skills oriented capability summary. */
 export function buildAgentsMd(origin: string): string {
   const o = trimSlash(origin);
-  return `# ${site.name} — agent guide
+  return `# ${site.name} - agent guide
 
 ${site.description}
 
