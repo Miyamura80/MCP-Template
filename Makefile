@@ -143,6 +143,11 @@ mcp_conformance: check_uv ## Run MCPJam apps + protocol conformance against the 
 	@uv run python scripts/mcp_conformance.py
 	@echo "$(GREEN)✅ MCP conformance passed.$(RESET)"
 
+gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page tool-surface JSON
+	@echo "$(YELLOW)🛠  Exporting tool surface...$(RESET)"
+	@uv run python scripts/export_tool_surface.py
+	@echo "$(GREEN)✅ Tool surface exported.$(RESET)"
+
 ralph: check_jq ## Run Ralph agent loop
 	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
 	@echo "$(RED)⚠️  It is HIGHLY RECOMMENDED to run Ralph in a sandboxed environment.$(RESET)"
@@ -300,6 +305,10 @@ ci: ruff vulture import_lint ty docs_lint check_deps file_len_check blind_except
 .PHONY: sync-agent-config
 sync-agent-config: check_uv ## Sync Claude <-> Codex skills & subagents (regenerates symlinks and .codex/agents/*.toml)
 	@uv run scripts/sync_agent_config.py
+
+.PHONY: sync-skills
+sync-skills: check_uv ## Mirror skills/ into landing-page/.well-known and refresh index.json digests
+	@uv run scripts/sync_skills.py
 
 ########################################################
 # Database

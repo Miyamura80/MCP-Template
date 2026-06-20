@@ -24,7 +24,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from common import global_config
 from mcp_server._tool_factory import make_tool
-from services import discover_services, get_registry
+from services import ServiceEntry, discover_services, get_registry
 
 _APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -130,6 +130,24 @@ def build_mcp_server() -> FastMCP:
 
     _populated = True
     return mcp
+
+
+def llm_tool_surface() -> list[ServiceEntry]:
+    """Service entries this server exposes to the LLM as MCP tools.
+
+    The registry minus the CLI-only defaults that ``build_mcp_server`` skips.
+    App-only tools (registered directly via ``@mcp.tool`` and hidden from the
+    LLM) are not in the service registry, so they are excluded automatically.
+
+    This is the LLM-facing tool surface advertised pre-connection in the
+    SEP-2127 server card (``/.well-known/mcp/server-card.json``). Sorted by name
+    so the committed landing-page snapshot is stable across environments.
+    """
+    build_mcp_server()
+    surface = (
+        e for e in get_registry() if e.name not in _EXCLUDED_DEFAULT_MCP_SERVICES
+    )
+    return sorted(surface, key=lambda e: e.name)
 
 
 def _register_app_resources(mcp: FastMCP) -> None:
