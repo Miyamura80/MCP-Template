@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "gen:discovery": "bun run scripts/gen-discovery.ts",
+    "build": "bun run scripts/gen-discovery.ts && astro build",
     "preview": "astro preview",
     "start": "sirv dist --host 0.0.0.0 --port ${PORT:-8080} --single --quiet",
     "astro": "astro"
