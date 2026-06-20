@@ -23,8 +23,7 @@ export function getPageImage(page: ReturnType<typeof source.getPage> & {}) {
 export async function getLLMText(
   page: ReturnType<typeof source.getPage> & {}
 ): Promise<string> {
-  // `getText("processed")` is available because the docs collection enables
-  // `includeProcessedMarkdown` in source.config.ts.
-  const processed = await page.data.getText("processed");
+  const processed = page.data.processedMarkdown;
+  if (!processed) return "";
   return `# ${page.data.title}\n\n${page.data.description ?? ""}\n\n${processed}`;
 }

@@ -47,75 +47,12 @@ function fixRelativePaths(md: string): string {
   return result;
 }
 
-function AgentView({ lang }: { lang: string }) {
-  const docs = `/${lang}/docs`;
-  return (
-    <div className="max-w-3xl mx-auto px-6 py-12">
-      <h1 className="text-3xl font-bold mb-2">MCP Template — Agent View</h1>
-      <p className="text-fd-muted-foreground mb-8">
-        A structured, link-first summary for autonomous agents. This is a
-        dedicated view served for <code>?mode=agent</code>; the human homepage
-        renders the project README instead.
-      </p>
-
-      <h2 className="text-xl font-semibold mt-8 mb-2">Machine-readable corpus</h2>
-      <ul className="list-disc ml-6 space-y-1">
-        <li>
-          <a className="underline" href="/llms-full.txt">/llms-full.txt</a>{" "}
-          — full documentation corpus as a single text file
-        </li>
-        <li>
-          <a className="underline" href="/llms.txt">/llms.txt</a> — link-first
-          index
-        </li>
-        <li>
-          <a className="underline" href="/agents.md">/agents.md</a> — agent
-          onboarding guide
-        </li>
-        <li>
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- route handler returns JSON, not a page */}
-          <a className="underline" href="/.well-known/agent-skills">
-            /.well-known/agent-skills
-          </a>{" "}
-          — skills manifest (JSON)
-        </li>
-        <li>
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- route handler returns JSON, not a page */}
-          <a className="underline" href="/.well-known/mcp">/.well-known/mcp</a>{" "}
-          — MCP server discovery (JSON)
-        </li>
-        <li>
-          <a className="underline" href="/sitemap.xml">/sitemap.xml</a> ·{" "}
-          <a className="underline" href="/schemamap.xml">/schemamap.xml</a>
-        </li>
-      </ul>
-
-      <h2 className="text-xl font-semibold mt-8 mb-2">Documentation</h2>
-      <ul className="list-disc ml-6 space-y-1">
-        <li>
-          <a className="underline" href={docs}>{docs}</a> — rendered docs
-          (append <code>.mdx</code> to any page for raw Markdown)
-        </li>
-        <li>
-          <a className="underline" href={`${docs}/mcp`}>MCP</a> ·{" "}
-          <a className="underline" href={`${docs}/cli`}>CLI</a> ·{" "}
-          <a className="underline" href={`${docs}/api`}>HTTP API</a>
-        </li>
-      </ul>
-    </div>
-  );
-}
-
 export default async function HomePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ lang: string }>;
-  searchParams: Promise<{ mode?: string }>;
 }) {
   const { lang } = await params;
-  const { mode } = await searchParams;
-  if (mode === "agent") return <AgentView lang={lang} />;
   const readmeContent = fixRelativePaths(getReadmeContent());
   const readmeHtml = marked.parse(readmeContent) as string;
 
