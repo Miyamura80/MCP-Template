@@ -63,7 +63,7 @@ export const site = {
   // TODO: the canonical deployed URL (also set `site` in astro.config.mjs).
   url: "https://gmailmcp.com",
   // TODO: links used across nav, footer, and CTAs.
-  docsUrl: "https://example.com/docs",
+  docsUrl: "https://docs.gmailmcp.com",
   githubUrl: "https://github.com/Miyamura80/MCP-Template",
   // TODO: the deployed streamable-HTTP MCP endpoint users add to their client.
   // This is the URL you paste / one-click-install into Claude, Cursor, etc.
