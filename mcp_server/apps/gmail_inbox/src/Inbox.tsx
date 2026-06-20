@@ -565,7 +565,7 @@ export function Inbox({ mcpApp }: InboxProps) {
             </button>
           </div>
         )}
-        <main style={{ ...readerPaneStyle, flex: 1 }}>
+        <main style={narrow ? readerPaneNarrowStyle : { ...readerPaneStyle, flex: 1 }}>
           {readerContent}
         </main>
       </div>
@@ -596,7 +596,7 @@ export function Inbox({ mcpApp }: InboxProps) {
         ) : visibleThreads.length === 0 ? (
           <div style={mutedStyle}>No threads.</div>
         ) : (
-          <ul style={listStyle}>
+          <ul style={narrow ? listStyleNarrow : listStyle}>
             {visibleThreads.map((t) => {
               const isSelected = t.thread_id === selectedId;
               const showUnread =
@@ -1996,12 +1996,22 @@ const appStyle: React.CSSProperties = {
   colorScheme: "light",
 };
 
-// Single-column variant for narrow viewports: fill the available height so the
-// list (and, after navigation, the reader) gets the full screen, Gmail-style.
+// Single-column variant for narrow viewports (phone-sized MCP clients).
+//
+// On mobile the app is a sandboxed iframe embedded inside the host chat's own
+// scroll view. Trapping scroll inside a fixed-height shell with nested
+// `overflow: auto` panes (the wide-screen approach) does not work there:
+// touch-dragging a nested scroll region inside a sandboxed iframe is
+// unreliable - the gesture is swallowed by the outer page, so the inbox looks
+// frozen. Instead we let the shell grow to its natural content height and let
+// the host page scroll the iframe, the standard pattern for embedded mobile
+// iframe UIs. So: no height cap and `overflow: visible` everywhere on the
+// narrow path.
 const appStyleNarrow: React.CSSProperties = {
   ...appStyle,
-  height: "min(100vh, 640px)",
-  maxHeight: 640,
+  height: "auto",
+  maxHeight: "none",
+  overflow: "visible",
 };
 
 const listPaneStyle: React.CSSProperties = {
@@ -2016,6 +2026,7 @@ const listPaneNarrowStyle: React.CSSProperties = {
   ...listPaneStyle,
   width: "100%",
   borderRight: "none",
+  overflow: "visible",
 };
 
 // Sticky top app bar shown above the reader on narrow screens, mirroring the
@@ -2057,7 +2068,18 @@ const listStyle: React.CSSProperties = {
   margin: 0,
   padding: 0,
   overflowY: "auto",
+  WebkitOverflowScrolling: "touch",
+  overscrollBehavior: "contain",
   flex: 1,
+};
+
+// Narrow path: the list flows at its natural height and the host page scrolls,
+// so it must not trap scroll inside a flex-sized `overflow: auto` box (which is
+// unreliable to touch-scroll inside a mobile iframe).
+const listStyleNarrow: React.CSSProperties = {
+  ...listStyle,
+  overflowY: "visible",
+  flex: "none",
 };
 
 const rowStyle: React.CSSProperties = {
@@ -2169,7 +2191,18 @@ const readerPaneStyle: React.CSSProperties = {
   flex: 1,
   padding: 16,
   overflowY: "auto",
+  WebkitOverflowScrolling: "touch",
+  overscrollBehavior: "contain",
   color: "#202124",
+};
+
+// Narrow path: let the reader flow at its natural height so the host page
+// scrolls the iframe, rather than trapping scroll in a nested pane that mobile
+// webviews struggle to touch-scroll.
+const readerPaneNarrowStyle: React.CSSProperties = {
+  ...readerPaneStyle,
+  overflowY: "visible",
+  flex: "none",
 };
 
 const actionsStyle: React.CSSProperties = {
