@@ -33,6 +33,7 @@ def main() -> int:
         {"name": entry.name, "description": entry.description}
         for entry in llm_tool_surface()
     ]
+    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(tools, indent=2) + "\n", encoding="utf-8")
     print(f"✓ wrote {len(tools)} tools to {OUT_PATH.relative_to(REPO_ROOT)}")
     return 0

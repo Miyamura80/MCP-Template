@@ -140,10 +140,14 @@ def llm_tool_surface() -> list[ServiceEntry]:
     LLM) are not in the service registry, so they are excluded automatically.
 
     This is the LLM-facing tool surface advertised pre-connection in the
-    SEP-2127 server card (``/.well-known/mcp/server-card.json``).
+    SEP-2127 server card (``/.well-known/mcp/server-card.json``). Sorted by name
+    so the committed landing-page snapshot is stable across environments.
     """
     build_mcp_server()
-    return [e for e in get_registry() if e.name not in _EXCLUDED_DEFAULT_MCP_SERVICES]
+    surface = (
+        e for e in get_registry() if e.name not in _EXCLUDED_DEFAULT_MCP_SERVICES
+    )
+    return sorted(surface, key=lambda e: e.name)
 
 
 def _register_app_resources(mcp: FastMCP) -> None:
