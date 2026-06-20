@@ -17,10 +17,10 @@ Three documents live here:
   metadata there, so strictly this is *not* the canonical discovery path. But
   many MCP clients and registry scanners look for RFC 8414 metadata directly on
   the resource server and do **not** follow a redirect to the AS - they then
-  report "no OAuth metadata available". Serving the document inline (rather than
-  the SDK's default 307 redirect, which the catch-all ``/mcp`` mount emits for
-  this path) keeps those consumers working. The upstream document is fetched
-  once and cached.
+  report "no OAuth metadata available". An earlier revision answered this path
+  with a 307 redirect to AuthKit, but the scanners that motivated it do not
+  follow the redirect; serving the document inline as a 200 is what actually
+  satisfies them. The upstream document is fetched once and cached.
 
 * **MCP Server Card** (SEP-2127) - pre-connect *branding*: the name, title,
   description, and icon a registry or client shows before anyone connects.

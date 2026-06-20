@@ -23,13 +23,13 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "human-id>=0.2.0",
     "import-linter>=2.1.1",
-    "pytest>=8.3.4",
+    "pytest>=9.0.3",
     "pytest-xdist>=3.6.1",
     "termcolor>=2.5.0",
     "loguru>=0.7.3",
     "vulture>=2.14",
     "dspy>=3.1.2",
-    "langfuse>=4.0.0",
+    "langfuse>=4.7.1",
     "litellm>=1.59.8,!=1.82.*",
     "tenacity>=9.0.0",
     "pillow>=12.1.0",
@@ -41,14 +41,14 @@ dependencies = [
     "pytest-repeat>=0.9.3",
     "pylint>=3.3.3",
     "deptry>=0.23.0",
-    "openfeature-sdk>=0.7.1",
+    "openfeature-sdk>=0.10.0",
     "scrubadub>=2.0.1",
     "pydantic>=2.10.6",
-    "numpy>=2.2.2",
+    "numpy>=2.4.6",
     "typer",
     "questionary",
     "rich>=15.0.0",
-    "packaging>=24.0",
+    "packaging>=26.2",
     "keyring>=25.0.0",
     "mcp[cli]>=1.10.0,<2.0.0",
     "fastapi>=0.115.0",
@@ -119,7 +119,9 @@ max-complexity = 10
 [tool.ty]
 
 [tool.ty.src]
-exclude = ["scripts/sync_agent_config.py"]
+# Standalone, dev-only helper scripts run outside the app venv (optional deps
+# like cairosvg) - not part of the typed app surface.
+exclude = ["scripts/sync_agent_config.py", "landing-page/scripts/gen-og.py"]
 
 [tool.ty.rules]
 possibly-unresolved-reference = "error"
@@ -132,7 +134,7 @@ python-version = "3.12"
 
 [tool.deptry]
 ignore = ["DEP002"]
-extend_exclude = ["scripts/sync_agent_config.py"]
+extend_exclude = ["scripts/sync_agent_config.py", "landing-page/scripts/gen-og.py"]
 package_module_name_map = { "PyJWT" = "jwt", "google-api-python-client" = "googleapiclient", "google-auth" = "google", "google-genai" = "google", "openfeature-sdk" = "openfeature", "pillow" = "PIL", "pyyaml" = "yaml", "python-dotenv" = "dotenv" }
 
 [tool.vulture]
@@ -213,9 +215,14 @@ omit = [
 show_missing = true
 
 [tool.uv]
-# Relative `exclude-newer` durations (below) are only honoured by uv >= 0.9.17;
-# older uv silently ignores the value and drops the quarantine. Pin a minimum
-# so a too-old uv fails loudly instead of resolving without the cooldown.
+# Relative `exclude-newer` durations (below) are only understood by uv >= 0.9.17.
+# WARNING: this `required-version` guard does NOT protect older uv here. An old
+# uv can't parse `exclude-newer = "7 days"`, so it warns and discards the WHOLE
+# `[tool.uv]` table - required-version included - then resolves without the
+# cooldown and silently rewrites uv.lock (exit 0). The guard only fires when the
+# table parses, i.e. on uv that's already new enough. The real guarantee that a
+# new-enough uv is present comes from the SessionStart hook
+# (.claude/hooks/session-start.sh), which upgrades uv before any sync.
 required-version = ">=0.9.17"
 # 7-day quarantine on freshly-published packages (supply-chain defense).
 exclude-newer = "7 days"
