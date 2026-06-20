@@ -25,6 +25,8 @@ Add the MCP server to your client, then discover its tools.
 
    ```json
    {
+     "jsonrpc": "2.0",
+     "id": 1,
      "method": "tools/call",
      "params": {
        "name": "gmail_curate_inbox",

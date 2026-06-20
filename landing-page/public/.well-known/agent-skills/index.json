@@ -6,7 +6,7 @@
       "type": "skill-md",
       "description": "Triage and curate a Gmail inbox by connecting to the GmailMCP server over MCP and calling its typed tools.",
       "url": "/.well-known/agent-skills/gmail-mcp/SKILL.md",
-      "digest": "sha256:e80901b94aa0ca309483ab0d699f70acad9551f589a9f0a844969cd0197336de"
+      "digest": "sha256:ec726076d41fd6e2ee8aa7f5c01bf433de0c3dda98a0371f2e8794faff00515c"
     }
   ]
 }
