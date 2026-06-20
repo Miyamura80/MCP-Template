@@ -110,7 +110,7 @@ ${faqBlock}
 - llms.txt: ${o}/llms.txt
 - llms-full.txt: ${o}/llms-full.txt
 - agents.md: ${o}/agents.md
-- Agent skills (JSON): ${o}/.well-known/agent-skills
+- Agent skills (JSON): ${o}/.well-known/agent-skills/index.json
 - MCP discovery (JSON): ${o}/.well-known/mcp.json
 - Sitemap: ${o}/sitemap.xml
 - Schema map: ${o}/schemamap.xml
@@ -145,7 +145,7 @@ is identical across all three transports.
 ## More
 
 - Full description for LLMs: ${o}/llms-full.txt
-- Skills (JSON): ${o}/.well-known/agent-skills
+- Skills (JSON): ${o}/.well-known/agent-skills/index.json
 - Human docs: ${site.docsUrl}
 - Source: ${site.githubUrl}
 `;
