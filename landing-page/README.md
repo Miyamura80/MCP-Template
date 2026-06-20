@@ -55,9 +55,3 @@ public/favicon.svg
 ```
 
 Sections, in order: Nav → Hero → TrustStrip → GetStarted → Features → Testimonials → Pricing → AskAi → Faq → FinalCta → Footer.
-
-## WebMCP (agent-navigable page)
-
-The page exposes its own actions to in-browser AI agents via the W3C WebMCP
-`navigator.modelContext` API (a no-op where unsupported). See
-[`WEBMCP.md`](./WEBMCP.md) for the tools, design, and spec caveats.
