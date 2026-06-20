@@ -68,6 +68,8 @@ export const site = {
   // TODO: the deployed streamable-HTTP MCP endpoint users add to their client.
   // This is the URL you paste / one-click-install into Claude, Cursor, etc.
   mcpUrl: "https://mcp.gmailmcp.com/mcp",
+  // TODO: the deployed HTTP API base URL (same backend, vanity host for REST).
+  apiUrl: "https://api.gmailmcp.com",
   // Server name used in client configs / deep links (no spaces).
   serverName: "gmail-mcp",
 } as const;
@@ -322,16 +324,16 @@ cd MCP-Template && make all`,
       icon: "/logos/api.svg",
       setupTitle: "Point at the endpoint",
       setupBody:
-        "No install required: the HTTP API is live at your deployment URL. Authenticate with a bearer token and call it from anything.",
+        "No install required: the HTTP API is live at its own host. Authenticate with a bearer token and call it from anything.",
       setupKind: "code",
       setupLang: "bash",
-      setupCode: `export GMAILMCP_URL=https://mcp.gmailmcp.com
+      setupCode: `export GMAILMCP_API_URL=${site.apiUrl}
 export TOKEN=sk-...   # OAuth 2.1 bearer`,
       callTitle: "Call a tool",
       callBody:
         "Hit the same service over plain HTTP: identical inputs and outputs as the CLI and MCP.",
       callLang: "bash",
-      callCode: `$ curl -s $GMAILMCP_URL/api/v1/services/gmail_curate_inbox \\
+      callCode: `$ curl -s $GMAILMCP_API_URL/api/v1/services/gmail_curate_inbox \\
     -H "Authorization: Bearer $TOKEN" \\
     -H "Content-Type: application/json" \\
     -d '{ "limit": 3 }'
