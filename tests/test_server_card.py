@@ -27,7 +27,8 @@ class TestServerCard:
         assert body["title"]
         assert body["description"]
         assert body["icons"] and body["icons"][0]["src"].startswith("https://")
-        assert body["$schema"].endswith("server-card.schema.json")
+        # No $schema: the draft SEP-2127 server-card schema URL is unpublished (404).
+        assert "$schema" not in body
 
     def test_card_advertises_streamable_http_remote(self):
         body = self._client().get(CARD_PATH).json()

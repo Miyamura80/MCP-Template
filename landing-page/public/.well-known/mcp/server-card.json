@@ -1,5 +1,4 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
   "name": "io.github.Miyamura80/MCP-Template",
   "version": "0.1.1",
   "title": "GmailMCP",

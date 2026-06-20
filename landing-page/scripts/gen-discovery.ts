@@ -27,10 +27,10 @@ const icon = {
 const repository = { url: site.githubUrl, source: serverCard.repositorySource };
 const remotes = [{ type: "streamable-http", url: site.mcpUrl }];
 
-// SEP-2127 Server Card (the pre-connect discovery document).
+// SEP-2127 Server Card (the pre-connect discovery document). No `$schema`: the
+// draft server-card schema is not published yet (the URL 404s), so emitting it
+// would only break validators - matching the bare /.well-known/mcp.json doc.
 const card = {
-  $schema:
-    "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
   name: serverCard.name,
   version: serverCard.version,
   title: site.name,

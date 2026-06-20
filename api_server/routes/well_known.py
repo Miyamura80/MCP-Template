@@ -28,10 +28,6 @@ from common.config_models import IconConfig
 
 router = APIRouter(tags=["well-known"])
 
-SERVER_CARD_SCHEMA = (
-    "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json"
-)
-
 
 def _server_version() -> str:
     """Resolve the published package version; fall back when not installed."""
@@ -50,10 +46,13 @@ def _icon(icon: IconConfig) -> dict:
 
 @router.get("/.well-known/mcp/server-card.json")
 def mcp_server_card() -> JSONResponse:
-    """SEP-2127 Server Card - pre-connect registry/client branding."""
+    """SEP-2127 Server Card - pre-connect registry/client branding.
+
+    No ``$schema`` is emitted: the draft SEP-2127 server-card schema is not yet
+    published (the URL 404s), so advertising it would only break validators.
+    """
     b = global_config.branding
     card = {
-        "$schema": SERVER_CARD_SCHEMA,
         "name": b.name,
         "version": _server_version(),
         "title": b.title,
