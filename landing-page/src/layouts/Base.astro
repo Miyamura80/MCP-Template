@@ -1,6 +1,7 @@
 ---
 import "../styles/global.css";
 import { site } from "../config/landing";
+import WebMcp from "../components/WebMcp.astro";
 
 interface Props {
   title?: string;
@@ -54,5 +55,6 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? site.url).href;
   </head>
   <body class="min-h-screen bg-bg text-fg antialiased">
     <slot />
+    <WebMcp />
   </body>
 </html>
