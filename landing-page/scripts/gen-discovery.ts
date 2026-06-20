@@ -32,15 +32,20 @@ const remotes = [{ type: "streamable-http", url: site.mcpUrl }];
 // SEP-2127 Server Card (the pre-connect discovery document). No `$schema`: the
 // draft server-card schema is not published yet (the URL 404s), so emitting it
 // would only break validators - matching the bare /.well-known/mcp.json doc.
+// `serverUrl` (flat endpoint) and `tools[]` let agents preview where to connect
+// and what the server can do before opening a transport; `remotes` carries the
+// same endpoint in the SEP-2127 / registry shape.
 const card = {
   name: serverCard.name,
   version: serverCard.version,
   title: site.name,
   description: serverCard.description,
   websiteUrl: site.url,
+  serverUrl: site.mcpUrl,
   repository,
   icons: [icon],
   remotes,
+  tools: serverCard.tools,
 };
 
 // MCP registry server.json (same identity, registry schema).

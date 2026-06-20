@@ -4,6 +4,7 @@
   "title": "GmailMCP",
   "description": "Give your AI agent real tools - one service registry over CLI, MCP, and HTTP.",
   "websiteUrl": "https://gmailmcp.com",
+  "serverUrl": "https://mcp.gmailmcp.com/mcp",
   "repository": {
     "url": "https://github.com/Miyamura80/MCP-Template",
     "source": "github"
@@ -21,6 +22,76 @@
     {
       "type": "streamable-http",
       "url": "https://mcp.gmailmcp.com/mcp"
+    }
+  ],
+  "tools": [
+    {
+      "name": "gmail_connect",
+      "description": "Begin the Google OAuth flow to link a Gmail account"
+    },
+    {
+      "name": "gmail_status",
+      "description": "Return whether the user has a linked Gmail account"
+    },
+    {
+      "name": "gmail_disconnect",
+      "description": "Revoke and remove the user's linked Gmail account"
+    },
+    {
+      "name": "gmail_list_drafts",
+      "description": "List the user's Gmail drafts"
+    },
+    {
+      "name": "gmail_get_draft",
+      "description": "Fetch a single Gmail draft by id"
+    },
+    {
+      "name": "gmail_update_draft",
+      "description": "Patch fields on an existing Gmail draft and open an interactive composer"
+    },
+    {
+      "name": "gmail_compose",
+      "description": "Create a new Gmail draft and open an interactive composer"
+    },
+    {
+      "name": "gmail_send",
+      "description": "Send a previously-composed Gmail draft"
+    },
+    {
+      "name": "gmail_discard_draft",
+      "description": "Delete a Gmail draft by id"
+    },
+    {
+      "name": "gmail_reply_to_thread",
+      "description": "Create a reply draft on an existing Gmail thread"
+    },
+    {
+      "name": "gmail_list_inbox",
+      "description": "List recent inbox messages, optionally filtered by a Gmail search query"
+    },
+    {
+      "name": "gmail_get_thread",
+      "description": "Fetch a Gmail thread by id with full message bodies and attachments"
+    },
+    {
+      "name": "gmail_curate_inbox",
+      "description": "Rank recent inbox threads by a deterministic importance score"
+    },
+    {
+      "name": "gmail_mark_thread_read",
+      "description": "Mark a Gmail thread as read"
+    },
+    {
+      "name": "gmail_archive_thread",
+      "description": "Archive a Gmail thread"
+    },
+    {
+      "name": "gmail_mark_thread_done",
+      "description": "Mark a Gmail thread as done (hides it from the curated inbox)"
+    },
+    {
+      "name": "gmail_unmark_thread_done",
+      "description": "Remove the done label from a thread (undo mark-done)"
     }
   ]
 }

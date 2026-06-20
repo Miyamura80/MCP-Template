@@ -83,8 +83,8 @@ export const site = {
  * show your server's name, icon, and description BEFORE anyone connects.
  *
  * Title, description, website, repo URL, icon, and the MCP endpoint are all
- * derived from `site` above so you brand the product in one place. The three
- * fields below have no marketing-copy equivalent, so they live here:
+ * derived from `site` above so you brand the product in one place. The fields
+ * below have no marketing-copy equivalent, so they live here:
  */
 export const serverCard = {
   // Reverse-DNS registry identity, exactly one slash. Usually io.github.<owner>/<repo>.
@@ -95,6 +95,32 @@ export const serverCard = {
   description: "Give your AI agent real tools - one service registry over CLI, MCP, and HTTP.",
   // repository.source value the MCP registry expects ("github" | "gitlab" | ...).
   repositorySource: "github",
+  /**
+   * The LLM-facing tool surface, advertised in the SEP-2127 server card so
+   * agents can preview what the server can do BEFORE opening a connection.
+   * This is a static mirror of the live registry (the deployed `/mcp` server
+   * serves the authoritative list at `/.well-known/mcp/server-card.json`);
+   * keep it in step when you add, remove, or rename a service.
+   */
+  tools: [
+    { name: "gmail_connect", description: "Begin the Google OAuth flow to link a Gmail account" },
+    { name: "gmail_status", description: "Return whether the user has a linked Gmail account" },
+    { name: "gmail_disconnect", description: "Revoke and remove the user's linked Gmail account" },
+    { name: "gmail_list_drafts", description: "List the user's Gmail drafts" },
+    { name: "gmail_get_draft", description: "Fetch a single Gmail draft by id" },
+    { name: "gmail_update_draft", description: "Patch fields on an existing Gmail draft and open an interactive composer" },
+    { name: "gmail_compose", description: "Create a new Gmail draft and open an interactive composer" },
+    { name: "gmail_send", description: "Send a previously-composed Gmail draft" },
+    { name: "gmail_discard_draft", description: "Delete a Gmail draft by id" },
+    { name: "gmail_reply_to_thread", description: "Create a reply draft on an existing Gmail thread" },
+    { name: "gmail_list_inbox", description: "List recent inbox messages, optionally filtered by a Gmail search query" },
+    { name: "gmail_get_thread", description: "Fetch a Gmail thread by id with full message bodies and attachments" },
+    { name: "gmail_curate_inbox", description: "Rank recent inbox threads by a deterministic importance score" },
+    { name: "gmail_mark_thread_read", description: "Mark a Gmail thread as read" },
+    { name: "gmail_archive_thread", description: "Archive a Gmail thread" },
+    { name: "gmail_mark_thread_done", description: "Mark a Gmail thread as done (hides it from the curated inbox)" },
+    { name: "gmail_unmark_thread_done", description: "Remove the done label from a thread (undo mark-done)" },
+  ],
 } as const;
 
 export const nav: {
