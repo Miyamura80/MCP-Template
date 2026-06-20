@@ -55,3 +55,21 @@ public/favicon.svg
 ```
 
 Sections, in order: Nav → Hero → TrustStrip → GetStarted → Features → Testimonials → Pricing → AskAi → Faq → FinalCta → Footer.
+
+## WebMCP (agent-navigable page)
+
+`src/components/WebMcp.astro` (loaded once from `Base.astro`) exposes this page's
+actions to in-browser AI agents via the W3C [WebMCP](https://github.com/webmachinelearning/webmcp)
+`navigator.modelContext` API, so an agent calls structured tools instead of
+scraping the DOM. It registers four tools - `get_mcp_endpoint`,
+`list_supported_clients`, `get_install_instructions`, `answer_faq` - all sourced
+from `src/config/landing.ts`, so they never drift from the visible UI.
+
+It's **progressive enhancement**: feature-detected and a no-op in browsers
+without the API (everything except Edge 147+ / Chrome's origin trial as of
+mid-2026), so normal visitors are unaffected and there's nothing to configure.
+
+> WebMCP is an early, fast-moving W3C Draft. The component detects both
+> `navigator.modelContext` (shipped) and `document.modelContext` (spec draft)
+> and both the `provideContext`/`registerTool` registration shapes. Re-verify
+> against the current spec before extending it.
