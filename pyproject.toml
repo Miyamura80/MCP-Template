@@ -152,6 +152,8 @@ exclude = [
     "tests/test_template.py",
     "tests/test_api_key_auth.py",
     "tests/test_api_server.py",
+    "tests/test_deprecation.py",
+    "tests/test_pagination.py",
     "tests/test_unified_auth.py",
     "tests/test_workos_auth.py",
     "tests/test_error_handler.py",

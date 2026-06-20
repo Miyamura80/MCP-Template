@@ -6,9 +6,16 @@ from sqlalchemy.orm import Session
 from api_server.auth import AuthenticatedUser, get_authenticated_user
 from api_server.auth.api_key_auth import create_api_key, revoke_api_key
 from api_server.auth.scopes import SCOPE_TEMPLATES, check_scopes, validate_scopes
+from api_server.pagination import (
+    CursorParams,
+    decode_cursor,
+    encode_cursor,
+    keyset_before,
+)
 from db.engine import get_db_session
 from db.models.api_keys import APIKey
 from models.auth import APIKeyInfo, CreateAPIKeyRequest, CreateAPIKeyResponse
+from models.pagination import CursorPage
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -83,18 +90,27 @@ def create_key(
     )
 
 
-@router.get("/api-keys", response_model=list[APIKeyInfo])
+@router.get("/api-keys", response_model=CursorPage[APIKeyInfo])
 def list_keys(
+    page: CursorParams = Depends(),
     user: AuthenticatedUser = Depends(get_authenticated_user),
     session: Session = Depends(get_db_session),
 ):
+    # Keyset pagination over the stable (created_at, id) composite key. Fetch one
+    # extra row to tell whether a further page exists without a COUNT query.
+    query = session.query(APIKey).filter_by(user_id=user.user_id, revoked=False)
+    if page.cursor:
+        created_at, last_id = decode_cursor(page.cursor)
+        query = query.filter(keyset_before(APIKey, created_at, last_id))
     rows = (
-        session.query(APIKey)
-        .filter_by(user_id=user.user_id, revoked=False)
-        .order_by(APIKey.created_at.desc())
+        query.order_by(APIKey.created_at.desc(), APIKey.id.desc())
+        .limit(page.limit + 1)
         .all()
     )
-    return [
+
+    has_more = len(rows) > page.limit
+    rows = rows[: page.limit]
+    items = [
         APIKeyInfo(
             id=r.id,
             key_prefix=r.key_prefix,
@@ -107,6 +123,12 @@ def list_keys(
         )
         for r in rows
     ]
+    next_cursor = (
+        encode_cursor(rows[-1].created_at, rows[-1].id) if has_more and rows else None
+    )
+    return CursorPage[APIKeyInfo](
+        items=items, next_cursor=next_cursor, has_more=has_more
+    )
 
 
 @router.delete("/api-keys/{key_id}")
