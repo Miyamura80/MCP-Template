@@ -46,7 +46,8 @@ const parsed = JSON.parse(readFileSync(toolSurfacePath, "utf8")) as unknown;
 const tools: Tool[] = Array.isArray(parsed) ? (parsed as Tool[]) : [];
 const toolsValid =
   tools.length > 0 &&
-  tools.every((t) => {
+  tools.every((t): t is Tool => {
+    if (typeof t !== "object" || t === null) return false;
     const o = t as Record<string, unknown>;
     return typeof o.name === "string" && typeof o.description === "string";
   });
