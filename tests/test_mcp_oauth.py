@@ -301,7 +301,9 @@ class TestAuthorizationServerMetadata(TestTemplate):
             assert resp.status_code == 200, path
             body = resp.json()
             assert body["issuer"] == AUTHKIT_DOMAIN
-            assert body["authorization_endpoint"] == f"{AUTHKIT_DOMAIN}/oauth2/authorize"
+            assert (
+                body["authorization_endpoint"] == f"{AUTHKIT_DOMAIN}/oauth2/authorize"
+            )
             assert body["token_endpoint"] == f"{AUTHKIT_DOMAIN}/oauth2/token"
             assert resp.headers["access-control-allow-origin"] == "*"
 
