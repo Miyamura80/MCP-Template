@@ -1,6 +1,6 @@
 """Well-known discovery documents for the /mcp endpoint.
 
-Two documents live here:
+Three documents live here:
 
 * **OAuth 2.0 Protected Resource Metadata** (RFC 9728) - tells MCP clients
   where the authorization server is. Required of resource servers by the MCP
@@ -9,6 +9,15 @@ Two documents live here:
   endpoint lives at ``/mcp``) and the root form. Returns 404 when OAuth is not
   configured, so unauthenticated discovery cleanly signals "no authorization
   server" instead of advertising a broken flow.
+
+* **OAuth 2.0 Authorization Server Metadata** (RFC 8414) - the authorization
+  server in this template is AuthKit, which publishes its own RFC 8414 document
+  at its issuer origin. The spec-correct path is PRM (above) -> AuthKit, but in
+  practice many MCP clients and registry crawlers probe
+  ``/.well-known/oauth-authorization-server`` against the *resource server*
+  origin directly. We redirect those requests to AuthKit's authoritative
+  metadata so the auth flow bootstraps regardless of which origin a client
+  probes. Returns 404 when OAuth is not configured, mirroring the PRM endpoints.
 
 * **MCP Server Card** (SEP-2127) - pre-connect *discovery*: the identity
   (name, title, description, version, icon) plus the endpoint (``serverUrl`` /
@@ -21,7 +30,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
 from common import global_config
@@ -113,3 +122,24 @@ def protected_resource_metadata_for_mcp() -> dict:
 @router.get("/.well-known/oauth-protected-resource")
 def protected_resource_metadata_root() -> dict:
     return _metadata()
+
+
+def _authorization_server_redirect() -> RedirectResponse:
+    domain = authkit_domain()
+    if not domain:
+        raise HTTPException(status_code=404, detail="OAuth is not configured")
+    # 307 keeps the request a GET (metadata is always fetched with GET) while
+    # signaling a temporary redirect, since the target depends on configuration.
+    return RedirectResponse(
+        url=f"{domain}/.well-known/oauth-authorization-server", status_code=307
+    )
+
+
+@router.get("/.well-known/oauth-authorization-server/mcp")
+def authorization_server_metadata_for_mcp() -> RedirectResponse:
+    return _authorization_server_redirect()
+
+
+@router.get("/.well-known/oauth-authorization-server")
+def authorization_server_metadata_root() -> RedirectResponse:
+    return _authorization_server_redirect()
