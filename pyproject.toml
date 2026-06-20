@@ -213,9 +213,14 @@ omit = [
 show_missing = true
 
 [tool.uv]
-# Relative `exclude-newer` durations (below) are only honoured by uv >= 0.9.17;
-# older uv silently ignores the value and drops the quarantine. Pin a minimum
-# so a too-old uv fails loudly instead of resolving without the cooldown.
+# Relative `exclude-newer` durations (below) are only understood by uv >= 0.9.17.
+# WARNING: this `required-version` guard does NOT protect older uv here. An old
+# uv can't parse `exclude-newer = "7 days"`, so it warns and discards the WHOLE
+# `[tool.uv]` table - required-version included - then resolves without the
+# cooldown and silently rewrites uv.lock (exit 0). The guard only fires when the
+# table parses, i.e. on uv that's already new enough. The real guarantee that a
+# new-enough uv is present comes from the SessionStart hook
+# (.claude/hooks/session-start.sh), which upgrades uv before any sync.
 required-version = ">=0.9.17"
 # 7-day quarantine on freshly-published packages (supply-chain defense).
 exclude-newer = "7 days"
