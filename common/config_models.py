@@ -212,6 +212,16 @@ class AgenticPaymentsConfig(BaseModel):
     acp: AcpProtocolConfig = Field(default_factory=AcpProtocolConfig)
 
 
+class AskConfig(BaseModel):
+    """NLWeb ``/ask`` Q&A endpoint configuration."""
+
+    enabled: bool = False
+    corpus_path: str = "docs/content/docs"
+    docs_base_url: str = "https://docs.gmailmcp.com"
+    top_k: int = 5
+    rate_limit_per_minute: int = 20
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 

@@ -554,6 +554,10 @@ export const faq: { heading: string; items: FaqItem[] } = {
       q: "What about my existing CLI / API?",
       a: "They share the same service registry. Add a tool once and it's available over CLI, MCP, and HTTP simultaneously, with no duplicated logic.",
     },
+    {
+      q: "Is there an /ask (NLWeb) endpoint?",
+      a: "Yes. There's a public, NLWeb-conformant /ask endpoint for natural-language questions answered from the docs (server-side Q&A with SSE streaming). It's distinct from the /mcp action-tool surface, which exposes callable tools. /ask is disabled by default in the template; enable it via config (ask.enabled: true).",
+    },
   ],
 };
 

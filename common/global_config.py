@@ -17,6 +17,7 @@ from pydantic_settings import (
 # Import configuration models
 from .config_models import (
     AgenticPaymentsConfig,
+    AskConfig,
     CliConfig,
     DefaultLlm,
     ExampleParent,
@@ -191,6 +192,7 @@ class Config(BaseSettings):
     payments: AgenticPaymentsConfig = Field(
         default_factory=lambda: AgenticPaymentsConfig()
     )
+    ask: AskConfig = Field(default_factory=lambda: AskConfig())
 
     # Environment variables
     DEV_ENV: str

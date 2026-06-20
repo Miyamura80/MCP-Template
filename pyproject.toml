@@ -68,6 +68,7 @@ dependencies = [
     "google-api-python-client>=2.196.0",
     "google-auth>=2.53.0",
     "psycopg2-binary>=2.9.12",
+    "rank-bm25>=0.2.2",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
@@ -95,7 +96,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "common", "utils", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html"}
+force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html", "docs/content/docs" = "docs/content/docs"}
 
 [tool.ruff]
 line-length = 88

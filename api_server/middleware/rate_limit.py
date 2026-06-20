@@ -29,7 +29,7 @@ from api_server.billing.stripe_config import STRIPE_WEBHOOK_PATH
 from db.engine import use_db_session
 from db.models.user_subscriptions import UserSubscription
 
-_EXEMPT_PATHS = frozenset({"/health", "/mcp", STRIPE_WEBHOOK_PATH})
+_EXEMPT_PATHS = frozenset({"/health", "/mcp", "/ask", STRIPE_WEBHOOK_PATH})
 _EXEMPT_PREFIXES = ("/mcp/",)
 
 # TTL cache for API key hash → subscription tier (avoids DB hit on every request)
