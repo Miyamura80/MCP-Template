@@ -108,6 +108,7 @@ export const nav: {
     { label: "Features", href: "/#features" },
     { label: "How it works", href: "/#how-it-works" },
     { label: "Compare", href: "/compare" },
+    { label: "API", href: "/api" },
     { label: "Docs", href: site.docsUrl },
   ],
   // Highlighted in the header to signal the project is open source & self-hostable.
@@ -841,6 +842,7 @@ export const footer: { columns: FooterColumn[]; copyright: string } = {
       heading: "Resources",
       links: [
         { label: "Docs", href: site.docsUrl },
+        { label: "API Reference", href: "/api" },
         { label: "GitHub", href: site.githubUrl },
         { label: "Changelog", href: site.githubUrl + "/releases" },
       ],
