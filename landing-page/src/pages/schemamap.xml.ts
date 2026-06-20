@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { site } from "../config/landing";
+import { site, comparison } from "../config/landing";
 
 /**
  * NLWeb / Schema Map feed (referenced via the `Schemamap:` directive in
@@ -15,6 +15,15 @@ export const GET: APIRoute = ({ site: astroSite }) => {
     { loc: `${origin}/`, type: "SoftwareApplication" },
     { loc: `${origin}/`, type: "Organization" },
     { loc: `${origin}/`, type: "FAQPage" },
+    // /compare embeds WebPage + ItemList + BreadcrumbList JSON-LD.
+    { loc: `${origin}/compare`, type: "WebPage" },
+    { loc: `${origin}/compare`, type: "ItemList" },
+    { loc: `${origin}/compare`, type: "BreadcrumbList" },
+    // Each /vs/<slug> page embeds WebPage + BreadcrumbList JSON-LD.
+    ...comparison.competitors.flatMap((c) => [
+      { loc: `${origin}/vs/${c.id}`, type: "WebPage" },
+      { loc: `${origin}/vs/${c.id}`, type: "BreadcrumbList" },
+    ]),
   ];
 
   const entries = feeds
