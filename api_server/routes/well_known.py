@@ -33,7 +33,7 @@ Two documents live here:
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
@@ -86,7 +86,7 @@ def mcp_server_card() -> JSONResponse:
 
 
 @router.get("/.well-known/api-catalog")
-def api_catalog() -> JSONResponse:
+def api_catalog(request: Request) -> JSONResponse:
     """RFC 9727 API catalog - points agents/crawlers at the OpenAPI description.
 
     Returns an RFC 9264 linkset whose ``service-desc`` link references this
@@ -98,7 +98,10 @@ def api_catalog() -> JSONResponse:
     """
     base = (global_config.API_PUBLIC_URL or "").rstrip("/")
     anchor = f"{base}/" if base else "/"
-    openapi_href = f"{base}/openapi.json" if base else "/openapi.json"
+    # Derive the spec path from the live app so the catalog tracks a customized
+    # ``openapi_url``; fall back to the FastAPI default if the spec is disabled.
+    openapi_path = request.app.openapi_url or "/openapi.json"
+    openapi_href = f"{base}{openapi_path}" if base else openapi_path
     catalog = {
         "linkset": [
             {

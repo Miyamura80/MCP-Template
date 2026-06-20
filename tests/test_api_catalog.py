@@ -41,6 +41,14 @@ class TestApiCatalog:
         assert link["anchor"] == "https://api.example.com/"
         assert link["service-desc"][0]["href"] == "https://api.example.com/openapi.json"
 
+    def test_catalog_tracks_custom_openapi_url(self, monkeypatch):
+        # The href is derived from the app's openapi_url, not hardcoded, so a
+        # customized spec path stays in sync.
+        monkeypatch.setattr(well_known.global_config, "API_PUBLIC_URL", None)
+        monkeypatch.setattr(app, "openapi_url", "/custom/openapi.json")
+        desc = self._client().get(CATALOG_PATH).json()["linkset"][0]["service-desc"][0]
+        assert desc["href"] == "/custom/openapi.json"
+
     def test_catalog_is_cors_readable(self):
         # Agents and registry crawlers fetch the catalog cross-origin.
         resp = self._client().get(CATALOG_PATH)
