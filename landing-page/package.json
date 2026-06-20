@@ -7,7 +7,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "start": "sirv dist --host 0.0.0.0 --port ${PORT:-8080} --single --quiet",
+    "start": "sirv dist --host 0.0.0.0 --port ${PORT:-8080} --single --dotfiles --quiet",
     "astro": "astro"
   },
   "dependencies": {

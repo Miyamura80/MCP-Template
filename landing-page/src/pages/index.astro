@@ -11,6 +11,17 @@ import AskAi from "../components/AskAi.astro";
 import Faq from "../components/Faq.astro";
 import FinalCta from "../components/FinalCta.astro";
 import Footer from "../components/Footer.astro";
+import { agentsMarkdown, abs } from "../utils/agent-content";
+
+// Build-time agent summary. The static homepage can't vary its HTTP response by
+// query string (it's served by sirv), so `?mode=agent` is handled client-side:
+// the script below swaps in this condensed, link-first view for agents that
+// execute JS. A fully server-rendered agent response would require switching
+// the landing page to an SSR adapter.
+const agentView = JSON.stringify({
+  markdown: agentsMarkdown(),
+  llmsFull: abs("/llms-full.txt"),
+});
 ---
 
 <Base>
@@ -28,3 +39,19 @@ import Footer from "../components/Footer.astro";
   </main>
   <Footer />
 </Base>
+
+<script type="application/json" id="agent-view" set:html={agentView} is:inline />
+<script is:inline>
+  (function () {
+    if (new URLSearchParams(location.search).get("mode") !== "agent") return;
+    const data = JSON.parse(document.getElementById("agent-view").textContent);
+    document.title = "Agent view — " + document.title;
+    const esc = (s) =>
+      s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    document.body.innerHTML =
+      '<main style="max-width:48rem;margin:0 auto;padding:3rem 1.5rem;' +
+      'font:15px/1.6 ui-monospace,monospace;white-space:pre-wrap">' +
+      esc(data.markdown) +
+      "</main>";
+  })();
+</script>
