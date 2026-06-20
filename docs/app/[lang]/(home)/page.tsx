@@ -8,11 +8,15 @@ const REPO_SLUG =
 const GITHUB_RAW_BASE = `https://raw.githubusercontent.com/${REPO_SLUG}/main`;
 const GITHUB_BLOB_BASE = `https://github.com/${REPO_SLUG}/blob/main`;
 
-function getReadmeContent(): string {
+async function getReadmeContent(): Promise<string> {
   const readmePath = path.resolve(process.cwd(), "..", "README.md");
   try {
     return fs.readFileSync(readmePath, "utf-8");
   } catch {
+    // In deploys the repo root README isn't in the build context (Railway root
+    // directory is `docs/`), so fall back to fetching it from GitHub.
+    const res = await fetch(`${GITHUB_RAW_BASE}/README.md`);
+    if (res.ok) return res.text();
     return "# MCP Template\n\nREADME.md not found.";
   }
 }
@@ -53,7 +57,7 @@ export default async function HomePage({
   params: Promise<{ lang: string }>;
 }) {
   const { lang } = await params;
-  const readmeContent = fixRelativePaths(getReadmeContent());
+  const readmeContent = fixRelativePaths(await getReadmeContent());
   const readmeHtml = marked.parse(readmeContent) as string;
 
   return (
