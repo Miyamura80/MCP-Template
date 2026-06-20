@@ -68,6 +68,7 @@ Layering (top calls down, never the reverse):
 - **`utils/llm/`** - DSPY + LiteLLM wrapper with fallback model, Tenacity retries, LangFuse observability.
 - **`tests/`** - subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
 - **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`.
+- **`landing-page/`** - standalone Astro + Tailwind v4 marketing site, **separate** from `docs/` and the Python server, with its own Railway deploy (`landing-page/railway.toml`). Data-driven: all copy lives in `src/config/landing.ts`, design tokens in `src/styles/global.css` (`@theme`). Uses `bun`, never npm. See [`landing-page/README.md`](./landing-page/README.md).
 - **`.claude/`**, **`.agents/`**, **`.codex/`** - Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
 
 **Don't add new files at the repo root** unless tooling requires it. Nest under an existing folder.
