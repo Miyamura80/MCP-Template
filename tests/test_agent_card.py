@@ -41,9 +41,9 @@ class TestAgentCard:
         assert body["description"]
         assert body["url"].startswith("https://")
         assert body["provider"]["organization"]
-        # Discovery card advertises A2A's default JSONRPC binding, not the
-        # HTTP+JSON REST binding (whose endpoints the template doesn't implement).
-        assert body["preferredTransport"] == "JSONRPC"
+        # Discovery-only card: no transport binding is claimed, because the
+        # template implements no A2A wire transport (JSON-RPC / HTTP+JSON).
+        assert "preferredTransport" not in body
 
     def test_skills_mirror_the_service_registry(self):
         discover_services()
@@ -66,7 +66,21 @@ class TestAgentCard:
         assert "localhost" not in body["url"]
         assert body["url"] == well_known.global_config.branding.website_url.rstrip("/")
 
-    def test_card_prefers_configured_public_host(self, monkeypatch):
+    def test_card_points_url_at_mcp_endpoint(self, monkeypatch):
+        # The MCP endpoint is the agent's real machine surface, so it takes
+        # precedence over the API host when both are configured.
+        monkeypatch.setattr(
+            well_known.global_config, "MCP_PUBLIC_URL", "https://mcp.example.com/mcp"
+        )
+        monkeypatch.setattr(
+            well_known.global_config, "API_PUBLIC_URL", "https://api.example.com"
+        )
+        body = self._client().get(CARD_PATH).json()
+        assert body["url"] == "https://mcp.example.com/mcp"
+
+    def test_card_falls_back_to_api_host(self, monkeypatch):
+        # No MCP endpoint but an API host configured: advertise the API host.
+        monkeypatch.setattr(well_known.global_config, "MCP_PUBLIC_URL", None)
         monkeypatch.setattr(
             well_known.global_config, "API_PUBLIC_URL", "https://api.example.com"
         )

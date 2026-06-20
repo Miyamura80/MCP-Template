@@ -96,15 +96,17 @@ def mcp_server_card() -> JSONResponse:
 def _agent_endpoint_url(b: BrandingConfig) -> str:
     """Resolve the public host to advertise as the agent's ``url``.
 
-    A2A requires ``url`` (and per spec the host it points to must serve the
-    declared ``preferredTransport``). This template ships the *discovery card*
-    only - the live A2A JSON-RPC transport is a tracked follow-up - so we point
-    at the public API host where that transport will mount, preferring a
-    configured public host over the branding website and never the localhost dev
-    default (which would point clients at a dead endpoint).
+    A2A requires ``url``. This template ships a *discovery* card only - it does
+    not implement an A2A wire transport (no JSON-RPC ``message/send``, no
+    HTTP+JSON REST binding), so we deliberately omit ``preferredTransport`` and
+    point ``url`` at the MCP endpoint, the agent's real machine-facing surface.
+    A2A clients use the card to discover that this agent exists and what it can
+    do; the MCP host is the honest place to send them today. Prefer a configured
+    public host over the branding website, and never the localhost dev default
+    (which would point clients at a dead endpoint).
     """
     return (
-        global_config.API_PUBLIC_URL or global_config.MCP_PUBLIC_URL or b.website_url
+        global_config.MCP_PUBLIC_URL or global_config.API_PUBLIC_URL or b.website_url
     ).rstrip("/")
 
 
@@ -128,10 +130,10 @@ def _service_skills() -> list[A2AAgentSkill]:
 def a2a_agent_card() -> JSONResponse:
     """A2A Agent Card (spec v0.3.0) - pre-connect agent discovery document.
 
-    Discovery only: it advertises this agent's identity and skills so A2A
-    registries/clients can find it. The backing A2A transport at ``url`` is a
-    tracked follow-up, so the declared ``preferredTransport`` is aspirational
-    until that lands.
+    Discovery/branding only: it advertises this agent's identity and skills so
+    A2A registries/clients can find it. We intentionally do not declare a
+    ``preferredTransport`` because the template implements no A2A wire transport;
+    advertising one would point clients at an endpoint that can't speak it.
     """
     b = global_config.branding
     card = A2AAgentCard(
@@ -143,10 +145,8 @@ def a2a_agent_card() -> JSONResponse:
         default_input_modes=["application/json", "text/plain"],
         default_output_modes=["application/json", "text/plain"],
         skills=_service_skills(),
-        # JSONRPC is A2A's default/simplest binding. We advertise it (rather than
-        # the HTTP+JSON REST binding) because the live A2A transport - whichever
-        # binding it lands on - is a tracked follow-up; the card is discovery only.
-        preferred_transport="JSONRPC",
+        # preferred_transport intentionally omitted: see docstring - no A2A wire
+        # transport is implemented, so we advertise presence, not a binding.
         provider=A2AAgentProvider(organization=b.title, url=b.website_url),
         icon_url=b.icons[0].src if b.icons else None,
         documentation_url=b.website_url,
