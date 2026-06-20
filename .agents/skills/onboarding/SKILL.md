@@ -80,7 +80,8 @@ action. Read it before changing anything. The enums and `OnboardingConfig`
 7. Handle the systems onboarding does not touch, after confirming with the user:
    - `landing-page/` is a GmailMCP-branded Astro marketing site (privacy/terms,
      comparison pages, WebMCP, Server Card, llms.txt). For a real project it
-     almost always needs rebranding or removal, and `make onboard` will not do this.
+     almost always needs rebranding or removal, which `make onboard` will not
+     do for you.
    - `render.yaml` and `Dockerfile` are deploy configs not wired into pruning;
      update or remove them to match the kept surfaces.
 
