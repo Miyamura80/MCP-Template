@@ -62,7 +62,7 @@ function quality(accept: string, type: string): number {
     let q = 1;
     for (const param of parts.slice(1)) {
       const [k, v] = param.split("=").map((s) => s.trim());
-      if (k === "q") q = Number.parseFloat(v) || 0;
+      if (k.toLowerCase() === "q") q = Number.parseFloat(v) || 0;
     }
     const [mt, ms] = media.split("/");
     const matches =
@@ -95,9 +95,8 @@ function explicitQuality(accept: string, type: string): number {
   for (const range of accept.split(",")) {
     const media = range.trim().split(";")[0]?.trim().toLowerCase();
     if (media !== type) continue;
-    const q = /;\s*q=/.test(range)
-      ? Number.parseFloat(range.split(/;\s*q=/)[1]) || 0
-      : 1;
+    const qMatch = range.match(/;\s*q=([^;]+)/i);
+    const q = qMatch ? Number.parseFloat(qMatch[1]) || 0 : 1;
     if (q > best) best = q;
   }
   return best;
@@ -109,12 +108,24 @@ function isCanonical(pathname: string): boolean {
 }
 
 /**
+ * First value of a (possibly comma-joined or repeated) header. `X-Forwarded-*`
+ * can carry a chain like `host1, host2`; we want only the client-facing entry.
+ * Returns undefined when empty.
+ */
+function firstHeaderToken(value: string | string[] | undefined): string | undefined {
+  if (!value) return undefined;
+  const raw = Array.isArray(value) ? value[0] : value;
+  const first = raw.split(",")[0]?.trim();
+  return first || undefined;
+}
+
+/**
  * Resolve the public origin for absolute links inside the markdown body,
  * honoring the proxy's forwarded headers and falling back to the configured
  * site URL.
  */
 function originFor(host: string | undefined, proto: string | undefined): string {
-  if (host) return `${(proto || "https").split(",")[0].trim()}://${host}`;
+  if (host) return `${proto || "https"}://${host}`;
   return new URL(site.url).origin;
 }
 
@@ -144,15 +155,24 @@ function ensureVaryAccept(res: ServerResponse): void {
 
 const server = createServer((req, res) => {
   const method = req.method ?? "GET";
-  const host = (req.headers["x-forwarded-host"] ?? req.headers.host) as
-    | string
-    | undefined;
-  const url = new URL(req.url ?? "/", `http://${host ?? "localhost"}`);
+  // Parse only the request target for the pathname. The forwarded host is
+  // untrusted and irrelevant to the path, so we use a fixed base - a malformed
+  // host can no longer throw out of URL parsing and crash the handler.
+  let pathname = "/";
+  try {
+    pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+  } catch {
+    // noqa: keep serving; a bad request target just isn't a canonical match.
+    pathname = "/";
+  }
 
-  const negotiable = isCanonical(url.pathname) && (method === "GET" || method === "HEAD");
+  const negotiable = isCanonical(pathname) && (method === "GET" || method === "HEAD");
 
   if (negotiable && wantsMarkdown(req.headers.accept)) {
-    const proto = req.headers["x-forwarded-proto"] as string | undefined;
+    const host = firstHeaderToken(
+      req.headers["x-forwarded-host"] ?? req.headers.host,
+    );
+    const proto = firstHeaderToken(req.headers["x-forwarded-proto"]);
     const body = buildAgentsMd(originFor(host, proto));
     const buf = Buffer.from(body, "utf-8");
     res.statusCode = 200;
@@ -165,11 +185,15 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // Static (or HTML) response: make sure the canonical URL advertises that it
-  // varies on Accept too, so the HTML variant is cached separately from the
-  // markdown one above.
-  ensureVaryAccept(res);
-  if (negotiable) res.setHeader("Vary", VARY);
+  // Only the canonical, content-negotiated route varies on Accept. Scope the
+  // `Vary: Accept` here so static assets (which are never negotiated) keep a
+  // single cache key and don't fragment. For the canonical HTML we both seed
+  // `Vary` and fold `Accept` into whatever sirv later sets, so the HTML variant
+  // is cached separately from the markdown one served above.
+  if (negotiable) {
+    ensureVaryAccept(res);
+    res.setHeader("Vary", VARY);
+  }
 
   assets(req, res, () => {
     res.statusCode = 404;
