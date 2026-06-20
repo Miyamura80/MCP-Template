@@ -2,6 +2,7 @@
 name: thermo-nuclear-code-quality-review
 description: Run an extremely strict maintainability review for abstraction quality, giant files, and spaghetti-condition growth. Use for a thermo-nuclear code quality review, thermonuclear review, deep code quality audit, or especially harsh maintainability review.
 disable-model-invocation: true
+user-invocable: true
 ---
 
 <!-- claude-only -->
@@ -11,6 +12,15 @@ disable-model-invocation: true
 Use this skill for an unusually strict review focused on implementation quality, maintainability, abstraction quality, and codebase health.
 
 Above all, this skill should push the reviewer to be **ambitious** about code structure. Do not merely identify local cleanup opportunities. Actively search for "code judo" moves: restructurings that preserve behavior while making the implementation dramatically simpler, smaller, more direct, and more elegant.
+
+## Running this review
+
+This file is both the **rubric** and the **entry point**. There are two ways in:
+
+- **You invoke it** (`/thermo-nuclear-code-quality-review`): first gather the review context (`git diff <base>...HEAD`, default base `main`, plus the full contents of the changed files), then hand that context to the `thermo-nuclear-code-quality-review` subagent (`Task` tool) so the heavy review reasoning runs in an isolated context window and only the verdict returns to your conversation. For a tiny diff you may just apply the rubric below inline.
+- **The subagent runs it**: the parent passes the diff and file contents in; the subagent reads this file for the rubric and reviews only what it was given.
+
+The split is deliberate: this file owns the *standard*; the subagent owns *isolated execution with the diff in context*.
 
 ## Core Prompt
 
