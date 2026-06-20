@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -60,21 +61,37 @@ def _build(src: Path) -> tuple[dict[str, str], dict[str, str]]:
     return {rel: text}, entry
 
 
-def generate() -> dict[Path, str]:
-    """Compute the full set of generated files (path -> desired content)."""
+def generate() -> tuple[dict[Path, str], set[str]]:
+    """Compute the generated files (path -> content) and the live skill names."""
     sources = sorted(SKILLS_SRC.glob("*/SKILL.md"))
     if not sources:
         raise SystemExit(f"no skills found under {SKILLS_SRC}")
     files: dict[Path, str] = {}
     entries: list[dict[str, str]] = []
+    names: set[str] = set()
     for src in sources:
         skill_files, entry = _build(src)
         for rel, content in skill_files.items():
             files[WELL_KNOWN.parent / rel] = content
         entries.append(entry)
+        names.add(entry["name"])
     index = {"$schema": INDEX_SCHEMA, "skills": entries}
     files[WELL_KNOWN / "index.json"] = json.dumps(index, indent=2) + "\n"
-    return files
+    return files, names
+
+
+def stale_mirror_dirs(skill_names: set[str]) -> list[Path]:
+    """Mirror skill directories that no longer have a source under `skills/`.
+
+    Without this, deleting a skill leaves its `.well-known/agent-skills/<name>/`
+    mirror behind and `--check` would still pass, silently breaking the
+    drift-detection guarantee.
+    """
+    if not WELL_KNOWN.exists():
+        return []
+    return sorted(
+        p for p in WELL_KNOWN.iterdir() if p.is_dir() and p.name not in skill_names
+    )
 
 
 def main() -> int:
@@ -86,7 +103,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    desired = generate()
+    desired, skill_names = generate()
     drift: list[Path] = []
     for path, content in desired.items():
         current = path.read_text() if path.exists() else None
@@ -95,6 +112,12 @@ def main() -> int:
             if not args.check:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
+
+    stale = stale_mirror_dirs(skill_names)
+    for path in stale:
+        drift.append(path)
+        if not args.check:
+            shutil.rmtree(path)
 
     if args.check:
         if drift:
@@ -110,7 +133,8 @@ def main() -> int:
 
     if drift:
         for path in drift:
-            print(f"updated {path.relative_to(REPO)}")
+            verb = "removed" if path in stale else "updated"
+            print(f"{verb} {path.relative_to(REPO)}")
     else:
         print("skills already in sync")
     return 0
