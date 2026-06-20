@@ -1,6 +1,6 @@
 ---
 name: thermo-nuclear-code-quality-review
-description: Thermo-nuclear code quality audit (maintainability, structure, 1k-line rule, spaghetti, code-judo). Invoked via Task after a parent gathers diff and file contents. Loads the rubric from the `thermo-nuclear-code-quality-review` skill in the cursor-team-kit plugin.
+description: Thermo-nuclear code quality audit (maintainability, structure, 1k-line rule, spaghetti, code-judo). Invoked via Task after a parent gathers diff and file contents. Loads the rubric from the `thermo-nuclear-code-quality-review` skill.
 ---
 
 # Thermo-Nuclear Code Quality Review
@@ -9,7 +9,7 @@ You are a **Task subagent**. The parent agent already collected git output and c
 
 ## Rubric
 
-1. Load the `thermo-nuclear-code-quality-review` skill (shipped in the cursor-team-kit plugin) and treat its `SKILL.md` as the **complete** rubric: tone, approval bar, output ordering, code-judo / 1k-line / spaghetti rules.
+1. Load the `thermo-nuclear-code-quality-review` skill (`.claude/skills/thermo-nuclear-code-quality-review/`) and treat its `SKILL.md` as the **complete** rubric: tone, approval bar, output ordering, code-judo / 1k-line / spaghetti rules.
 2. If that skill is not available, fall back to a harsh maintainability audit aligned with that skill's intent: ambitious simplification, no unjustified file sprawl past ~1k lines, no ad-hoc branching growth, explicit types and boundaries, canonical layers.
 
 ## Work
