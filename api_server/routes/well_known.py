@@ -23,6 +23,12 @@ Two documents live here:
   description, and icon a registry or client shows before anyone connects.
   Always available (branding has no auth dependency) and served with
   ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
+
+* **A2A Agent Card** (Agent2Agent spec v0.3.0) - the agent-protocol analogue of
+  the Server Card. Served at ``/.well-known/agent-card.json`` so A2A clients and
+  orchestrators can discover this agent's identity, endpoint, and skills. Built
+  from the same branding config plus the shared service registry (each service
+  becomes an A2A skill). Public and cross-origin readable, like the Server Card.
 """
 
 from importlib.metadata import PackageNotFoundError
@@ -33,7 +39,14 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
 from common import global_config
-from common.config_models import IconConfig
+from common.config_models import BrandingConfig, IconConfig
+from models.a2a import (
+    A2AAgentCapabilities,
+    A2AAgentCard,
+    A2AAgentProvider,
+    A2AAgentSkill,
+)
+from services import discover_services, get_registry
 
 router = APIRouter(tags=["well-known"])
 
@@ -78,6 +91,58 @@ def mcp_server_card() -> JSONResponse:
         card["remotes"] = [{"type": "streamable-http", "url": public_url.rstrip("/")}]
     # Public branding: any registry crawler (cross-origin) must be able to read it.
     return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
+
+
+def _agent_endpoint_url(b: BrandingConfig) -> str:
+    """Resolve the public HTTP endpoint to advertise as the agent's ``url``.
+
+    A2A requires ``url``, so unlike the Server Card's optional remote we always
+    emit something. Prefer a configured public host; fall back to the branding
+    website (a real HTTPS URL) rather than the localhost dev default, which would
+    point A2A clients at a dead endpoint.
+    """
+    return (
+        global_config.API_PUBLIC_URL or global_config.MCP_PUBLIC_URL or b.website_url
+    ).rstrip("/")
+
+
+def _service_skills() -> list[A2AAgentSkill]:
+    """Map each registered service onto an A2A skill (id == service name)."""
+    discover_services()
+    return [
+        A2AAgentSkill(
+            id=entry.name,
+            name=entry.name,
+            description=entry.description,
+            tags=["mcp"],
+            input_modes=["application/json"],
+            output_modes=["application/json"],
+        )
+        for entry in get_registry()
+    ]
+
+
+@router.get("/.well-known/agent-card.json")
+def a2a_agent_card() -> JSONResponse:
+    """A2A Agent Card (spec v0.3.0) - pre-connect agent discovery document."""
+    b = global_config.branding
+    card = A2AAgentCard(
+        name=b.title,
+        description=b.description,
+        url=_agent_endpoint_url(b),
+        version=_server_version(),
+        capabilities=A2AAgentCapabilities(),
+        default_input_modes=["application/json", "text/plain"],
+        default_output_modes=["application/json", "text/plain"],
+        skills=_service_skills(),
+        # We expose services over HTTP/JSON (FastAPI) rather than A2A JSON-RPC.
+        preferred_transport="HTTP+JSON",
+        provider=A2AAgentProvider(organization=b.title, url=b.website_url),
+        icon_url=b.icons[0].src if b.icons else None,
+        documentation_url=b.website_url,
+    )
+    # Public discovery document: any A2A crawler (cross-origin) must read it.
+    return JSONResponse(card.to_wire(), headers={"Access-Control-Allow-Origin": "*"})
 
 
 def _metadata() -> dict:
