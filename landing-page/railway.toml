@@ -10,7 +10,8 @@ builder = "RAILPACK"
 buildCommand = "bun run build"
 
 [deploy]
-# Serve the static `dist/` output. --single rewrites unknown paths to index.html.
+# Serve the static `dist/` output via server.ts (sirv + `Accept: text/markdown`
+# content negotiation on the canonical URL). Unknown paths fall back to index.html.
 startCommand = "bun run start"
 healthcheckPath = "/"
 healthcheckTimeout = 30

@@ -17,6 +17,7 @@ from pydantic_settings import (
 # Import configuration models
 from .config_models import (
     AgenticPaymentsConfig,
+    BrandingConfig,
     CliConfig,
     DefaultLlm,
     ExampleParent,
@@ -184,6 +185,7 @@ class Config(BaseSettings):
     telemetry: TelemetryConfig = Field(default_factory=lambda: TelemetryConfig())
     cli: CliConfig = Field(default_factory=lambda: CliConfig())
     server: ServerConfig = Field(default_factory=lambda: ServerConfig())
+    branding: BrandingConfig = Field(default_factory=lambda: BrandingConfig())
     subscription_config: SubscriptionConfig = Field(
         default_factory=lambda: SubscriptionConfig()
     )
@@ -215,6 +217,11 @@ class Config(BaseSettings):
     # Canonical public URL of the /mcp endpoint (RFC 8707 resource identifier);
     # must match the resource indicator configured in the WorkOS dashboard
     MCP_PUBLIC_URL: str | None = None
+    # Canonical public base URL of the HTTP API (no trailing slash, e.g.
+    # https://api.example.com). When set, it is advertised as the `servers`
+    # entry in the published OpenAPI spec so codegen / Swagger "Try it out" and
+    # the landing-page API reference target the right host. Unset -> relative.
+    API_PUBLIC_URL: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Stripe & billing
@@ -265,6 +272,10 @@ class Config(BaseSettings):
             self.WORKOS_AUTHKIT_DOMAIN = self.WORKOS_AUTHKIT_DOMAIN.strip() or None
         if self.MCP_PUBLIC_URL is not None:
             self.MCP_PUBLIC_URL = self.MCP_PUBLIC_URL.strip() or None
+        # Same normalization for the API host: a trailing space would produce a
+        # broken servers[0].url in the published OpenAPI spec.
+        if self.API_PUBLIC_URL is not None:
+            self.API_PUBLIC_URL = self.API_PUBLIC_URL.strip() or None
         # Tokens are audience-bound to MCP_PUBLIC_URL; without it the resource
         # URI falls back to localhost and OAuth silently breaks in production.
         if (

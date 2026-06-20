@@ -1,19 +1,83 @@
-"""RFC 9728 OAuth 2.0 Protected Resource Metadata for the /mcp endpoint.
+"""Well-known discovery documents for the /mcp endpoint.
 
-MCP clients discover the authorization server here (MCP spec 2025-11-25
-requires resource servers to publish this document). Served both at the
-path-form URI (``/.well-known/oauth-protected-resource/mcp``, tried first by
-clients because the MCP endpoint lives at ``/mcp``) and at the root form.
+Two documents live here:
 
-Returns 404 when OAuth is not configured, so unauthenticated discovery cleanly
-signals "no authorization server" instead of advertising a broken flow.
+* **OAuth 2.0 Protected Resource Metadata** (RFC 9728) - tells MCP clients
+  where the authorization server is. Required of resource servers by the MCP
+  spec (2025-11-25). Served at the path-form URI
+  (``/.well-known/oauth-protected-resource/mcp``, tried first because the MCP
+  endpoint lives at ``/mcp``) and the root form. Returns 404 when OAuth is not
+  configured, so unauthenticated discovery cleanly signals "no authorization
+  server" instead of advertising a broken flow.
+
+* **OAuth 2.0 Authorization Server Metadata** (RFC 8414) - the authorization
+  server in this template is AuthKit, which publishes its own RFC 8414 document
+  at its issuer origin. The spec-correct path is PRM (above) -> AuthKit, but in
+  practice many MCP clients and registry crawlers probe
+  ``/.well-known/oauth-authorization-server`` against the *resource server*
+  origin directly. We redirect those requests to AuthKit's authoritative
+  metadata so the auth flow bootstraps regardless of which origin a client
+  probes. Returns 404 when OAuth is not configured, mirroring the PRM endpoints.
+
+* **MCP Server Card** (SEP-2127) - pre-connect *branding*: the name, title,
+  description, and icon a registry or client shows before anyone connects.
+  Always available (branding has no auth dependency) and served with
+  ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
+from common import global_config
+from common.config_models import IconConfig
 
 router = APIRouter(tags=["well-known"])
+
+
+def _server_version() -> str:
+    """Resolve the published package version; fall back when not installed."""
+    try:
+        return _pkg_version("mcp-template")
+    except PackageNotFoundError:
+        return "0.0.0"
+
+
+def _icon(icon: IconConfig) -> dict:
+    out: dict = {"src": icon.src, "mimeType": icon.mime_type, "sizes": icon.sizes}
+    if icon.theme:
+        out["theme"] = icon.theme
+    return out
+
+
+@router.get("/.well-known/mcp/server-card.json")
+def mcp_server_card() -> JSONResponse:
+    """SEP-2127 Server Card - pre-connect registry/client branding.
+
+    No ``$schema`` is emitted: the draft SEP-2127 server-card schema is not yet
+    published (the URL 404s), so advertising it would only break validators.
+    """
+    b = global_config.branding
+    card: dict = {
+        "name": b.name,
+        "version": _server_version(),
+        "title": b.title,
+        "description": b.description,
+        "websiteUrl": b.website_url,
+        "repository": {"url": b.repository_url, "source": b.repository_source},
+        "icons": [_icon(i) for i in b.icons],
+    }
+    # Only advertise a remote when a real public URL is configured. mcp_resource_url()
+    # falls back to localhost when MCP_PUBLIC_URL is unset (e.g. a deployed no-OAuth
+    # server), and publishing localhost would point registries at a dead endpoint.
+    public_url = global_config.MCP_PUBLIC_URL
+    if public_url:
+        card["remotes"] = [{"type": "streamable-http", "url": public_url.rstrip("/")}]
+    # Public branding: any registry crawler (cross-origin) must be able to read it.
+    return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
 
 
 def _metadata() -> dict:
@@ -35,3 +99,24 @@ def protected_resource_metadata_for_mcp() -> dict:
 @router.get("/.well-known/oauth-protected-resource")
 def protected_resource_metadata_root() -> dict:
     return _metadata()
+
+
+def _authorization_server_redirect() -> RedirectResponse:
+    domain = authkit_domain()
+    if not domain:
+        raise HTTPException(status_code=404, detail="OAuth is not configured")
+    # 307 keeps the request a GET (metadata is always fetched with GET) while
+    # signaling a temporary redirect, since the target depends on configuration.
+    return RedirectResponse(
+        url=f"{domain}/.well-known/oauth-authorization-server", status_code=307
+    )
+
+
+@router.get("/.well-known/oauth-authorization-server/mcp")
+def authorization_server_metadata_for_mcp() -> RedirectResponse:
+    return _authorization_server_redirect()
+
+
+@router.get("/.well-known/oauth-authorization-server")
+def authorization_server_metadata_root() -> RedirectResponse:
+    return _authorization_server_redirect()

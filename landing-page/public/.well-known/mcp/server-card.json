@@ -1,0 +1,26 @@
+{
+  "name": "io.github.Miyamura80/MCP-Template",
+  "version": "0.1.1",
+  "title": "GmailMCP",
+  "description": "Give your AI agent real tools - one service registry over CLI, MCP, and HTTP.",
+  "websiteUrl": "https://gmailmcp.com",
+  "repository": {
+    "url": "https://github.com/Miyamura80/MCP-Template",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://gmailmcp.com/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.gmailmcp.com/mcp"
+    }
+  ]
+}

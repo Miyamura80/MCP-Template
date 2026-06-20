@@ -1,9 +1,17 @@
 import type { APIRoute } from "astro";
-import { site } from "../config/landing";
+import { site, comparison } from "../config/landing";
 
 // Static routes that ship in dist/. Keep in sync with src/pages/*.astro.
 const routes = [
   { path: "/", priority: "1.0", changefreq: "weekly" },
+  { path: "/compare", priority: "0.8", changefreq: "monthly" },
+  { path: "/api", priority: "0.7", changefreq: "weekly" },
+  // One /vs/<slug> page per competitor (generated from the comparison config).
+  ...comparison.competitors.map((c) => ({
+    path: `/vs/${c.id}`,
+    priority: "0.7",
+    changefreq: "monthly",
+  })),
   { path: "/privacy", priority: "0.3", changefreq: "yearly" },
   { path: "/terms", priority: "0.3", changefreq: "yearly" },
 ];

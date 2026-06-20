@@ -1,3 +1,7 @@
+# Use bash for recipes; several targets rely on bash-only features
+# (e.g. `read -d ''`) that fail under dash, the default /bin/sh on Debian/Ubuntu.
+SHELL := bash
+
 # ANSI color codes
 GREEN=\033[0;32m
 YELLOW=\033[0;33m
@@ -215,14 +219,13 @@ fmt: install_tools check_jq ## Format code with ruff and jq
 	@uv tool run ruff format
 	@echo "$(YELLOW)✨Formatting JSONs with jq...$(RESET)"
 	@count=0; \
-	find . \( $(FIND_PRUNE) \) -prune -o -type f -name '*.json' -print0 | \
 	while IFS= read -r -d '' file; do \
 		if jq . "$$file" > "$$file.tmp" 2>/dev/null && mv "$$file.tmp" "$$file"; then \
 			count=$$((count + 1)); \
 		else \
 			rm -f "$$file.tmp"; \
 		fi; \
-	done; \
+	done < <(find . \( $(FIND_PRUNE) \) -prune -o -type f -name '*.json' -print0); \
 	echo "$(BLUE)$$count JSON file(s)$(RESET) formatted."; \
 	echo "$(GREEN)✅Formatting completed.$(RESET)"
 
