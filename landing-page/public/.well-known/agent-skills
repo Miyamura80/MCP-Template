@@ -1,0 +1,31 @@
+{
+  "schema_version": "v1",
+  "name": "gmail-mcp",
+  "description": "Agent skills exposed by the GmailMCP server. Connect over MCP to discover and call them.",
+  "contact": "https://github.com/Miyamura80/MCP-Template",
+  "mcp": {
+    "url": "https://mcp.gmailmcp.com/mcp",
+    "transport": "streamable-http"
+  },
+  "discovery": {
+    "llms_txt": "https://gmailmcp.com/llms.txt",
+    "llms_full_txt": "https://gmailmcp.com/llms-full.txt",
+    "agents_md": "https://gmailmcp.com/agents.md"
+  },
+  "skills": [
+    {
+      "name": "gmail_curate_inbox",
+      "description": "Rank and triage inbox threads by importance, optionally drafting replies.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of threads to return."
+          }
+        }
+      },
+      "transports": ["cli", "mcp", "http"]
+    }
+  ]
+}

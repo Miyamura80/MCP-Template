@@ -44,6 +44,13 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? site.url).href;
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDescription} />
+
+    <!-- Machine-readable / agent discovery -->
+    <link rel="alternate" type="text/plain" title="llms.txt" href="/llms.txt" />
+    <link rel="alternate" type="text/plain" title="llms-full.txt" href="/llms-full.txt" />
+    <link rel="alternate" type="text/markdown" title="agents.md" href="/agents.md" />
+
+    <slot name="head" />
   </head>
   <body class="min-h-screen bg-bg text-fg antialiased">
     <slot />
