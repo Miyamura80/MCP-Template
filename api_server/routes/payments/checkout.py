@@ -223,14 +223,15 @@ def create_checkout(
 
     sub_cfg = global_config.subscription_config
     trial_days = sub_cfg.trial_period_days
-    subscription_data = {"trial_period_days": trial_days} if trial_days else {}
 
     checkout_session = stripe.checkout.Session.create(
         customer=customer_id,
         payment_method_types=["card"],
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
-        subscription_data=subscription_data,
+        subscription_data=(
+            {"trial_period_days": trial_days} if trial_days else {}
+        ),
         success_url=f"{frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{frontend_url}/billing/cancel",
         metadata={"user_id": user.user_id},
