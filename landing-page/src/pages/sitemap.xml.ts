@@ -1,18 +1,35 @@
 import type { APIRoute } from "astro";
-import { SITE_PAGES, abs } from "../utils/agent-content";
+import { site } from "../config/landing";
 
-function xmlEscape(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+// Static routes that ship in dist/. Keep in sync with src/pages/*.astro.
+const routes = [
+  { path: "/", priority: "1.0", changefreq: "weekly" },
+  { path: "/privacy", priority: "0.3", changefreq: "yearly" },
+  { path: "/terms", priority: "0.3", changefreq: "yearly" },
+];
 
-export const GET: APIRoute = () => {
+export const GET: APIRoute = ({ site: astroSite }) => {
+  const origin = (astroSite ?? new URL(site.url)).origin;
+  const lastmod = new Date().toISOString().split("T")[0];
+
+  const urls = routes
+    .map(
+      (r) =>
+        `  <url>\n` +
+        `    <loc>${origin}${r.path}</loc>\n` +
+        `    <lastmod>${lastmod}</lastmod>\n` +
+        `    <changefreq>${r.changefreq}</changefreq>\n` +
+        `    <priority>${r.priority}</priority>\n` +
+        `  </url>`,
+    )
+    .join("\n");
+
   const body = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${SITE_PAGES.map(
-    (p) => `  <url>\n    <loc>${xmlEscape(abs(p))}</loc>\n  </url>`,
-  ).join("\n")}
+${urls}
 </urlset>
 `;
+
   return new Response(body, {
     headers: { "Content-Type": "application/xml; charset=utf-8" },
   });

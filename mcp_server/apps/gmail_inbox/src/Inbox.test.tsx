@@ -259,4 +259,41 @@ describe("Inbox", () => {
     unmount();
     expect(app.ontoolresult).toBeUndefined();
   });
+
+  // Mobile MCP hosts embed the app in a sandboxed iframe inside the chat's own
+  // scroll view, where touch-dragging a nested `overflow: auto` pane is
+  // unreliable. On narrow viewports the list/reader must flow at their natural
+  // height (so the host page scrolls the iframe) instead of trapping scroll.
+  it("narrow viewport lets the list flow instead of trapping scroll", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const { app } = makeMcpApp();
+      render(<Inbox mcpApp={app} />);
+      app.ontoolresult?.({ structuredContent: sampleResult });
+      const row = await screen.findByTestId("row-tA");
+      const list = row.closest("ul")!;
+      expect(list.style.overflowY).toBe("visible");
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it("wide viewport keeps the list as its own scroll region", async () => {
+    const { app } = makeMcpApp();
+    render(<Inbox mcpApp={app} />);
+    app.ontoolresult?.({ structuredContent: sampleResult });
+    const row = await screen.findByTestId("row-tA");
+    const list = row.closest("ul")!;
+    expect(list.style.overflowY).toBe("auto");
+  });
 });

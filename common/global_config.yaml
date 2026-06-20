@@ -104,6 +104,25 @@ server:
     - "http://localhost:3000"
 
 ########################################################
+# Registry branding (pre-connect discovery)
+########################################################
+# Served at /.well-known/mcp/server-card.json (SEP-2127). This is what MCP
+# registries and client "add server" directories show before connecting. The
+# deployed endpoint URL is NOT set here - it comes from MCP_PUBLIC_URL so the
+# card and OAuth resource metadata stay in lockstep.
+branding:
+  name: "io.github.Miyamura80/MCP-Template"   # reverse-DNS registry id (one slash)
+  title: "GmailMCP"                            # human-readable display name
+  description: "Give your AI agent real tools - one service registry over CLI, MCP, and HTTP."
+  website_url: "https://gmailmcp.com"
+  repository_url: "https://github.com/Miyamura80/MCP-Template"
+  repository_source: "github"
+  icons:
+    - src: "https://gmailmcp.com/favicon.svg"
+      mime_type: "image/svg+xml"
+      sizes: ["any"]
+
+########################################################
 # CLI
 ########################################################
 telemetry:
