@@ -41,7 +41,7 @@ request to thread your trace ID through the server logs.
 |------|--------------|------------|------------|
 | `400` | `bad_request` | No | Fix the request before retrying |
 | `401` | `unauthorized` | No | Verify the `Authorization: Bearer` header / API key |
-| `402` | `payment_required` / `quota_exceeded` | After reset | Daily quota exhausted - wait for `Retry-After`, or upgrade the plan |
+| `402` | `payment_required` / `quota_exceeded` | After daily reset | Daily quota exhausted - the `Retry-After` can be hours away, so handle it separately from the [retry loop](#reference-retry-loop-python): wait for the reset or upgrade the plan |
 | `403` | `forbidden` | No | The key lacks the required [scope](/docs/api/authentication#scopes) |
 | `404` | `not_found` | No | Check the endpoint URL or resource ID |
 | `405` | `method_not_allowed` | No | Use the correct HTTP method |
@@ -65,13 +65,17 @@ incident from a client-side error before retrying.
 Retry **only** the codes marked retryable above. For everything else a retry
 will fail identically - fix the request instead.
 
-1. **Honor `Retry-After` first.** On `429` and `402` the server tells you
-   exactly how many seconds to wait. Sleep at least that long before retrying.
+1. **Honor `Retry-After` first.** On `429` the server tells you exactly how
+   many seconds to wait. Sleep at least that long before retrying.
 2. **Exponential backoff with jitter** for `5xx` (no `Retry-After`): wait
    `min(cap, base * 2^attempt)` plus random jitter (e.g. `base=1s`, `cap=30s`).
    Jitter prevents synchronized retry storms across agents.
-3. **Cap attempts** (e.g. 5) and surface the final `request_id` to the user.
-4. **Idempotency:** writes that must not double-apply accept an
+3. **Don't auto-retry `402`.** Its `Retry-After` points at the next daily reset,
+   which can be hours away - blocking a request loop that long is wrong. Treat a
+   `402` as a stop condition: surface it, wait for the reset, or upgrade. See
+   [Handling a 402](/docs/api/rate-limits#handling-a-402-daily-quota).
+4. **Cap attempts** (e.g. 5) and surface the final `request_id` to the user.
+5. **Idempotency:** writes that must not double-apply accept an
    `Idempotency-Key` header (see [Billing](/docs/api/billing#report-usage)), so a
    retried request is de-duplicated server-side.
 
@@ -83,6 +87,8 @@ import time
 
 import httpx
 
+# 402 is intentionally excluded: its Retry-After is the next daily reset
+# (possibly hours out), so it's handled as a stop condition, not a retry.
 RETRYABLE = {429, 500, 502, 503}
 
 def call_with_retry(client: httpx.Client, request: httpx.Request, max_attempts: int = 5):
