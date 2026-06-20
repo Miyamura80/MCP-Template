@@ -14,26 +14,31 @@ enforced inline here instead.
 import json
 import time
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from limits import RateLimitItemPerMinute
-from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
 from starlette.responses import JSONResponse, StreamingResponse
 
 from api_server.ask.core import answer_question, stream_events
+from api_server.middleware.rate_limit import _build_storage, _client_ip
 from common import global_config
 from models.ask import AskInput, AskResult
 
 router = APIRouter(tags=["ask"])
 
-_limiter = MovingWindowRateLimiter(MemoryStorage())
+# Reuse the main middleware's storage selection (Redis when configured) so /ask
+# limits hold across workers/replicas, and its trusted-proxy _client_ip so
+# proxied deployments resolve the real client IP rather than the proxy's.
+_limiter = MovingWindowRateLimiter(_build_storage())
 
 
-def _client_ip(request: Request) -> str:
-    if request.client:
-        return request.client.host
-    return "unknown"
+def _split_prev(prev: str | None) -> list[str]:
+    """Parse the NLWeb comma-separated ``prev`` query field into a list."""
+    if not prev:
+        return []
+    return [p.strip() for p in prev.split(",") if p.strip()]
 
 
 def _enforce_rate_limit(request: Request) -> None:
@@ -106,16 +111,18 @@ async def ask_get(
     request: Request,
     query: str,
     streaming: bool = True,
-    mode: str = "generate",
+    mode: Literal["list", "summarize", "generate"] = "generate",
     query_id: str | None = None,
+    prev: str | None = None,
     site: str | None = None,
     decontextualized_query: str | None = None,
 ) -> object:
     inp = AskInput(
         query=query,
         streaming=streaming,
-        mode=mode,  # ty: ignore[invalid-argument-type]
+        mode=mode,
         query_id=query_id,
+        prev=_split_prev(prev),
         site=site,
         decontextualized_query=decontextualized_query,
     )

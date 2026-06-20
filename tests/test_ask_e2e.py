@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from api_server.ask.retriever import DocsRetriever
 from api_server.server import app
 from common import global_config
+from models.ask import AskResult
 from tests.test_template import TestTemplate
 
 _BASE_URL = "https://docs.example.com"
@@ -98,3 +99,29 @@ class TestAskE2E(TestTemplate):
         with TestClient(app) as client:
             resp = client.post("/ask", json={"query": "x", "streaming": False})
         assert resp.status_code == 404
+
+    def test_get_invalid_mode_returns_422(self):
+        # Literal-typed query param is validated at the boundary -> clean 422,
+        # not a route-time crash. Validation happens before the enabled guard.
+        with TestClient(app) as client:
+            resp = client.get("/ask", params={"query": "x", "mode": "bogus"})
+        assert resp.status_code == 422
+
+    def test_get_parses_prev_into_list(self, tmp_path):
+        captured = {}
+
+        async def _capture(inp):
+            captured["prev"] = inp.prev
+            return AskResult(query_id="qid", answer="a", results=[])
+
+        with (
+            _enabled_ask(tmp_path),
+            patch("api_server.routes.ask.answer_question", _capture),
+            TestClient(app) as client,
+        ):
+            resp = client.get(
+                "/ask",
+                params={"query": "x", "streaming": "false", "prev": "first, second"},
+            )
+        assert resp.status_code == 200
+        assert captured["prev"] == ["first", "second"]

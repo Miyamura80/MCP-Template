@@ -137,7 +137,11 @@ class DocsRetriever:
             return
         for mdx in sorted(corpus_dir.rglob("*.mdx")):
             rel = mdx.relative_to(corpus_dir)
-            raw = mdx.read_text(encoding="utf-8")
+            try:
+                raw = mdx.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                log.warning("Skipping unreadable docs file {}: {}", mdx, exc)
+                continue
             self._chunks.extend(_chunk_page(raw, rel, self._base_url))
         if not self._chunks:
             log.warning("Ask corpus is empty: {}", corpus_dir)

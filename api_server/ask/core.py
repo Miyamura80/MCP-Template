@@ -106,13 +106,21 @@ def _complete_event(query_id: str) -> dict:
 
 
 async def stream_events(inp: AskInput) -> AsyncIterator[dict]:
-    """Yield NLWeb SSE message dicts: start, result(s), [summary], complete."""
-    result = await answer_question(inp)
-    yield _start_event(result.query_id)
+    """Yield NLWeb SSE messages progressively: start, result(s), [summary], complete.
+
+    ``start`` and the retrieved ``result`` events are emitted before the (slow)
+    answer generation, so clients receive bytes immediately instead of waiting
+    for the full LLM round-trip. ``mode="list"`` skips generation entirely.
+    """
+    query_id = _resolve_query_id(inp)
+    site = _resolve_site(inp)
+    yield _start_event(query_id)
+    chunks = get_retriever().search(inp.query, global_config.ask.top_k)
     index = 0
-    for item in result.results:
-        yield _result_event(index, item.schema_object)
+    for chunk in chunks:
+        yield _result_event(index, _chunk_to_item(chunk, site).schema_object)
         index += 1
     if inp.mode != "list":
-        yield _result_event(index, _summary_item(result.answer))
-    yield _complete_event(result.query_id)
+        answer = await _generate_answer(inp.query, _build_context(chunks))
+        yield _result_event(index, _summary_item(answer))
+    yield _complete_event(query_id)
