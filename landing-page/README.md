@@ -21,10 +21,10 @@ Design tokens (colors, fonts, the accent) live in `src/styles/global.css` under 
 The `og:image` / `twitter:image` card is a committed 1200×630 PNG at `public/og.png` (the production build does **not** regenerate it). After changing the brand copy or tokens, regenerate and commit it:
 
 ```bash
-uv run --with pillow python scripts/gen-og.py
+uv run --with pillow --with cairosvg python scripts/gen-og.py
 ```
 
-`scripts/gen-og.py` mirrors the `@theme` colors and the `landing.ts` copy, and pulls the Archivo typeface at run time. To use a different card per page, pass `image="/my-og.png"` (and optionally `imageAlt`) to `Base.astro`.
+`scripts/gen-og.py` mirrors the `@theme` colors and the `landing.ts` copy, pulls the Archivo typeface at run time, and rasterizes the canonical brand mark from `public/favicon.svg`. To use a different card per page, pass `image="/my-og.png"` (and optionally `imageAlt`) to `Base.astro`.
 
 ## Develop
 
