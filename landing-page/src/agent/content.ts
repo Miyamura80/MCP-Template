@@ -5,7 +5,7 @@
  * surface: llms.txt, llms-full.txt, agents.md and the in-page agent view.
  * Rebranding the site (editing landing.ts) keeps all of these in sync.
  */
-import { site, hero, features, getStarted, faq, compatibility, connect } from "../config/landing";
+import { site, hero, features, getStarted, faq, compatibility, connect, comparison } from "../config/landing";
 
 /** Strip a trailing slash so we can safely append paths. */
 function trimSlash(url: string): string {
@@ -27,6 +27,7 @@ ${hero.subhead}
 ## Documentation for LLMs
 - [llms-full.txt](${o}/llms-full.txt): Full, expanded description of what ${site.name} is and how to use every transport.
 - [agents.md](${o}/agents.md): Agent-oriented capability and skills summary.
+- [How it compares](${o}/compare): ${site.name} vs other Gmail MCP servers (GongRzhe, Composio, Zapier/Pipedream, Google Workspace MCP).
 
 ## Resources
 - [Documentation](${site.docsUrl})
@@ -53,6 +54,20 @@ export function buildLlmsFullTxt(origin: string): string {
     .join("\n\n");
   const faqBlock = faq.items.map((i) => `### ${i.q}\n${i.a}`).join("\n\n");
   const clients = compatibility.clients.map((c) => c.name).join(", ");
+
+  const pillarsBlock = comparison.pillars
+    .map((p) => `- **${p.title}**: ${p.body}`)
+    .join("\n");
+  const competitorBlock = comparison.competitors
+    .map(
+      (c) =>
+        `### ${site.name} vs ${c.name}\n` +
+        `${c.headline} ${c.summary}\n\n` +
+        `- Choose ${site.name} if: ${c.pickUs}\n` +
+        `- Choose ${c.name} if: ${c.pickThem}\n` +
+        `- Full comparison: ${o}/vs/${c.id}`,
+    )
+    .join("\n\n");
 
   return `# ${site.name} - ${site.tagline}
 
@@ -83,6 +98,17 @@ ${transportBlock}
 ## Features
 
 ${featureBlock}
+
+## How it compares
+
+${comparison.subhead}
+
+What makes ${site.name} different (as of ${comparison.asOf}):
+${pillarsBlock}
+
+${competitorBlock}
+
+See the full comparison and capability matrix at ${o}/compare.
 
 ## Compatible clients
 
@@ -141,6 +167,18 @@ tools rather than scraping this page.
 
 The same tools are also reachable over a CLI and a plain HTTP API; behaviour
 is identical across all three transports.
+
+## How it compares
+
+${site.name} is a dedicated Gmail MCP, not a thin API wrapper or a generic
+multi-app gateway. Its differentiators: interactive in-chat UI (MCP Apps),
+one codebase exposed over CLI + MCP + HTTP, and an open-source, self-hostable
+server. Head-to-head comparisons:
+${comparison.competitors
+  .map((c) => `- vs ${c.name}: ${o}/vs/${c.id}`)
+  .join("\n")}
+
+Full matrix: ${o}/compare
 
 ## More
 
