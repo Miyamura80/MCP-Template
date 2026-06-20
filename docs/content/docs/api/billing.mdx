@@ -48,6 +48,13 @@ Two independent throttles apply:
   plan's daily allowance is used up. The response includes a `Retry-After`
   header and a `quota_reset_at` timestamp (next UTC day).
 
+Each subscription tier has a daily request quota:
+
+| Tier   | Daily requests |
+|--------|----------------|
+| `free_tier` | 10,000 |
+| `plus_tier` | 10,000 |
+
 Tier limits are configurable in `common/global_config.yaml` and
 `common/subscription_config.yaml`. See [Rate Limits](/docs/api/rate-limits) for
 the full window/header reference and [Errors](/docs/api/errors#retry-guidance)
