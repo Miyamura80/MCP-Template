@@ -6,6 +6,7 @@ available regardless of auth config and readable cross-origin.
 
 from fastapi.testclient import TestClient
 
+from api_server.routes import well_known
 from api_server.server import app
 
 CARD_PATH = "/.well-known/mcp/server-card.json"
@@ -30,12 +31,20 @@ class TestServerCard:
         # No $schema: the draft SEP-2127 server-card schema URL is unpublished (404).
         assert "$schema" not in body
 
-    def test_card_advertises_streamable_http_remote(self):
+    def test_card_omits_remote_without_public_url(self, monkeypatch):
+        # MCP_PUBLIC_URL unset (e.g. deployed no-OAuth server): the card must not
+        # advertise the localhost fallback as a discoverable endpoint.
+        monkeypatch.setattr(well_known.global_config, "MCP_PUBLIC_URL", None)
+        body = self._client().get(CARD_PATH).json()
+        assert "localhost" not in str(body)
+        assert not body.get("remotes")
+
+    def test_card_advertises_public_remote_when_configured(self, monkeypatch):
+        url = "https://mcp.example.com/mcp"
+        monkeypatch.setattr(well_known.global_config, "MCP_PUBLIC_URL", url)
         body = self._client().get(CARD_PATH).json()
         remotes = body["remotes"]
-        assert remotes and remotes[0]["type"] == "streamable-http"
-        # Endpoint is derived from MCP_PUBLIC_URL, not hard-coded in the card.
-        assert remotes[0]["url"].endswith("/mcp")
+        assert remotes and remotes[0] == {"type": "streamable-http", "url": url}
 
     def test_card_is_cors_readable(self):
         # Registry crawlers fetch the card cross-origin; it must allow that.

@@ -5,7 +5,9 @@
  * `public/` so Astro copies it verbatim into `dist/`. `sirv` serves
  * `/.well-known/*` even though it is a dotfolder - well-known paths are exempt
  * from both its dotfile filter and the `--single` SPA fallback - so the static
- * card is reachable in production with no extra flags.
+ * card is reachable in production. The `start` script runs `sirv` with `--cors`
+ * so registries/clients can fetch these docs cross-origin (SEP-2127 expects the
+ * server card to be CORS-readable), matching the API route's CORS header.
  *
  * Single source of truth: edit branding in `landing.ts` (`site` + `serverCard`),
  * never hand-edit the generated JSON. Run `bun run gen:discovery` to refresh.

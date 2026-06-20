@@ -6,6 +6,8 @@ Each model corresponds to a section in the global_config.yaml file and provides
 type validation and structure for the configuration data.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -132,7 +134,7 @@ class IconConfig(BaseModel):
     src: str
     mime_type: str = "image/svg+xml"
     sizes: list[str] = Field(default_factory=lambda: ["any"])
-    theme: str | None = None
+    theme: Literal["light", "dark"] | None = None
 
 
 class BrandingConfig(BaseModel):

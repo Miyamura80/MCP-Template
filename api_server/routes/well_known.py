@@ -52,7 +52,7 @@ def mcp_server_card() -> JSONResponse:
     published (the URL 404s), so advertising it would only break validators.
     """
     b = global_config.branding
-    card = {
+    card: dict = {
         "name": b.name,
         "version": _server_version(),
         "title": b.title,
@@ -60,8 +60,13 @@ def mcp_server_card() -> JSONResponse:
         "websiteUrl": b.website_url,
         "repository": {"url": b.repository_url, "source": b.repository_source},
         "icons": [_icon(i) for i in b.icons],
-        "remotes": [{"type": "streamable-http", "url": mcp_resource_url()}],
     }
+    # Only advertise a remote when a real public URL is configured. mcp_resource_url()
+    # falls back to localhost when MCP_PUBLIC_URL is unset (e.g. a deployed no-OAuth
+    # server), and publishing localhost would point registries at a dead endpoint.
+    public_url = global_config.MCP_PUBLIC_URL
+    if public_url:
+        card["remotes"] = [{"type": "streamable-http", "url": public_url.rstrip("/")}]
     # Public branding: any registry crawler (cross-origin) must be able to read it.
     return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
 
