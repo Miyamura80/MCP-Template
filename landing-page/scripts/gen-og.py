@@ -67,8 +67,8 @@ def brand_mark(size: int) -> Image.Image | None:
         )
     except (ImportError, OSError):
         return None
-    return Image.open(io.BytesIO(png)).convert("RGBA").resize(
-        (size, size), Image.LANCZOS
+    return (
+        Image.open(io.BytesIO(png)).convert("RGBA").resize((size, size), Image.LANCZOS)
     )
 
 
