@@ -11,7 +11,7 @@ them.
 
 Usage in a route::
 
-    page = CursorParams = Depends()
+    page: CursorParams = Depends()
     if page.cursor:
         created_at, last_id = decode_cursor(page.cursor)
         query = query.filter(keyset_before(Model, created_at, last_id))

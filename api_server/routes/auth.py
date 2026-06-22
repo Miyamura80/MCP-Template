@@ -123,8 +123,9 @@ def list_keys(
         )
         for r in rows
     ]
+    # has_more implies len(rows) == page.limit >= 1, so rows[-1] is always safe.
     next_cursor = (
-        encode_cursor(rows[-1].created_at, rows[-1].id) if has_more and rows else None
+        encode_cursor(rows[-1].created_at, rows[-1].id) if has_more else None
     )
     return CursorPage[APIKeyInfo](
         items=items, next_cursor=next_cursor, has_more=has_more
