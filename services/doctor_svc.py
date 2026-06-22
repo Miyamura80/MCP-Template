@@ -3,7 +3,7 @@
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -299,3 +299,33 @@ def doctor(input: DoctorInput) -> DoctorResult:
 
     has_failures = any(r.status == "fail" for r in results)
     return DoctorResult(checks=results, has_failures=has_failures)
+
+
+def iter_doctor(input: DoctorInput) -> Iterator[CheckResultModel]:
+    """Yield each ``CheckResultModel`` as it completes - streaming variant of ``doctor``.
+
+    Several checks shell out (``_check_deps_synced`` waits up to 30s on
+    ``uv sync --dry-run``), so a unary caller blocks until every check is done.
+    This generator lets a transport surface each result the moment it lands.
+
+    In ``--fix`` mode it yields the initial pass first, then applies the fixers
+    and yields the re-checked results, so a consumer sees the full progression.
+    The pure ``doctor`` service is intentionally left unchanged and stays the
+    shared entry point for CLI/MCP/API; only the SSE route uses this generator.
+    """
+    results: list[CheckResultModel] = []
+    for check_fn in _ALL_CHECKS:
+        result = check_fn()
+        results.append(result)
+        yield result
+
+    if not input.fix:
+        return
+
+    fixed_any = False
+    for r in results:
+        if r.status != "pass" and r.fixable and r.name in _FIXERS and _FIXERS[r.name]():
+            fixed_any = True
+    if fixed_any:
+        for check_fn in _ALL_CHECKS:
+            yield check_fn()

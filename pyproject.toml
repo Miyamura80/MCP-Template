@@ -68,6 +68,7 @@ dependencies = [
     "google-api-python-client>=2.196.0",
     "google-auth>=2.53.0",
     "psycopg2-binary>=2.9.12",
+    "sse-starlette>=3.3.3",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
@@ -152,6 +153,8 @@ exclude = [
     "tests/test_template.py",
     "tests/test_api_key_auth.py",
     "tests/test_api_server.py",
+    "tests/test_deprecation.py",
+    "tests/test_pagination.py",
     "tests/test_unified_auth.py",
     "tests/test_workos_auth.py",
     "tests/test_error_handler.py",
