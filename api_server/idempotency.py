@@ -103,7 +103,13 @@ def _release(session, user_id: str, route: str, key: str) -> None:
 
 
 def _maybe_cleanup() -> None:
-    """Best-effort opportunistic TTL sweep, gated to a fraction of requests."""
+    """Best-effort opportunistic TTL sweep, gated to a fraction of requests.
+
+    Interim mechanism: the template ships no scheduler, so retention is enforced
+    by piggy-backing a rare sweep onto request traffic. Prefer calling
+    ``cleanup_expired_idempotency_keys`` from a scheduled job (cron / background
+    task) when one exists and drop this request-path gate.
+    """
     if random.random() >= _CLEANUP_PROBABILITY:
         return
     try:

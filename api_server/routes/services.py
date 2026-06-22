@@ -19,37 +19,12 @@ def _register_service_routes() -> None:
 
 
 def _make_route(entry: ServiceEntry) -> None:
-    """Create a POST route, with Idempotency-Key support for mutating services."""
-    if entry.mutating:
-        _make_mutating_route(entry)
-    else:
-        _make_headless_route(entry)
+    """Register ``POST /api/v1/services/{name}`` for one service.
 
-
-def _make_headless_route(entry: ServiceEntry) -> None:
-    """Create a POST route that mirrors the MCP tool pattern."""
-    func = entry.func
-    input_model = entry.input_model
-    output_model = entry.output_model
-
-    @router.post(
-        f"/{entry.name}",
-        response_model=output_model,
-        summary=entry.description,
-        name=f"svc_{entry.name}",
-    )
-    def _handler(
-        body: input_model,  # ty: ignore[invalid-type-form]
-        _user: AuthenticatedUser = Depends(require_scopes(SERVICES_EXECUTE)),
-    ):
-        if "user_id" in input_model.model_fields:  # ty: ignore[unresolved-attribute]
-            body = body.model_copy(update={"user_id": _user.user_id})
-        ensure_daily_limit(_user.user_id)
-        return func(body)
-
-
-def _make_mutating_route(entry: ServiceEntry) -> None:
-    """Create a POST route that requires Idempotency-Key and replays retries."""
+    Read-only services run the compute directly. Mutating services run the same
+    compute through ``execute_idempotent``, which enforces ``Idempotency-Key``
+    and replays the stored response on retries.
+    """
     func = entry.func
     input_model = entry.input_model
     output_model = entry.output_model
@@ -69,11 +44,13 @@ def _make_mutating_route(entry: ServiceEntry) -> None:
             body = body.model_copy(update={"user_id": _user.user_id})
 
         def _compute():
-            # Run the quota check inside the claim so retries (replays) don't
+            # Quota is checked inside the compute so idempotent replays don't
             # double-count usage; the first execution still enforces the limit.
             ensure_daily_limit(_user.user_id)
             return func(body)
 
+        if not entry.mutating:
+            return _compute()
         return execute_idempotent(
             request=request,
             user_id=_user.user_id,
