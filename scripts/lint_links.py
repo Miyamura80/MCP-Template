@@ -13,6 +13,7 @@ Domains that block automated requests outright (403 regardless of
 backoff) are added to the ignore list.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -25,6 +26,52 @@ BOT_BLOCKED_DOMAINS = [
     # non-browser HTTP clients even though they resolve fine in a browser.
     r"https://railway\.com/deploy/.*",
 ]
+
+# Domains we deliberately keep OFF the Claude Code cloud sandbox network
+# allowlist because they are programmable endpoints (SSRF relays, RPC, package/
+# tool registries, render-and-share services) that widen the data-exfiltration
+# surface, not static docs. The sandbox egress proxy returns 403 for them, so we
+# skip them only when running inside the cloud sandbox. Normal CI (open egress)
+# still checks them for real. See `make lint_links` discussion / network policy.
+CLOUD_SANDBOX_IGNORES = [
+    r"https?://(www\.)?shields\.io(/|\?|$)",
+    r"https?://img\.shields\.io(/|\?|$)",
+    r"https?://rpc\.tempo\.xyz(/|\?|$)",
+    r"https?://registry\.modelcontextprotocol\.io(/|\?|$)",
+    r"https?://mcp\.gmailmcp\.com(/|\?|$)",
+    r"https?://carbon\.now\.sh(/|\?|$)",
+    r"https?://chalk\.ist(/|\?|$)",
+    r"https?://facilitator\.x402\.org(/|\?|$)",
+    r"https?://jules\.googleapis\.com(/|\?|$)",
+    r"https?://skills\.sh(/|\?|$)",
+    r"https?://banner\.godori\.dev(/|\?|$)",
+    r"https?://contrib\.rocks(/|\?|$)",
+    r"https?://(www\.)?render\.com(/|\?|$)",
+    r"https?://(www\.)?railway\.com(/|\?|$)",
+    # VS Code Marketplace is a publish surface (extension gallery API); keep it
+    # off the allowlist rather than grant standing egress for one convenience
+    # link to an extension page.
+    r"https?://marketplace\.visualstudio\.com(/|\?|$)",
+]
+
+# Files whose external links are deliberately not checked inside the cloud
+# sandbox. The research doc cites ~20 third-party news/vendor pages; rather than
+# widen the sandbox allowlist to all of them, we skip the file in the sandbox
+# only. Normal CI (open egress) still link-checks it.
+CLOUD_SANDBOX_IGNORE_FILES = [
+    "./docs/agentic_payment_protocols_research.md",
+]
+
+
+def _in_claude_code_cloud() -> bool:
+    """True when running inside the Claude Code cloud sandbox.
+
+    Claude Code on the web sets ``CLAUDE_CODE_REMOTE=true`` in the session
+    shell. We gate the extra ignores on this so the skip never leaks into a
+    developer's local run or GitHub Actions CI (which have open egress).
+    """
+    return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
+
 
 MAX_RETRIES = 3
 BASE_DELAY = 5
@@ -46,23 +93,28 @@ def _build_cmd(extra_ignores: list[str]) -> list[str]:
     for pattern in extra_ignores:
         cmd.extend(["--check-links-ignore", pattern])
 
+    find_cmd = [
+        "find",
+        ".",
+        "-name",
+        "*.md",
+        "-not",
+        "-path",
+        "./.venv/*",
+        "-not",
+        "-path",
+        "./.venv-test/*",
+        "-not",
+        "-path",
+        "*/node_modules/*",
+    ]
+    if _in_claude_code_cloud():
+        for path in CLOUD_SANDBOX_IGNORE_FILES:
+            find_cmd.extend(["-not", "-path", path])
+
     md_files = (
         subprocess.run(
-            [
-                "find",
-                ".",
-                "-name",
-                "*.md",
-                "-not",
-                "-path",
-                "./.venv/*",
-                "-not",
-                "-path",
-                "./.venv-test/*",
-                "-not",
-                "-path",
-                "*/node_modules/*",
-            ],
+            find_cmd,
             capture_output=True,
             text=True,
             check=True,
@@ -86,6 +138,14 @@ def _is_only_429(output: str) -> bool:
 
 def main() -> int:
     ignores = list(BOT_BLOCKED_DOMAINS)
+    if _in_claude_code_cloud():
+        print(
+            "Claude Code cloud sandbox detected (CLAUDE_CODE_REMOTE=true): "
+            "skipping egress-restricted, exfil-sensitive domains that are kept "
+            "off the network allowlist. These are still checked in normal CI.",
+            file=sys.stderr,
+        )
+        ignores.extend(CLOUD_SANDBOX_IGNORES)
     cmd = _build_cmd(ignores)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
