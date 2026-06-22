@@ -20,6 +20,7 @@ from api_server.routes import (
     google_oauth,
     health,
     services,
+    stream,
     well_known,
 )
 from api_server.routes.payments import checkout, metering, subscription, webhooks
@@ -74,6 +75,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(well_known.router)
 app.include_router(services.router)
+app.include_router(stream.router)
 app.include_router(auth.router)
 app.include_router(google_oauth.router)
 app.include_router(checkout.router)

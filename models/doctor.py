@@ -20,3 +20,9 @@ class CheckResultModel(BaseModel):
 class DoctorResult(BaseModel):
     checks: list[CheckResultModel]
     has_failures: bool
+
+
+class DoctorStreamDone(BaseModel):
+    """Payload of the terminal ``done`` event on the doctor SSE stream."""
+
+    has_failures: bool
