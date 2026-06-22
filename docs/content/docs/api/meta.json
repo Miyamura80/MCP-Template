@@ -5,6 +5,7 @@
     "tools",
     "authentication",
     "billing",
+    "rate-limits",
     "errors"
   ]
 }
