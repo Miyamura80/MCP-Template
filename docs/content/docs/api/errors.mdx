@@ -20,7 +20,7 @@ All errors return a JSON object:
 | `402` | Quota exceeded | Wait for daily reset (check `Retry-After` header) or upgrade your plan |
 | `403` | Insufficient permissions | Your API key lacks the required scope for this endpoint |
 | `404` | Not found | Check the endpoint URL or resource ID |
-| `409` | Idempotency-Key in progress | A request with the same key is still running; retry shortly |
+| `409` | Idempotency-Key in progress | A request with the same key is still running; retry with backoff. A key left in-flight by a crashed request clears after the 24h retention window |
 | `422` | Unprocessable | Validation failed, or an `Idempotency-Key` was reused with a different payload |
 | `429` | Rate limited | Wait and retry (check `Retry-After` header) |
 | `500` | Server error | Retry the request; if persistent, check the health endpoint |
