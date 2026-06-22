@@ -1019,17 +1019,57 @@
         ],
         "summary": "List Keys",
         "operationId": "list_keys_api_v1_auth_api_keys_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum items to return (1-100).",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Maximum items to return (1-100)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque pagination cursor returned as `next_cursor` by a prior call.",
+              "title": "Cursor"
+            },
+            "description": "Opaque pagination cursor returned as `next_cursor` by a prior call."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/APIKeyInfo"
-                  },
-                  "type": "array",
-                  "title": "Response List Keys Api V1 Auth Api Keys Get"
+                  "$ref": "#/components/schemas/CursorPage_APIKeyInfo_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -3194,6 +3234,41 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "CursorPage_APIKeyInfo_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/APIKeyInfo"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The items on this page."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for the next page. Pass it back as `cursor`. `null` when there are no more items."
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "description": "True when another page is available via `next_cursor`.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CursorPage[APIKeyInfo]"
       }
     }
   },
