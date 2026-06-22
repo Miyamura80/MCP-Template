@@ -170,6 +170,16 @@ def execute_idempotent(
             return _handle_existing(session, user_id, route, key, request_hash)
 
         # We hold the claim: execute the side effect exactly once.
+        #
+        # Crash window: ``compute`` performs the real (often irreversible) side
+        # effect, and it runs between the claim commit above and the result
+        # commit below with no enclosing transaction - the two commits cannot be
+        # made atomic when the side effect is a remote call. If the process dies
+        # after the side effect but before the result is cached, the row is left
+        # in-flight and retries get 409 until the TTL sweep removes it (see
+        # ``_RETENTION``), after which the same key re-executes. This is inherent
+        # to idempotency over external effects; we bound it rather than prevent
+        # it.
         try:
             result = compute()
         except Exception:  # noqa: BLE001
@@ -179,7 +189,9 @@ def execute_idempotent(
             _release(session, user_id, route, key)
             raise
 
-        body = result.model_dump(mode="json")
+        # Match FastAPI's response_model serialization (by_alias=True by default)
+        # so a replayed JSONResponse is byte-identical to the first response.
+        body = result.model_dump(mode="json", by_alias=True)
         session.execute(
             update(IdempotencyRecord)
             .where(

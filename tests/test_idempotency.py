@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -36,6 +36,14 @@ def _make_engine():
 
 class _Out(BaseModel):
     value: int
+
+
+class _Aliased(BaseModel):
+    """Field with a serialization alias - exposes replay/first-response drift."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    snake_value: int = Field(serialization_alias="camelValue")
 
 
 def _request(key: str | None) -> Request:
@@ -283,6 +291,20 @@ class TestIdempotentRouteOverHTTP(TestTemplate):
                 compute=_compute,
             )
 
+        @app.post("/aliased", response_model=_Aliased)
+        def _aliased(body: _Aliased, request: Request):
+            def _compute():
+                counter["n"] += 1
+                return _Aliased(snake_value=counter["n"])
+
+            return execute_idempotent(
+                request=request,
+                user_id="u1",
+                route="aliased",
+                request_payload=body.model_dump(mode="json"),
+                compute=_compute,
+            )
+
         self.client = TestClient(app)
 
     def teardown_method(self):
@@ -302,6 +324,20 @@ class TestIdempotentRouteOverHTTP(TestTemplate):
         )
         assert first.status_code == 200
         assert second.status_code == 200
+        assert first.json() == second.json()
+        assert self.counter["n"] == 1
+
+    def test_replay_preserves_field_aliases(self):
+        # FastAPI serializes response_model with by_alias=True; the cached
+        # replay must use the same aliased keys, not the raw field names.
+        first = self.client.post(
+            "/aliased", json={"snake_value": 0}, headers={"Idempotency-Key": "al"}
+        )
+        second = self.client.post(
+            "/aliased", json={"snake_value": 0}, headers={"Idempotency-Key": "al"}
+        )
+        assert first.status_code == 200
+        assert "camelValue" in first.json()
         assert first.json() == second.json()
         assert self.counter["n"] == 1
 
