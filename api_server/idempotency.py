@@ -1,0 +1,193 @@
+"""Generic ``Idempotency-Key`` support for mutating API routes.
+
+Implements the REST idempotency convention (Stripe / IETF
+draft-ietf-httpapi-idempotency-key-header) on top of the ``idempotency_keys``
+table:
+
+1. Client sends a unique ``Idempotency-Key`` header with a mutating request.
+2. The server *claims* the key by inserting an in-flight row (unique on
+   ``(user_id, route, key)``). A losing concurrent insert means the key is
+   already in use.
+3. On the first request the handler runs, and its response is cached on the
+   row. Retries with the same key replay the cached response instead of
+   re-executing the side effect. Reusing a key with a *different* payload is
+   rejected (422); a still-running request returns 409.
+
+Only the API transport uses this; CLI and MCP are unaffected.
+"""
+
+import hashlib
+import json
+import random
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from loguru import logger as log
+from pydantic import BaseModel
+from sqlalchemy import delete, update
+from sqlalchemy.exc import IntegrityError
+
+from db.engine import use_db_session
+from db.models.idempotency_keys import IdempotencyRecord
+
+# Mirror the DB column width and (loosely) Stripe's own key-length guidance.
+_KEY_MAX_LEN = 255
+# Match Stripe's 24h idempotency window; retries beyond this re-execute.
+_RETENTION = timedelta(days=1)
+# Probability of running an opportunistic TTL sweep after a successful claim.
+_CLEANUP_PROBABILITY = 0.01
+
+
+def _canonical_hash(payload: dict) -> str:
+    """Stable SHA-256 of a request payload, independent of key ordering."""
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def _require_key(request: Request) -> str:
+    key = (request.headers.get("Idempotency-Key") or "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key header is required for this request",
+        )
+    if len(key) > _KEY_MAX_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Idempotency-Key must not exceed {_KEY_MAX_LEN} characters",
+        )
+    return key
+
+
+def _handle_existing(
+    session, user_id: str, route: str, key: str, request_hash: str
+) -> Response:
+    """Resolve a duplicate claim into a replay, conflict, or in-flight error."""
+    existing = session.get(IdempotencyRecord, (user_id, route, key))
+    if existing is None:
+        # The competing transaction rolled back between our failed INSERT and
+        # this read. Treat as a transient conflict; the caller can retry.
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency-Key conflict; please retry the request",
+        )
+    if existing.request_hash != request_hash:
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key was already used with a different request payload",
+        )
+    if existing.completed_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="A request with this Idempotency-Key is still in progress",
+        )
+    return JSONResponse(
+        content=existing.response_body,
+        status_code=existing.status_code or 200,
+    )
+
+
+def _release(session, user_id: str, route: str, key: str) -> None:
+    """Delete a claimed-but-failed row so the caller can retry the same key."""
+    session.rollback()
+    session.execute(
+        delete(IdempotencyRecord).where(
+            IdempotencyRecord.user_id == user_id,
+            IdempotencyRecord.route == route,
+            IdempotencyRecord.idempotency_key == key,
+        )
+    )
+    session.commit()
+
+
+def _maybe_cleanup() -> None:
+    """Best-effort opportunistic TTL sweep, gated to a fraction of requests."""
+    if random.random() >= _CLEANUP_PROBABILITY:
+        return
+    try:
+        cleanup_expired_idempotency_keys()
+    except Exception as exc:  # noqa: BLE001
+        # Opportunistic maintenance must never fail a request that already
+        # succeeded; a transient DB error here is non-fatal.
+        log.warning("Idempotency key cleanup failed: {}", exc)
+
+
+def cleanup_expired_idempotency_keys() -> int:
+    """Delete idempotency rows older than the retention window.
+
+    Returns the number of rows removed. Safe to schedule periodically.
+    """
+    cutoff = datetime.now(UTC) - _RETENTION
+    with use_db_session() as session:
+        result = session.execute(
+            delete(IdempotencyRecord).where(IdempotencyRecord.created_at < cutoff)
+        )
+        session.commit()
+        return result.rowcount or 0  # ty: ignore[unresolved-attribute]
+
+
+def execute_idempotent(
+    *,
+    request: Request,
+    user_id: str,
+    route: str,
+    request_payload: dict,
+    compute: Callable[[], BaseModel],
+) -> Response | BaseModel:
+    """Run ``compute`` at most once per ``Idempotency-Key``, caching its result.
+
+    On the first request the computed model is returned and cached. Retries
+    with the same key replay the cached response; the same key with a different
+    payload returns 422; an in-flight key returns 409. If ``compute`` raises,
+    the claim is released so the request can be retried.
+    """
+    key = _require_key(request)
+    request_hash = _canonical_hash(request_payload)
+
+    with use_db_session() as session:
+        # Claim the key by inserting an in-flight row. A duplicate means the
+        # key is already taken (completed, in-flight, or payload mismatch).
+        try:
+            session.add(
+                IdempotencyRecord(
+                    user_id=user_id,
+                    route=route,
+                    idempotency_key=key,
+                    request_hash=request_hash,
+                )
+            )
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return _handle_existing(session, user_id, route, key, request_hash)
+
+        # We hold the claim: execute the side effect exactly once.
+        try:
+            result = compute()
+        except Exception:  # noqa: BLE001
+            # Any failure (validation, limit, downstream) releases the claim so
+            # the caller can safely retry with the same key. Errors are never
+            # cached. Re-raise to preserve the original status/detail.
+            _release(session, user_id, route, key)
+            raise
+
+        body = result.model_dump(mode="json")
+        session.execute(
+            update(IdempotencyRecord)
+            .where(
+                IdempotencyRecord.user_id == user_id,
+                IdempotencyRecord.route == route,
+                IdempotencyRecord.idempotency_key == key,
+            )
+            .values(
+                status_code=200,
+                response_body=body,
+                completed_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+
+    _maybe_cleanup()
+    return result

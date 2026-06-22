@@ -76,11 +76,13 @@ Layering (top calls down, never the reverse):
 ### Adding a new feature
 
 1. Pydantic models in `models/<feature>.py`.
-2. Pure `@service` function in `services/<feature>_svc.py`.
+2. Pure `@service` function in `services/<feature>_svc.py`. Pass `mutating=True` if it has side effects (create/charge/send).
 3. (CLI) Typer command in `src/cli/commands/<feature>.py` calling the service.
 4. (MCP) Nothing - `mcp_server/server.py` auto-registers on import.
 5. (HTTP, optional) Route in `api_server/routes/`.
 6. Tests inheriting `TestTemplate`.
+
+`mutating=True` services get REST `Idempotency-Key` enforcement on their auto-generated API route: the key is required, claimed in the `idempotency_keys` table, and the response replayed on retries (same key + different payload → 422). API-only; CLI/MCP unaffected. Logic in `api_server/idempotency.py:execute_idempotent`.
 
 ## Code Style
 

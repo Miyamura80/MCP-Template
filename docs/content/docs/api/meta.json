@@ -5,6 +5,7 @@
     "tools",
     "authentication",
     "billing",
+    "idempotency",
     "errors"
   ]
 }
