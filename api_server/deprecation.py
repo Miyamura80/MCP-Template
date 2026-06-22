@@ -37,11 +37,16 @@ from fastapi import Response
 DEPRECATION_POLICY_URL = "https://gmailmcp.com/docs/api/deprecation"
 
 
+def _to_utc(value: datetime) -> datetime:
+    """Normalize to UTC, treating a naive datetime as already-UTC (not local)."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _http_date(value: datetime) -> str:
     """Format a datetime as an IMF-fixdate (RFC 7231), e.g. for ``Sunset``."""
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return format_datetime(value.astimezone(UTC), usegmt=True)
+    return format_datetime(_to_utc(value), usegmt=True)
 
 
 def deprecate(
@@ -54,19 +59,19 @@ def deprecate(
 
     Args:
         since: When the endpoint became deprecated. Emitted as the RFC 9745
-            ``Deprecation`` sf-date; when omitted the header is the token
-            ``true``.
+            ``Deprecation`` sf-date. RFC 9745 has no bare "deprecated" token, so
+            when omitted we default to the time the route is declared (captured
+            once here, stable across requests) rather than emit a non-conformant
+            value.
         sunset: When the endpoint will stop working. Emitted as the RFC 8594
             ``Sunset`` HTTP-date; omitted entirely when ``None``.
         policy_url: Target of the ``Link; rel="deprecation"`` header.
     """
+    effective_since = since if since is not None else datetime.now(UTC)
 
     def _dependency(response: Response) -> None:
-        if since is not None:
-            ts = int(since.astimezone(UTC).timestamp())
-            response.headers["Deprecation"] = f"@{ts}"
-        else:
-            response.headers["Deprecation"] = "true"
+        ts = int(_to_utc(effective_since).timestamp())
+        response.headers["Deprecation"] = f"@{ts}"
         if sunset is not None:
             response.headers["Sunset"] = _http_date(sunset)
         response.headers["Link"] = f'<{policy_url}>; rel="deprecation"'

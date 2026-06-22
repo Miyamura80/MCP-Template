@@ -74,9 +74,11 @@ curl -H "Authorization: Bearer sk_live_..." \
   "http://localhost:8000/api/v1/auth/api-keys?cursor=eyJjIjoiMjAyNS0wMS0xNVQxMDozMDowMCswMDowMCIsImkiOjQyfQ"
 ```
 
-Cursor pagination (rather than `offset`/`page`) keeps results stable while keys
-are created or revoked between fetches, so an agent looping through pages never
-skips or double-counts a key.
+Cursor pagination (rather than `offset`/`page`) avoids duplicate rows under
+concurrent writes and offset drift. It does not provide a point-in-time
+snapshot, so keys created after the walk starts can still be missed by a later
+page fetch. Pass the same `limit` value on each request until `has_more` is
+`false`.
 
 ### Revoke a key
 

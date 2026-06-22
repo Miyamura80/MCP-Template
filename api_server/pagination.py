@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -33,6 +34,9 @@ from sqlalchemy import and_, or_
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+
+# URL-safe base64 alphabet (no padding - we strip and re-add it ourselves).
+_CURSOR_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 @dataclass
@@ -63,6 +67,11 @@ def decode_cursor(cursor: str) -> tuple[datetime, int]:
     Raises ``HTTPException(400)`` on any malformed token so a bad client cursor
     surfaces as a clean validation error rather than a 500.
     """
+    # Reject anything outside the URL-safe base64 alphabet up front;
+    # urlsafe_b64decode silently discards stray bytes rather than failing, so a
+    # malformed cursor would otherwise slip through to a confusing decode error.
+    if not _CURSOR_RE.match(cursor):
+        raise HTTPException(status_code=400, detail="Invalid pagination cursor")
     padded = cursor + "=" * (-len(cursor) % 4)
     try:
         data = json.loads(base64.urlsafe_b64decode(padded))

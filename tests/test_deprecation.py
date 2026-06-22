@@ -20,10 +20,13 @@ def _app_with_route(**kwargs) -> FastAPI:
 
 
 class TestDeprecationHeaders(TestTemplate):
-    def test_deprecation_true_when_no_since(self):
+    def test_defaults_to_sf_date_when_no_since(self):
+        # RFC 9745 has no bare token, so an unspecified `since` still yields an
+        # sf-date (defaulted to declaration time), never "true".
         resp = TestClient(_app_with_route()).get("/legacy")
         assert resp.status_code == 200
-        assert resp.headers["Deprecation"] == "true"
+        assert resp.headers["Deprecation"].startswith("@")
+        assert int(resp.headers["Deprecation"].lstrip("@")) > 0
         assert "Sunset" not in resp.headers
         assert 'rel="deprecation"' in resp.headers["Link"]
         assert DEPRECATION_POLICY_URL in resp.headers["Link"]
@@ -32,6 +35,13 @@ class TestDeprecationHeaders(TestTemplate):
         since = datetime(2025, 10, 1, tzinfo=UTC)
         resp = TestClient(_app_with_route(since=since)).get("/legacy")
         assert resp.headers["Deprecation"] == f"@{int(since.timestamp())}"
+
+    def test_naive_since_treated_as_utc(self):
+        # A naive datetime must be read as UTC, not the server's local zone.
+        naive = datetime(2025, 10, 1, 0, 0, 0)
+        aware = datetime(2025, 10, 1, 0, 0, 0, tzinfo=UTC)
+        resp = TestClient(_app_with_route(since=naive)).get("/legacy")
+        assert resp.headers["Deprecation"] == f"@{int(aware.timestamp())}"
 
     def test_sunset_emitted_as_http_date(self):
         sunset = datetime(2025, 12, 31, 23, 59, 59, tzinfo=UTC)
