@@ -167,11 +167,33 @@ class TestExecuteIdempotent(TestTemplate):
         assert exc.value.status_code == 422
         assert counter["n"] == 0
 
-    def test_compute_failure_releases_claim(self):
-        calls = {"n": 0}
-
+    def test_client_error_releases_claim(self):
+        # A 4xx client error (e.g. quota 402) is raised before the side effect
+        # commits, so the claim is released and a same-key retry runs again.
         def _compute_fail():
-            calls["n"] += 1
+            raise HTTPException(status_code=402, detail="quota")
+
+        with pytest.raises(HTTPException) as exc:
+            execute_idempotent(
+                request=_request("k1"),
+                user_id="u1",
+                route="demo",
+                request_payload={"a": 1},
+                compute=_compute_fail,
+            )
+        assert exc.value.status_code == 402
+
+        # Claim was released: a retry with the same key runs compute again.
+        counter = {"n": 0}
+        result = self._run("k1", {"a": 1}, counter)
+        assert result.value == 1
+        assert counter["n"] == 1
+
+    def test_ambiguous_failure_keeps_claim(self):
+        # A 5xx / ambiguous failure may have committed the side effect remotely,
+        # so the claim is kept: a same-key retry returns 409 and does NOT
+        # re-execute compute.
+        def _compute_fail():
             raise HTTPException(status_code=503, detail="boom")
 
         with pytest.raises(HTTPException) as exc:
@@ -184,11 +206,11 @@ class TestExecuteIdempotent(TestTemplate):
             )
         assert exc.value.status_code == 503
 
-        # Claim was released: a retry with the same key runs compute again.
         counter = {"n": 0}
-        result = self._run("k1", {"a": 1}, counter)
-        assert result.value == 1
-        assert counter["n"] == 1
+        with pytest.raises(HTTPException) as retry:
+            self._run("k1", {"a": 1}, counter)
+        assert retry.value.status_code == 409
+        assert counter["n"] == 0
 
     def test_in_flight_returns_409(self):
         # Simulate a claimed-but-not-completed row from a concurrent request.

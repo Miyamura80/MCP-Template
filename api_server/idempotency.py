@@ -146,8 +146,11 @@ def execute_idempotent(
 
     On the first request the computed model is returned and cached. Retries
     with the same key replay the cached response; the same key with a different
-    payload returns 422; an in-flight key returns 409. If ``compute`` raises,
-    the claim is released so the request can be retried.
+    payload returns 422; an in-flight key returns 409. If ``compute`` raises a
+    client error (HTTP 4xx, e.g. quota/validation) the claim is released so the
+    request can be retried; ambiguous failures (5xx, network errors that may
+    have already committed an irreversible side effect) keep the claim so a
+    retry returns 409 rather than re-executing.
     """
     key = _require_key(request)
     request_hash = _canonical_hash(request_payload)
@@ -182,12 +185,21 @@ def execute_idempotent(
         # it.
         try:
             result = compute()
-        except Exception:  # noqa: BLE001
-            # Any failure (validation, limit, downstream) releases the claim so
-            # the caller can safely retry with the same key. Errors are never
-            # cached. Re-raise to preserve the original status/detail.
-            _release(session, user_id, route, key)
+        except HTTPException as exc:
+            # Client errors (4xx: quota 402, validation 422, bad input 400) are
+            # raised before the side effect commits, so release the claim for a
+            # clean same-key retry. A 5xx HTTPException is ambiguous and falls
+            # through to the no-release path below. Errors are never cached.
+            if exc.status_code < 500:
+                _release(session, user_id, route, key)
             raise
+        # Any other failure - a 5xx HTTPException, a network drop, or an
+        # unexpected exception - is *ambiguous*: the side effect may already
+        # have committed remotely (e.g. Gmail accepted the send before the
+        # connection dropped). We deliberately do NOT release the claim, so a
+        # same-key retry returns 409 instead of re-executing an irreversible
+        # operation; the wedged row clears via the TTL sweep. The exception
+        # propagates out of the ``use_db_session`` context with the claim intact.
 
         # Match FastAPI's response_model serialization (by_alias=True by default)
         # so a replayed JSONResponse is byte-identical to the first response.
