@@ -146,6 +146,9 @@ class TestAPIServer(TestTemplate):
 
         assert len(checks) >= 1
         assert len(dones) == 1
+        # Ordering contract: every check streams before the terminal `done`.
+        assert events[-1]["event"] == "done"
+        assert all(e["event"] == "check" for e in events[:-1])
 
         first = json.loads(checks[0]["data"])
         assert "name" in first
