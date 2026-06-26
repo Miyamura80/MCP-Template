@@ -24,6 +24,9 @@ from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
 from models.gmail import (
+    AttachmentInput,
+    AttachmentReference,
+    GmailAddAttachmentInput,
     GmailComposeInput,
     GmailCurateInboxInput,
     GmailDiscardDraftInput,
@@ -31,8 +34,13 @@ from models.gmail import (
     GmailGetThreadInput,
     GmailListDraftsInput,
     GmailListInboxInput,
+    GmailRemoveAttachmentInput,
     GmailSendInput,
     GmailUpdateDraftInput,
+)
+from services.gmail_attachments_svc import (
+    gmail_add_attachment,
+    gmail_remove_attachment,
 )
 from services.gmail_drafts_svc import (
     GmailReplyInput,
@@ -159,6 +167,68 @@ def _draft_resource(
     }
 
 
+def _draft_resource_with_attachment(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    body: str = "hello world",
+    thread_id: str = "t-1",
+    attachment_id: str = "att-1",
+    filename: str = "report.pdf",
+    mime_type: str = "application/pdf",
+    size: int = 1024,
+    cc: str | None = None,
+) -> dict:
+    """A draft whose message is multipart/mixed with one named attachment."""
+    headers = {"To": to, "Subject": subject}
+    if cc is not None:
+        headers["Cc"] = cc
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": body[:50],
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "headers": _headers(headers),
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": _b64url(body), "size": len(body)},
+                    },
+                    {
+                        "mimeType": mime_type,
+                        "filename": filename,
+                        "body": {"attachmentId": attachment_id, "size": size},
+                    },
+                ],
+            },
+        },
+    }
+
+
+def _gmail_attachment_blob(raw: bytes = b"PDFBYTES") -> dict:
+    """Mimic ``messages().attachments().get()`` - base64url data, padding stripped."""
+    data = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return {"data": data, "size": len(raw)}
+
+
+def _attachment_filenames_in_raw(raw_b64: str) -> list[str]:
+    """Filenames of attachment parts inside a base64url-encoded MIME message."""
+    mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+    return [name for p in mime.walk() if (name := p.get_filename())]
+
+
+def _last_update_raw(mock: MagicMock) -> str:
+    """The raw MIME of the most recent ``drafts().update(body=...)`` call."""
+    update_calls = [c for c in mock.users().drafts().update.call_args_list if c.kwargs]
+    assert update_calls, "drafts().update() was not called with kwargs"
+    return update_calls[-1].kwargs["body"]["message"]["raw"]
+
+
 def _make_mock_service() -> MagicMock:
     """A MagicMock that supports the chained ``.users().drafts().get().execute()`` style."""
     mock = MagicMock()
@@ -269,6 +339,9 @@ def _patch_client(mock_svc: MagicMock):
         patch("services.gmail_svc._get_gmail_client", return_value=mock_svc),
         patch("services.gmail_drafts_svc._get_gmail_client", return_value=mock_svc),
         patch("services.gmail_messages_svc._get_gmail_client", return_value=mock_svc),
+        patch(
+            "services.gmail_attachments_svc._get_gmail_client", return_value=mock_svc
+        ),
     ]
 
 
@@ -978,6 +1051,353 @@ class TestGmailReplyToThread(TestTemplate):
                 with pytest.raises(ValueError, match="no messages"):
                     gmail_reply_to_thread(
                         GmailReplyInput(user_id="alice", thread_id="t-empty")
+                    )
+            finally:
+                _stop(patches)
+
+
+# ---------------------------------------------------------------------------
+# Non-destructive update + stable attachment handles (this change)
+# ---------------------------------------------------------------------------
+
+
+def _new_upload(filename: str = "new.txt", body: bytes = b"NEWFILE") -> AttachmentInput:
+    return AttachmentInput(
+        filename=filename,
+        mime_type="text/plain",
+        data_base64=base64.urlsafe_b64encode(body).decode("ascii"),
+    )
+
+
+class TestUpdateDraftPreservesAttachments(TestTemplate):
+    """Acceptance: updating only the body leaves an existing attachment intact."""
+
+    def test_omitting_attachments_reattaches_existing_file(self):
+        original = _draft_resource_with_attachment(body="Original body")
+        echoed = _draft_resource_with_attachment(body="New body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                draft = gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", body="New body"
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        # The raw MIME actually sent to Gmail still carries the file (proof the
+        # bytes were re-downloaded and re-attached, not dropped).
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == ["report.pdf"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Subject"] == "hi"
+        # The existing attachment bytes were re-fetched from the current message.
+        mock.users().messages().attachments().get.assert_called()
+
+        # Response echoes the live attachment metadata - no follow-up get needed.
+        assert len(draft.attachments) == 1
+        assert draft.attachments[0].filename == "report.pdf"
+        assert draft.attachments[0].size_bytes == 1024
+        assert draft.attachments[0].attachment_id == "att-1"
+        assert draft.body_preview == "New body"
+
+    def test_explicit_null_clears_attachments(self):
+        original = _draft_resource_with_attachment(body="body")
+        echoed = _draft_resource(draft_id="d-1", to="b@y", subject="hi", body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                draft = gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", attachments=None
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == []
+        assert draft.attachments == []
+
+    def test_explicit_null_clears_a_scalar_field(self):
+        original = _draft_resource(
+            draft_id="d-1", to="b@y", subject="Keep me", body="hi"
+        )
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", subject=None
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        mime = message_from_bytes(
+            base64.urlsafe_b64decode(_last_update_raw(mock).encode("ascii"))
+        )
+        # Cleared subject -> empty header; To preserved.
+        assert (mime["Subject"] or "") == ""
+        assert mime["To"] == "b@y"
+
+    def test_attachment_by_reference_preserves_without_reupload(self):
+        original = _draft_resource_with_attachment(body="body")
+        echoed = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        body="body",
+                        attachments=[AttachmentReference(attachment_id="att-1")],
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == ["report.pdf"]
+        # Referenced by id -> bytes pulled from the existing message.
+        get_call = mock.users().messages().attachments().get.call_args_list[-1]
+        assert get_call.kwargs["id"] == "att-1"
+
+    def test_reference_to_unknown_id_raises(self):
+        original = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="not on draft"):
+                    gmail_update_draft(
+                        GmailUpdateDraftInput(
+                            user_id="alice",
+                            draft_id="d-1",
+                            attachments=[AttachmentReference(attachment_id="nope")],
+                        )
+                    )
+            finally:
+                _stop(patches)
+
+    def test_mix_reference_and_new_upload(self):
+        original = _draft_resource_with_attachment(body="body")
+        echoed = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachments=[
+                            AttachmentReference(attachment_id="att-1"),
+                            _new_upload(filename="extra.txt"),
+                        ],
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert sorted(_attachment_filenames_in_raw(raw)) == ["extra.txt", "report.pdf"]
+
+
+class TestEditBodyRepeatedlyKeepsAttachment(TestTemplate):
+    """Acceptance: change the body three times without re-uploading or losing the file."""
+
+    def test_three_body_edits_in_a_row(self):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            # The server always reports the file still on the draft.
+            mock.users().drafts().get().execute.return_value = (
+                _draft_resource_with_attachment(body="v0")
+            )
+            mock.users().drafts().update().execute.return_value = (
+                _draft_resource_with_attachment(body="vN")
+            )
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            drafts = []
+            try:
+                for new_body in ("v1", "v2", "v3"):
+                    drafts.append(
+                        gmail_update_draft(
+                            GmailUpdateDraftInput(
+                                user_id="alice", draft_id="d-1", body=new_body
+                            )
+                        )
+                    )
+                    # Each round re-attaches the file in the outgoing MIME.
+                    assert _attachment_filenames_in_raw(_last_update_raw(mock)) == [
+                        "report.pdf"
+                    ]
+            finally:
+                _stop(patches)
+
+        # Three edits happened, and the file is still present at the end -
+        # without ever supplying attachment bytes.
+        assert len(drafts) == 3
+        assert len(drafts[-1].attachments) == 1
+        assert drafts[-1].attachments[0].filename == "report.pdf"
+
+
+class TestAddRemoveAttachment(TestTemplate):
+    def test_add_attachment_appends_and_keeps_content(self):
+        original = _draft_resource_with_attachment(
+            body="Keep this body", subject="Keep subj", to="keep@x"
+        )
+        echoed = _draft_resource_with_attachment(body="Keep this body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_add_attachment(
+                    GmailAddAttachmentInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachment=_new_upload(filename="added.txt"),
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        # Both the existing and the newly-added file are present.
+        assert sorted(_attachment_filenames_in_raw(raw)) == ["added.txt", "report.pdf"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        # Content fields untouched.
+        assert mime["To"] == "keep@x"
+        assert mime["Subject"] == "Keep subj"
+        body_part = next(
+            p for p in mime.walk() if p.get_content_type() == "text/plain"
+        )
+        decoded = body_part.get_payload(decode=True)
+        assert isinstance(decoded, bytes)
+        assert "Keep this body" in decoded.decode("utf-8")
+        assert result.draft_id == "d-1"
+        assert isinstance(result.attachments, list)
+
+    def test_remove_attachment_drops_only_that_file(self):
+        original = _draft_resource_with_attachment(
+            body="Body stays", subject="Subj stays", to="stay@x"
+        )
+        echoed = _draft_resource(draft_id="d-1", to="stay@x", subject="Subj stays", body="Body stays")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_remove_attachment(
+                    GmailRemoveAttachmentInput(
+                        user_id="alice", draft_id="d-1", attachment_id="att-1"
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == []
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["To"] == "stay@x"
+        assert mime["Subject"] == "Subj stays"
+        assert result.attachments == []
+
+    def test_remove_unknown_attachment_raises(self):
+        original = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="not on draft"):
+                    gmail_remove_attachment(
+                        GmailRemoveAttachmentInput(
+                            user_id="alice", draft_id="d-1", attachment_id="ghost"
+                        )
                     )
             finally:
                 _stop(patches)

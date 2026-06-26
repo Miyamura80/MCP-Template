@@ -10,6 +10,7 @@ from mcp_server.app_tools._auth_guard import guard_user_id
 from mcp_server.server import mcp
 from models.gmail import (
     AttachmentInput,
+    AttachmentReference,
     GmailDiscardDraftInput,
     GmailDiscardDraftResult,
     GmailDraft,
@@ -56,7 +57,9 @@ def save_draft(
     attachments: list[dict] | None = None,
 ) -> GmailDraft:
     uid = guard_user_id(user_id)
-    atts = [AttachmentInput(**a) for a in attachments] if attachments else None
+    atts: list[AttachmentInput | AttachmentReference] | None = (
+        [AttachmentInput(**a) for a in attachments] if attachments else None
+    )
     return _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,
@@ -87,7 +90,9 @@ def send(
     attachments: list[dict] | None = None,
 ) -> GmailSendResult:
     uid = guard_user_id(user_id)
-    atts = [AttachmentInput(**a) for a in attachments] if attachments else None
+    atts: list[AttachmentInput | AttachmentReference] | None = (
+        [AttachmentInput(**a) for a in attachments] if attachments else None
+    )
     _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,

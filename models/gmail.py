@@ -7,7 +7,7 @@ a later wiring step (we deliberately do not use ContextVars).
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # ---------------------------------------------------------------------------
 # Connect / status / disconnect
@@ -73,6 +73,22 @@ class AttachmentInput(BaseModel):
     )
 
 
+class AttachmentReference(BaseModel):
+    """Reference to an attachment already present on a draft, by its stable id.
+
+    Pass this (instead of an ``AttachmentInput``) in ``gmail_update_draft`` to
+    keep an existing file on the draft without re-uploading its bytes. The
+    ``attachment_id`` comes from the ``attachments[].attachment_id`` echoed by
+    any prior draft mutation (compose / update / add / remove) or
+    ``gmail_get_draft``.
+    """
+
+    attachment_id: str = Field(
+        description="Stable id of an attachment already on the draft to preserve",
+        min_length=1,
+    )
+
+
 class GmailListDraftsInput(BaseModel):
     user_id: str = ""
     limit: int = Field(default=20, ge=1, le=500)
@@ -96,13 +112,25 @@ class GmailGetDraftInput(BaseModel):
 
 
 class GmailDraftAttachment(BaseModel):
-    """Metadata for an attachment already on a draft (read-only, no data blob)."""
+    """Metadata for an attachment already on a draft (read-only, no data blob).
+
+    ``attachment_id`` is the stable handle for the file: pass it back as an
+    ``AttachmentReference`` to ``gmail_update_draft`` (or to
+    ``gmail_remove_attachment``) to preserve / remove the file without
+    re-uploading its bytes.
+    """
 
     filename: str | None = None
     mime_type: str | None = None
     size: int | None = None
     attachment_id: str | None = None
     message_id: str | None = None
+
+    @computed_field
+    @property
+    def size_bytes(self) -> int | None:
+        """Alias of ``size`` (bytes) in the contract every transport returns."""
+        return self.size
 
 
 class GmailDraft(BaseModel):
@@ -115,8 +143,30 @@ class GmailDraft(BaseModel):
     thread_id: str | None = None
     attachments: list[GmailDraftAttachment] = Field(default_factory=list)
 
+    @computed_field
+    @property
+    def body_preview(self) -> str | None:
+        """First ~200 chars of the body, so callers can verify content cheaply."""
+        if self.body is None:
+            return None
+        return self.body[:200]
+
 
 class GmailUpdateDraftInput(BaseModel):
+    """Patch input for ``gmail_update_draft``.
+
+    Non-destructive by default: a field you omit is left unchanged on the
+    draft; a field you set to ``null`` is cleared. This applies to ``to``,
+    ``cc``, ``bcc``, ``subject``, ``body``, and ``attachments``.
+
+    ``attachments`` accepts a mix of new uploads (``AttachmentInput`` with
+    base64 bytes) and references to files already on the draft
+    (``AttachmentReference`` with just an ``attachment_id``), so a caller can
+    edit the body repeatedly without re-uploading attachments. Omit
+    ``attachments`` to keep every existing file; pass ``null`` (or ``[]``) to
+    drop them all.
+    """
+
     user_id: str = ""
     draft_id: str
     to: str | None = None
@@ -124,7 +174,40 @@ class GmailUpdateDraftInput(BaseModel):
     body: str | None = None
     cc: str | None = None
     bcc: str | None = None
-    attachments: list[AttachmentInput] | None = None
+    attachments: list[AttachmentInput | AttachmentReference] | None = None
+
+
+class GmailAddAttachmentInput(BaseModel):
+    """Input for ``gmail_add_attachment``: append one file to a draft.
+
+    Touches only the attachment list - body, subject, and recipients are
+    preserved verbatim.
+    """
+
+    user_id: str = ""
+    draft_id: str
+    attachment: AttachmentInput
+
+
+class GmailRemoveAttachmentInput(BaseModel):
+    """Input for ``gmail_remove_attachment``: drop one file from a draft by id.
+
+    Touches only the attachment list - body, subject, and recipients are
+    preserved verbatim.
+    """
+
+    user_id: str = ""
+    draft_id: str
+    attachment_id: str = Field(
+        description="Stable id of the attachment to remove", min_length=1
+    )
+
+
+class GmailDraftAttachmentsResult(BaseModel):
+    """The draft's attachment list after an add/remove operation."""
+
+    draft_id: str
+    attachments: list[GmailDraftAttachment] = Field(default_factory=list)
 
 
 class GmailComposeInput(BaseModel):

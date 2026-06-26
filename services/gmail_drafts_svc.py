@@ -24,7 +24,6 @@ from models.gmail import (
     GmailDiscardDraftInput,
     GmailDiscardDraftResult,
     GmailDraft,
-    GmailDraftAttachment,
     GmailGetDraftInput,
     GmailListDraftsInput,
     GmailListDraftsResult,
@@ -36,6 +35,11 @@ from models.gmail import (
     GmailDraftSummary as _DraftSummary,
 )
 from services import service
+from services.gmail_draft_helpers import (
+    _draft_resource_to_model,
+    _rebuild_draft,
+    _resolve_update_attachments,
+)
 from services.gmail_svc import (
     _build_raw_message,
     _get_gmail_client,
@@ -46,34 +50,6 @@ from services.gmail_svc import (
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _draft_resource_to_model(draft: dict[str, Any]) -> GmailDraft:
-    """Map a Gmail ``drafts.get(format=full)`` payload to ``GmailDraft``."""
-    msg = draft.get("message") or {}
-    parsed = _parse_message_resource(msg)
-    msg_id = parsed.get("message_id") or ""
-    atts = [
-        GmailDraftAttachment(
-            filename=a.get("filename"),
-            mime_type=a.get("mime_type"),
-            size=a.get("size"),
-            attachment_id=a.get("attachment_id"),
-            message_id=msg_id,
-        )
-        for a in parsed.get("attachments") or []
-        if a.get("filename")
-    ]
-    return GmailDraft(
-        draft_id=draft.get("id") or "",
-        thread_id=parsed.get("thread_id"),
-        to=parsed.get("to"),
-        cc=parsed.get("cc"),
-        bcc=None,  # Gmail does not echo Bcc back to the sender
-        subject=parsed.get("subject"),
-        body=parsed.get("body_text"),
-        attachments=atts,
-    )
 
 
 def _draft_summary_from_metadata(draft: dict[str, Any]) -> _DraftSummary:
@@ -166,12 +142,36 @@ def gmail_get_draft(input: GmailGetDraftInput) -> GmailDraft:
 
 @service(
     name="gmail_update_draft",
-    description="Patch fields on an existing Gmail draft and open an interactive composer UI. ALWAYS call this tool to write or edit draft content - NEVER compose email text as plain chat text. The tool renders an interactive composer where the user can review, edit, and send. Pass your composed text in the 'body' parameter. Keep your chat response to one brief sentence since the user can edit in the UI.",
+    description=(
+        "Patch fields on an existing Gmail draft and open an interactive "
+        "composer UI. Non-destructive by default: any field you OMIT is left "
+        "unchanged on the draft, and a field set to null is CLEARED - this "
+        "holds for to, cc, bcc, subject, body, and attachments. Omit "
+        "'attachments' to keep every existing file untouched (so you can edit "
+        "the body repeatedly without re-uploading); pass null or [] to drop "
+        "them all. 'attachments' may mix new uploads (filename + mime_type + "
+        "data_base64) with references to existing files ({attachment_id}) taken "
+        "from a prior response, letting you preserve specific files by id. To "
+        "add or remove a single file without touching the body, prefer "
+        "gmail_add_attachment / gmail_remove_attachment. The returned draft "
+        "echoes the saved state (recipients, subject, body_preview, and the "
+        "full attachment list with ids/filenames/sizes). ALWAYS call this tool "
+        "to write or edit draft content - NEVER compose email text as plain "
+        "chat text. Pass your composed text in the 'body' parameter. Keep your "
+        "chat response to one brief sentence since the user can edit in the UI."
+    ),
     input_model=GmailUpdateDraftInput,
     output_model=GmailDraft,
 )
 def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
-    """Patch fields on a draft, preserving anything the caller left as ``None``."""
+    """Patch a draft non-destructively: omitted fields stay, null clears them.
+
+    Distinguishes "omitted" from "explicit null" via ``model_fields_set`` so a
+    caller can change just the body without disturbing recipients, subject, or
+    attachments. Because Gmail's ``drafts().update`` replaces the entire MIME
+    message, existing attachments are re-downloaded and re-attached unless the
+    caller explicitly clears or overrides them.
+    """
     svc = _get_gmail_client(input.user_id)
     current = (
         svc.users()
@@ -179,42 +179,49 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
         .get(userId="me", id=input.draft_id, format="full")
         .execute()
     )
-    parsed = _parse_message_resource(current.get("message") or {})
+    message = current.get("message") or {}
+    parsed = _parse_message_resource(message)
+    message_id = message.get("id") or parsed.get("message_id") or ""
 
-    to = input.to if input.to is not None else (parsed.get("to") or "")
-    subject = (
-        input.subject if input.subject is not None else (parsed.get("subject") or "")
-    )
-    body = input.body if input.body is not None else (parsed.get("body_text") or "")
-    cc = input.cc if input.cc is not None else parsed.get("cc")
-    bcc = input.bcc  # Gmail never echoes Bcc; only update when explicitly set
+    fields_set = input.model_fields_set
+    to = (input.to if "to" in fields_set else parsed.get("to")) or ""
+    subject = (input.subject if "subject" in fields_set else parsed.get("subject")) or ""
+    body = (input.body if "body" in fields_set else parsed.get("body_text")) or ""
+    cc = input.cc if "cc" in fields_set else parsed.get("cc")
+    # Gmail never echoes Bcc back, so it cannot be preserved across a rebuild;
+    # only honor an explicitly-supplied value.
+    bcc = input.bcc if "bcc" in fields_set else None
 
-    raw = _build_raw_message(
+    attachment_uploads = _resolve_update_attachments(svc, message_id, parsed, input)
+
+    return _rebuild_draft(
+        svc,
+        draft_id=input.draft_id,
+        parsed=parsed,
         to=to,
         subject=subject,
         body=body,
         cc=cc,
         bcc=bcc,
-        attachments=input.attachments if input.attachments is not None else None,
+        attachment_uploads=attachment_uploads,
     )
-
-    body_dict: dict[str, Any] = {"message": {"raw": raw}}
-    thread_id = parsed.get("thread_id")
-    if thread_id:
-        body_dict["message"]["threadId"] = thread_id
-
-    updated = (
-        svc.users()
-        .drafts()
-        .update(userId="me", id=input.draft_id, body=body_dict)
-        .execute()
-    )
-    return _draft_resource_to_model(updated)
 
 
 @service(
     name="gmail_compose",
-    description="Create a new Gmail draft from the given fields. ALWAYS use this tool instead of composing email text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
+    description=(
+        "Create a new Gmail draft from the given fields and open an interactive "
+        "composer UI. Returns the draft's actual saved state - draft_id, "
+        "thread_id, recipients, subject, a body_preview, and the attachment list "
+        "(each with attachment_id, filename, mime_type, size_bytes) - so you can "
+        "verify what was saved without a follow-up gmail_get_draft. To edit it "
+        "afterward use gmail_update_draft, which preserves omitted fields and "
+        "keeps attachments unless you clear them. ALWAYS use this tool instead "
+        "of composing email text in chat - it creates a real Gmail draft where "
+        "the user can review, edit, and send. When an interactive UI is rendered "
+        "alongside the result, keep your text response brief since the user can "
+        "edit in the UI."
+    ),
     input_model=GmailComposeInput,
     output_model=GmailDraft,
 )
