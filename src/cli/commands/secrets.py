@@ -74,7 +74,7 @@ def _mask_value(value: str) -> str:
     epilog=examples_epilog(
         "mymcp secrets set OPENAI_API_KEY sk-...",
         "echo sk-... | mymcp secrets set OPENAI_API_KEY --stdin",
-        "mymcp secrets set OPENAI_API_KEY --dry-run",
+        "mymcp --dry-run secrets set OPENAI_API_KEY sk-...",
     ),
 )
 def set_secret(
@@ -143,7 +143,7 @@ def get_secret(
 @app.command(
     epilog=examples_epilog(
         "mymcp secrets delete OPENAI_API_KEY",
-        "mymcp secrets delete OPENAI_API_KEY --dry-run",
+        "mymcp --dry-run secrets delete OPENAI_API_KEY",
     )
 )
 def delete(
@@ -157,7 +157,11 @@ def delete(
     try:
         keyring.delete_password(_SERVICE_NAME, key)
     except keyring.errors.PasswordDeleteError:
-        # Idempotent: deleting an absent secret is a no-op success.
+        # A delete error on a key that is actually gone is the idempotent no-op
+        # case. If the secret is still present, the backend genuinely failed -
+        # surface that instead of silently claiming a no-op success.
+        if keyring.get_password(_SERVICE_NAME, key) is not None:
+            raise
         _untrack_key(key)
         if not is_quiet():
             console.print(f"[dim]No-op:[/dim] {key} not present")
@@ -169,7 +173,7 @@ def delete(
         console.print(f"[green]Deleted[/green] {key}")
 
 
-@app.command("list", epilog=examples_epilog("mymcp secrets list --format json"))
+@app.command("list", epilog=examples_epilog("mymcp --format json secrets list"))
 def list_secrets() -> None:
     """List stored secret key names (never values)."""
     keys = _get_tracked_keys()
@@ -191,12 +195,36 @@ def list_secrets() -> None:
     render(rows, title="Secrets")
 
 
+def _load_import_values(
+    file: str, *, use_stdin: bool, interactive: bool
+) -> tuple[dict[str, str | None], str]:
+    """Load .env values from stdin or a file, validating the stdin combination."""
+    if not use_stdin:
+        return dotenv_values(file), file
+
+    # Reading the .env body from stdin consumes it, so per-key confirmation has
+    # nowhere to read answers from - reject the contradiction up front.
+    if interactive:
+        console.print(
+            "[red]Error:[/red] --interactive cannot be used with --stdin "
+            "(stdin is consumed reading the .env body)."
+        )
+        raise typer.Exit(code=2)
+    if sys.stdin.isatty():
+        console.print(
+            "[red]Error:[/red] --stdin given but stdin is a terminal; "
+            "pipe a .env in, e.g. cat .env | mymcp secrets import --stdin"
+        )
+        raise typer.Exit(code=2)
+    return dotenv_values(stream=io.StringIO(sys.stdin.read())), "stdin"
+
+
 @app.command(
     "import",
     epilog=examples_epilog(
         "mymcp secrets import --file .env",
         "cat .env | mymcp secrets import --stdin",
-        "mymcp secrets import --file .env --dry-run",
+        "mymcp --dry-run secrets import --file .env",
     ),
 )
 def import_secrets(
@@ -214,16 +242,14 @@ def import_secrets(
     ] = False,
 ) -> None:
     """Import secrets from a .env file (or stdin) into the OS keyring."""
-    if use_stdin:
-        values = dotenv_values(stream=io.StringIO(sys.stdin.read()))
-        source = "stdin"
-    else:
-        values = dotenv_values(file)
-        source = file
+    values, source = _load_import_values(
+        file, use_stdin=use_stdin, interactive=interactive
+    )
     if not values:
         console.print(f"[yellow]No values found in {source}[/yellow]")
         return
 
+    dry = is_dry_run()
     imported = 0
     skipped = 0
     for key, value in values.items():
@@ -231,13 +257,14 @@ def import_secrets(
             skipped += 1
             continue
 
-        if interactive:
+        # Don't prompt during a dry-run preview - it makes no changes to confirm.
+        if interactive and not dry:
             confirm = typer.confirm(f"Import {key}?")
             if not confirm:
                 skipped += 1
                 continue
 
-        if is_dry_run():
+        if dry:
             imported += 1
             continue
 
@@ -246,12 +273,15 @@ def import_secrets(
         imported += 1
 
     if not is_quiet():
-        prefix = (
-            "[yellow][DRY RUN][/yellow] Would import" if is_dry_run() else "Imported"
-        )
-        console.print(
-            f"[green]{prefix} {imported} secret(s)[/green], skipped {skipped}"
-        )
+        if dry:
+            console.print(
+                f"[yellow][DRY RUN][/yellow] Would import {imported} secret(s), "
+                f"skipped {skipped}"
+            )
+        else:
+            console.print(
+                f"[green]Imported {imported} secret(s)[/green], skipped {skipped}"
+            )
 
 
 @app.command(

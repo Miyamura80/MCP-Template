@@ -14,7 +14,7 @@ console = Console(stderr=True)
 EPILOG = examples_epilog(
     "mymcp doctor",
     "mymcp doctor --fix",
-    "mymcp doctor --format json",
+    "mymcp --format json doctor",
 )
 
 

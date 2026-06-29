@@ -17,7 +17,7 @@ console = Console(stderr=True)
 @app.command(
     epilog=examples_epilog(
         "mymcp config show",
-        "mymcp config show --format json",
+        "mymcp --format json config show",
     )
 )
 def show() -> None:
@@ -34,7 +34,7 @@ def show() -> None:
 @app.command(
     epilog=examples_epilog(
         "mymcp config get llm_config.default_model",
-        "mymcp config get llm_config.cache_enabled --format json",
+        "mymcp --format json config get llm_config.cache_enabled",
     )
 )
 def get(
@@ -66,7 +66,7 @@ def get(
     epilog=examples_epilog(
         "mymcp config set llm_config.cache_enabled true",
         "echo true | mymcp config set llm_config.cache_enabled --stdin",
-        "mymcp config set llm_config.default_model gpt-4o --dry-run",
+        "mymcp --dry-run config set llm_config.default_model gpt-4o",
     ),
 )
 def set_value(

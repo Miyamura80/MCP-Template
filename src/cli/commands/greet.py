@@ -12,7 +12,7 @@ from src.utils.output import render
 EPILOG = examples_epilog(
     "mymcp greet Ada",
     "mymcp greet Ada --shout --times 3",
-    "mymcp greet Ada --dry-run",
+    "mymcp --dry-run greet Ada",
 )
 
 

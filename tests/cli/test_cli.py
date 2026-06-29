@@ -79,6 +79,29 @@ class TestCLI(TestTemplate):
         assert result.exit_code == 1
         assert "no value" in result.output
 
+    def test_config_set_via_dash_sentinel_dry_run(self):
+        result = runner.invoke(
+            app,
+            ["--dry-run", "config", "set", "llm_config.cache_enabled", "-"],
+            input="true\n",
+        )
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+        assert "true" in result.output
+
+    def test_help_shows_examples(self):
+        for cmd in (["greet"], ["doctor"], ["config", "set"], ["secrets", "set"]):
+            result = runner.invoke(app, [*cmd, "--help"])
+            assert result.exit_code == 0
+            assert "Examples:" in result.output
+
+    def test_help_examples_are_runnable(self):
+        # Global flags (--dry-run/--format) must precede the subcommand, or the
+        # example fails with exit 2. Pin the corrected ordering.
+        result = runner.invoke(app, ["greet", "--help"])
+        assert "mymcp --dry-run greet" in result.output
+        assert "mymcp greet Ada --dry-run" not in result.output
+
     def test_format_json(self):
         result = runner.invoke(app, ["--format", "json", "config", "show"])
         assert result.exit_code == 0
