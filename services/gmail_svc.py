@@ -30,7 +30,7 @@ from common import global_config
 from db.engine import use_db_session
 from db.models.google_tokens import GoogleToken
 from models.gmail import (
-    AttachmentInput,
+    AttachmentUpload,
     GmailConnectInput,
     GmailConnectResult,
     GmailDisconnectInput,
@@ -343,12 +343,13 @@ def _build_raw_message(
     to: str,
     subject: str,
     body: str,
+    body_html: str | None = None,
     cc: str | None = None,
     bcc: str | None = None,
     in_reply_to_thread_id: str | None = None,  # noqa: ARG001 - threadId travels on the wrapper, not headers
     in_reply_to: str | None = None,
     references: str | None = None,
-    attachments: list[Any] | None = None,
+    attachments: list[AttachmentUpload] | None = None,
 ) -> str:
     """Return a base64-url-encoded MIME message for ``drafts.create`` / ``messages.send``.
 
@@ -357,9 +358,13 @@ def _build_raw_message(
     than Gmail also thread the conversation. Gmail itself uses ``threadId`` on
     the API wrapper; these headers are belt-and-braces for the recipient.
 
-    When ``attachments`` is non-empty the message becomes multipart/mixed with
-    the text body as the first part and each attachment as a subsequent part.
-    Each attachment object must have ``filename``, ``mime_type``, and ``data_base64``.
+    Body shape: pass ``body`` (plain text) and/or ``body_html``. With both, the
+    message is multipart/alternative; with only ``body_html`` it is an HTML
+    message (so HTML-only drafts survive a rebuild); otherwise it is plain text.
+
+    When ``attachments`` is non-empty the message additionally becomes
+    multipart/mixed. Each attachment is an ``AttachmentUpload`` with
+    ``filename``, ``mime_type``, and base64url ``data_base64``.
     """
     msg = EmailMessage()
     msg["To"] = to
@@ -372,25 +377,25 @@ def _build_raw_message(
         msg["In-Reply-To"] = in_reply_to
     if references:
         msg["References"] = references
-    msg.set_content(body, subtype="plain", charset="utf-8")
+
+    if body_html and body:
+        msg.set_content(body, subtype="plain", charset="utf-8")
+        msg.add_alternative(body_html, subtype="html", charset="utf-8")
+    elif body_html:
+        msg.set_content(body_html, subtype="html", charset="utf-8")
+    else:
+        msg.set_content(body, subtype="plain", charset="utf-8")
 
     for att in attachments or []:
-        if isinstance(att, AttachmentInput):
-            filename = att.filename
-            mime_type = att.mime_type
-            data = base64.urlsafe_b64decode(
-                att.data_base64 + "=" * (-len(att.data_base64) % 4)
-            )
-        else:
-            filename = att.get("filename", "attachment")
-            mime_type = att.get("mime_type", "application/octet-stream")
-            raw_b64 = att.get("data_base64", "")
-            data = base64.urlsafe_b64decode(raw_b64 + "=" * (-len(raw_b64) % 4))
-
-        maintype, _, subtype = mime_type.partition("/")
+        data = base64.urlsafe_b64decode(
+            att.data_base64 + "=" * (-len(att.data_base64) % 4)
+        )
+        maintype, _, subtype = att.mime_type.partition("/")
         if not subtype:
             maintype, subtype = "application", "octet-stream"
-        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
+        msg.add_attachment(
+            data, maintype=maintype, subtype=subtype, filename=att.filename
+        )
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     return raw
@@ -490,7 +495,14 @@ def _parse_message_resource(msg: dict[str, Any]) -> dict[str, Any]:
         "from": headers.get("from"),
         "to": headers.get("to"),
         "cc": headers.get("cc"),
+        # Drafts retain Bcc in their stored MIME (it is only stripped once sent),
+        # so format=full surfaces it here and rebuilds can preserve it.
+        "bcc": headers.get("bcc"),
         "subject": headers.get("subject"),
+        # Reply threading headers, so a rebuild of a reply draft keeps non-Gmail
+        # MUAs threading the conversation.
+        "in_reply_to": headers.get("in-reply-to"),
+        "references": headers.get("references"),
         "date": None,
         "body_text": None,
         "body_html": None,

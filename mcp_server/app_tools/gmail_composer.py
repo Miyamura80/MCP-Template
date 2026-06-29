@@ -41,6 +41,31 @@ from services.gmail_svc import _get_gmail_client
 _APP_META = {"ui": {"visibility": ["app"]}}
 
 
+def _coerce_attachments(
+    attachments: list[dict] | None,
+) -> list[AttachmentInput | AttachmentReference] | None:
+    """Map raw attachment dicts to the right model.
+
+    A dict carrying ``data_base64`` is a new upload (``AttachmentInput``); one
+    with only ``attachment_id`` is a by-reference preserve (``AttachmentReference``).
+    Coercing everything to ``AttachmentInput`` would crash reference dicts.
+    """
+    if not attachments:
+        return None
+    out: list[AttachmentInput | AttachmentReference] = []
+    for a in attachments:
+        if a.get("data_base64"):
+            out.append(AttachmentInput(**a))
+        elif a.get("attachment_id"):
+            out.append(AttachmentReference(attachment_id=a["attachment_id"]))
+        else:
+            raise ValueError(
+                "attachment must have either 'data_base64' (new upload) or "
+                "'attachment_id' (existing file reference)"
+            )
+    return out
+
+
 @mcp.tool(
     name="gmail_composer.save_draft",
     description="Persist the current composer fields onto an existing Gmail draft.",
@@ -57,9 +82,7 @@ def save_draft(
     attachments: list[dict] | None = None,
 ) -> GmailDraft:
     uid = guard_user_id(user_id)
-    atts: list[AttachmentInput | AttachmentReference] | None = (
-        [AttachmentInput(**a) for a in attachments] if attachments else None
-    )
+    atts = _coerce_attachments(attachments)
     return _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,
@@ -90,9 +113,7 @@ def send(
     attachments: list[dict] | None = None,
 ) -> GmailSendResult:
     uid = guard_user_id(user_id)
-    atts: list[AttachmentInput | AttachmentReference] | None = (
-        [AttachmentInput(**a) for a in attachments] if attachments else None
-    )
+    atts = _coerce_attachments(attachments)
     _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,

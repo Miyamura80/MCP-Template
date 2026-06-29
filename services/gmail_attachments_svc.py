@@ -11,12 +11,14 @@ from __future__ import annotations
 from typing import Any
 
 from models.gmail import (
+    AttachmentUpload,
     GmailAddAttachmentInput,
     GmailDraftAttachmentsResult,
     GmailRemoveAttachmentInput,
 )
 from services import service
 from services.gmail_draft_helpers import (
+    _attachment_not_found,
     _current_attachments,
     _existing_to_upload,
     _rebuild_draft,
@@ -42,9 +44,14 @@ def _rebuild_preserving_content(
     *,
     draft_id: str,
     parsed: dict[str, Any],
-    attachment_uploads: list[dict[str, str]],
+    attachment_uploads: list[AttachmentUpload],
 ) -> GmailDraftAttachmentsResult:
-    """Rewrite a draft with a new file set, leaving content fields verbatim."""
+    """Rewrite a draft with a new file set, leaving content fields verbatim.
+
+    Every content field is sourced from the current draft: plain and HTML body,
+    recipients (including Bcc), and reply-threading headers - so an attachment
+    edit never disturbs the message itself.
+    """
     draft = _rebuild_draft(
         svc,
         draft_id=draft_id,
@@ -52,9 +59,12 @@ def _rebuild_preserving_content(
         to=parsed.get("to") or "",
         subject=parsed.get("subject") or "",
         body=parsed.get("body_text") or "",
+        body_html=parsed.get("body_html"),
         cc=parsed.get("cc"),
-        bcc=None,  # Gmail never echoes Bcc, so it cannot be preserved here.
+        bcc=parsed.get("bcc"),
         attachment_uploads=attachment_uploads,
+        in_reply_to=parsed.get("in_reply_to"),
+        references=parsed.get("references"),
     )
     return GmailDraftAttachmentsResult(
         draft_id=draft.draft_id, attachments=draft.attachments
@@ -84,11 +94,11 @@ def gmail_add_attachment(
         _existing_to_upload(svc, message_id, a) for a in _current_attachments(parsed)
     ]
     uploads.append(
-        {
-            "filename": input.attachment.filename,
-            "mime_type": input.attachment.mime_type,
-            "data_base64": input.attachment.data_base64,
-        }
+        AttachmentUpload(
+            filename=input.attachment.filename,
+            mime_type=input.attachment.mime_type,
+            data_base64=input.attachment.data_base64,
+        )
     )
     return _rebuild_preserving_content(
         svc, draft_id=input.draft_id, parsed=parsed, attachment_uploads=uploads
@@ -116,10 +126,7 @@ def gmail_remove_attachment(
     current = _current_attachments(parsed)
     remaining = [a for a in current if a.get("attachment_id") != input.attachment_id]
     if len(remaining) == len(current):
-        raise ValueError(
-            f"attachment_id {input.attachment_id!r} is not on draft "
-            f"{input.draft_id!r}"
-        )
+        raise _attachment_not_found(input.attachment_id, input.draft_id)
     uploads = [_existing_to_upload(svc, message_id, a) for a in remaining]
     return _rebuild_preserving_content(
         svc, draft_id=input.draft_id, parsed=parsed, attachment_uploads=uploads

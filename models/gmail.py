@@ -73,6 +73,20 @@ class AttachmentInput(BaseModel):
     )
 
 
+class AttachmentUpload(BaseModel):
+    """A normalized attachment payload ready to write into an outgoing MIME message.
+
+    This is the single shape ``_build_raw_message`` consumes. It deliberately
+    skips ``AttachmentInput``'s strict validators (mime pattern, size caps) so
+    bytes re-downloaded from an existing draft - already accepted by Gmail once -
+    never fail re-validation on a preserve path.
+    """
+
+    filename: str
+    mime_type: str
+    data_base64: str
+
+
 class AttachmentReference(BaseModel):
     """Reference to an attachment already present on a draft, by its stable id.
 
@@ -129,7 +143,13 @@ class GmailDraftAttachment(BaseModel):
     @computed_field
     @property
     def size_bytes(self) -> int | None:
-        """Alias of ``size`` (bytes) in the contract every transport returns."""
+        """Size in bytes - the name the public tool contract advertises.
+
+        Emitted alongside ``size`` (not instead of it) because the committed
+        composer UI bundle still reads ``size``; collapsing to a single key
+        would require rebuilding that React bundle (``make build_apps``), which
+        is out of scope for a pure service change.
+        """
         return self.size
 
 

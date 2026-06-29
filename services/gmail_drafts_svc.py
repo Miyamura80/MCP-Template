@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from models.gmail import (
     AttachmentInput,
+    AttachmentUpload,
     GmailComposeInput,
     GmailDiscardDraftInput,
     GmailDiscardDraftResult,
@@ -39,6 +40,7 @@ from services.gmail_draft_helpers import (
     _draft_resource_to_model,
     _rebuild_draft,
     _resolve_update_attachments,
+    draft_message_body,
 )
 from services.gmail_svc import (
     _build_raw_message,
@@ -50,6 +52,20 @@ from services.gmail_svc import (
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _inputs_to_uploads(
+    attachments: list[AttachmentInput] | None,
+) -> list[AttachmentUpload] | None:
+    """Normalize caller-supplied ``AttachmentInput``s to the upload shape."""
+    if not attachments:
+        return None
+    return [
+        AttachmentUpload(
+            filename=a.filename, mime_type=a.mime_type, data_base64=a.data_base64
+        )
+        for a in attachments
+    ]
 
 
 def _draft_summary_from_metadata(draft: dict[str, Any]) -> _DraftSummary:
@@ -186,11 +202,18 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
     fields_set = input.model_fields_set
     to = (input.to if "to" in fields_set else parsed.get("to")) or ""
     subject = (input.subject if "subject" in fields_set else parsed.get("subject")) or ""
-    body = (input.body if "body" in fields_set else parsed.get("body_text")) or ""
     cc = input.cc if "cc" in fields_set else parsed.get("cc")
-    # Gmail never echoes Bcc back, so it cannot be preserved across a rebuild;
-    # only honor an explicitly-supplied value.
-    bcc = input.bcc if "bcc" in fields_set else None
+    bcc = input.bcc if "bcc" in fields_set else parsed.get("bcc")
+
+    # When the caller sets body, it replaces the content (plain text, no HTML).
+    # When omitted, preserve whatever representation the draft already had -
+    # including an HTML-only body, which would otherwise be erased.
+    if "body" in fields_set:
+        body = input.body or ""
+        body_html = None
+    else:
+        body = parsed.get("body_text") or ""
+        body_html = parsed.get("body_html")
 
     attachment_uploads = _resolve_update_attachments(svc, message_id, parsed, input)
 
@@ -201,9 +224,12 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
         to=to,
         subject=subject,
         body=body,
+        body_html=body_html,
         cc=cc,
         bcc=bcc,
         attachment_uploads=attachment_uploads,
+        in_reply_to=parsed.get("in_reply_to"),
+        references=parsed.get("references"),
     )
 
 
@@ -234,12 +260,9 @@ def gmail_compose(input: GmailComposeInput) -> GmailDraft:
         cc=input.cc,
         bcc=input.bcc,
         in_reply_to_thread_id=input.in_reply_to_thread_id,
-        attachments=input.attachments or None,
+        attachments=_inputs_to_uploads(input.attachments),
     )
-    body_dict: dict[str, Any] = {"message": {"raw": raw}}
-    if input.in_reply_to_thread_id:
-        body_dict["message"]["threadId"] = input.in_reply_to_thread_id
-
+    body_dict = draft_message_body(raw, input.in_reply_to_thread_id)
     created = svc.users().drafts().create(userId="me", body=body_dict).execute()
     log.debug("Created Gmail draft id={}", created.get("id"))
     return _draft_resource_to_model(created)
@@ -348,7 +371,7 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         in_reply_to_thread_id=input.thread_id,
         in_reply_to=in_reply_to,
         references=references,
-        attachments=input.attachments or None,
+        attachments=_inputs_to_uploads(input.attachments),
     )
     created = (
         svc.users()

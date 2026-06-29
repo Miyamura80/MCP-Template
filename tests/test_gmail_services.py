@@ -23,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
+from mcp_server.app_tools.gmail_composer import _coerce_attachments
 from models.gmail import (
     AttachmentInput,
     AttachmentReference,
@@ -1401,3 +1402,259 @@ class TestAddRemoveAttachment(TestTemplate):
                     )
             finally:
                 _stop(patches)
+
+
+# ---------------------------------------------------------------------------
+# Rebuild preserves content beyond plain body (cubic review fixes)
+# ---------------------------------------------------------------------------
+
+
+def _draft_with_headers(
+    headers: dict[str, str],
+    *,
+    body: str = "hi",
+    draft_id: str = "d-1",
+    thread_id: str = "t-1",
+) -> dict:
+    return {
+        "id": draft_id,
+        "message": _plain_message(
+            message_id=f"m-{draft_id}",
+            thread_id=thread_id,
+            headers=headers,
+            body=body,
+        ),
+    }
+
+
+def _draft_resource_html_only(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    html: str = "<p>hello</p>",
+    thread_id: str = "t-1",
+) -> dict:
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": "hello",
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "text/html",
+                "headers": _headers({"To": to, "Subject": subject}),
+                "body": {"data": _b64url(html), "size": len(html)},
+            },
+        },
+    }
+
+
+def _mime_part_texts(raw_b64: str, content_type: str) -> list[str]:
+    mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+    out = []
+    for p in mime.walk():
+        if p.get_content_type() == content_type:
+            payload = p.get_payload(decode=True)
+            if isinstance(payload, bytes):
+                out.append(payload.decode("utf-8"))
+    return out
+
+
+class TestRebuildPreservesContent(TestTemplate):
+    def _run_update(self, original, update_input, echoed=None):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed or original
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(update_input)
+            finally:
+                _stop(patches)
+        return _last_update_raw(mock)
+
+    def test_omitted_body_preserves_html_only_body(self):
+        original = _draft_resource_html_only(html="<p>keep me</p>")
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", subject="New subj"),
+        )
+        # The HTML body survived; it was not flattened to an empty plain body.
+        html_parts = _mime_part_texts(raw, "text/html")
+        assert any("keep me" in h for h in html_parts)
+
+    def test_setting_body_replaces_with_plain_text(self):
+        original = _draft_resource_html_only(html="<p>old html</p>")
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="brand new"),
+        )
+        plain = _mime_part_texts(raw, "text/plain")
+        assert any("brand new" in p for p in plain)
+        assert not any("old html" in h for h in _mime_part_texts(raw, "text/html"))
+
+    def test_omitted_bcc_is_preserved(self):
+        original = _draft_with_headers(
+            {"To": "a@x", "Subject": "S", "Bcc": "secret@x"}, body="b"
+        )
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="new body"),
+        )
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Bcc"] == "secret@x"
+
+    def test_explicit_null_clears_bcc(self):
+        original = _draft_with_headers(
+            {"To": "a@x", "Subject": "S", "Bcc": "secret@x"}, body="b"
+        )
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", bcc=None),
+        )
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Bcc"] is None
+
+    def test_reply_threading_headers_preserved(self):
+        original = _draft_with_headers(
+            {
+                "To": "a@x",
+                "Subject": "Re: S",
+                "In-Reply-To": "<parent@m>",
+                "References": "<root@m> <parent@m>",
+            },
+            body="b",
+        )
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="edited"),
+        )
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["In-Reply-To"] == "<parent@m>"
+        assert mime["References"] == "<root@m> <parent@m>"
+
+    def test_inline_attachment_without_id_does_not_crash(self):
+        # A named part with a size but no attachmentId and no inline data:
+        # it has no retrievable bytes, so a body-only edit must skip it, not
+        # call the attachments API with an empty id and error.
+        original = {
+            "id": "d-1",
+            "message": {
+                "id": "m-d-1",
+                "threadId": "t-1",
+                "snippet": "s",
+                "internalDate": "1700000000000",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "headers": _headers({"To": "a@x", "Subject": "S"}),
+                    "parts": [
+                        {
+                            "mimeType": "text/plain",
+                            "body": {"data": _b64url("body here"), "size": 9},
+                        },
+                        {
+                            "mimeType": "application/pdf",
+                            "filename": "weird.pdf",
+                            "body": {"size": 10},  # no attachmentId, no data
+                        },
+                    ],
+                },
+            },
+        }
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="new"),
+        )
+        # No crash; the un-retrievable part is dropped rather than erroring.
+        assert _attachment_filenames_in_raw(raw) == []
+        assert any("new" in p for p in _mime_part_texts(raw, "text/plain"))
+
+
+class TestAddAttachmentPreservesHtmlAndBcc(TestTemplate):
+    def test_add_attachment_keeps_html_body_and_bcc(self):
+        original = {
+            "id": "d-1",
+            "message": {
+                "id": "m-d-1",
+                "threadId": "t-1",
+                "snippet": "s",
+                "internalDate": "1700000000000",
+                "payload": {
+                    "mimeType": "text/html",
+                    "headers": _headers(
+                        {"To": "a@x", "Subject": "S", "Bcc": "secret@x"}
+                    ),
+                    "body": {"data": _b64url("<p>html body</p>"), "size": 16},
+                },
+            },
+        }
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_add_attachment(
+                    GmailAddAttachmentInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachment=_new_upload(filename="a.txt"),
+                    )
+                )
+            finally:
+                _stop(patches)
+        raw = _last_update_raw(mock)
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Bcc"] == "secret@x"
+        assert _attachment_filenames_in_raw(raw) == ["a.txt"]
+        html = _mime_part_texts(raw, "text/html")
+        assert any("html body" in h for h in html)
+
+
+class TestAppToolAttachmentCoercion(TestTemplate):
+    def test_reference_dict_becomes_attachment_reference(self):
+        out = _coerce_attachments([{"attachment_id": "att-1"}])
+        assert out is not None
+        assert isinstance(out[0], AttachmentReference)
+        assert out[0].attachment_id == "att-1"
+
+    def test_upload_dict_becomes_attachment_input(self):
+        out = _coerce_attachments(
+            [
+                {
+                    "filename": "f.txt",
+                    "mime_type": "text/plain",
+                    "data_base64": base64.urlsafe_b64encode(b"x").decode("ascii"),
+                }
+            ]
+        )
+        assert out is not None
+        assert isinstance(out[0], AttachmentInput)
+
+    def test_mixed_list_routes_each_item(self):
+        out = _coerce_attachments(
+            [
+                {"attachment_id": "att-1"},
+                {
+                    "filename": "f.txt",
+                    "mime_type": "text/plain",
+                    "data_base64": base64.urlsafe_b64encode(b"x").decode("ascii"),
+                },
+            ]
+        )
+        assert out is not None
+        assert isinstance(out[0], AttachmentReference)
+        assert isinstance(out[1], AttachmentInput)
+
+    def test_empty_attachment_dict_raises(self):
+        with pytest.raises(ValueError, match="data_base64"):
+            _coerce_attachments([{}])
