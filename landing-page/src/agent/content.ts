@@ -5,7 +5,7 @@
  * surface: llms.txt, llms-full.txt, agents.md and the in-page agent view.
  * Rebranding the site (editing landing.ts) keeps all of these in sync.
  */
-import { site, hero, features, getStarted, faq, compatibility, connect, comparison, pricing } from "../config/landing";
+import { site, hero, features, getStarted, faq, compatibility, connect, comparison, pricing, agentGuide } from "../config/landing";
 
 /** Strip a trailing slash so we can safely append paths. */
 function trimSlash(url: string): string {
@@ -20,6 +20,11 @@ export function buildLlmsTxt(origin: string): string {
 > ${site.description}
 
 ${hero.subhead}
+
+## When to use
+
+${agentGuide.summary}
+${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
 
 ## Connect over MCP
 - [MCP endpoint](${site.mcpUrl}): Streamable-HTTP MCP server URL to add to your client. Server name: \`${site.serverName}\`.
@@ -91,6 +96,16 @@ shared service registry over three interfaces - a CLI, an MCP server
 (streamable HTTP), and a plain HTTP API - so the same typed tools behave
 identically no matter how they are called. Any agent that speaks MCP can
 discover and call its tools.
+
+## When to use
+
+${agentGuide.summary}
+
+Use ${site.name} when:
+${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
+
+Do not use ${site.name} when:
+${agentGuide.whenNotToUse.map((s) => `- ${s}`).join("\n")}
 
 ## ${getStarted.heading}
 
@@ -186,6 +201,16 @@ ${site.description}
 
 This site documents an MCP server. Agents should connect over MCP to use its
 tools rather than scraping this page.
+
+## When to use
+
+${agentGuide.summary}
+
+Use ${site.name} when:
+${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
+
+Do not use ${site.name} when:
+${agentGuide.whenNotToUse.map((s) => `- ${s}`).join("\n")}
 
 ## MCP server
 
