@@ -18,7 +18,7 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from email.message import EmailMessage
+from email.message import EmailMessage, MIMEPart
 from typing import Any
 from urllib.parse import urlencode
 
@@ -30,13 +30,14 @@ from common import global_config
 from db.engine import use_db_session
 from db.models.google_tokens import GoogleToken
 from models.gmail import (
-    AttachmentInput,
+    AttachmentUpload,
     GmailConnectInput,
     GmailConnectResult,
     GmailDisconnectInput,
     GmailDisconnectResult,
     GmailStatusInput,
     GmailStatusResult,
+    InlineImageUpload,
 )
 from services import service
 
@@ -343,12 +344,14 @@ def _build_raw_message(
     to: str,
     subject: str,
     body: str,
+    body_html: str | None = None,
     cc: str | None = None,
     bcc: str | None = None,
     in_reply_to_thread_id: str | None = None,  # noqa: ARG001 - threadId travels on the wrapper, not headers
     in_reply_to: str | None = None,
     references: str | None = None,
-    attachments: list[Any] | None = None,
+    attachments: list[AttachmentUpload] | None = None,
+    inline_images: list[InlineImageUpload] | None = None,
 ) -> str:
     """Return a base64-url-encoded MIME message for ``drafts.create`` / ``messages.send``.
 
@@ -357,9 +360,13 @@ def _build_raw_message(
     than Gmail also thread the conversation. Gmail itself uses ``threadId`` on
     the API wrapper; these headers are belt-and-braces for the recipient.
 
-    When ``attachments`` is non-empty the message becomes multipart/mixed with
-    the text body as the first part and each attachment as a subsequent part.
-    Each attachment object must have ``filename``, ``mime_type``, and ``data_base64``.
+    Body shape: pass ``body`` (plain text) and/or ``body_html``. With both, the
+    message is multipart/alternative; with only ``body_html`` it is an HTML
+    message (so HTML-only drafts survive a rebuild); otherwise it is plain text.
+
+    When ``attachments`` is non-empty the message additionally becomes
+    multipart/mixed. Each attachment is an ``AttachmentUpload`` with
+    ``filename``, ``mime_type``, and base64url ``data_base64``.
     """
     msg = EmailMessage()
     msg["To"] = to
@@ -372,28 +379,63 @@ def _build_raw_message(
         msg["In-Reply-To"] = in_reply_to
     if references:
         msg["References"] = references
-    msg.set_content(body, subtype="plain", charset="utf-8")
 
+    body_host = _set_message_body(msg, body, body_html)
+    # Inline images go in a multipart/related around the HTML part so the body's
+    # cid: references resolve; regular files become multipart/mixed attachments.
+    # The image must relate to the HTML part itself, not a multipart/alternative
+    # root, or clients showing the HTML alternative can't find the image.
+    for img in inline_images or []:
+        maintype, subtype = _split_mime(img.mime_type)
+        body_host.add_related(
+            _decode_b64url(img.data_base64),
+            maintype=maintype,
+            subtype=subtype,
+            cid=f"<{img.content_id}>",
+        )
     for att in attachments or []:
-        if isinstance(att, AttachmentInput):
-            filename = att.filename
-            mime_type = att.mime_type
-            data = base64.urlsafe_b64decode(
-                att.data_base64 + "=" * (-len(att.data_base64) % 4)
-            )
-        else:
-            filename = att.get("filename", "attachment")
-            mime_type = att.get("mime_type", "application/octet-stream")
-            raw_b64 = att.get("data_base64", "")
-            data = base64.urlsafe_b64decode(raw_b64 + "=" * (-len(raw_b64) % 4))
+        maintype, subtype = _split_mime(att.mime_type)
+        msg.add_attachment(
+            _decode_b64url(att.data_base64),
+            maintype=maintype,
+            subtype=subtype,
+            filename=att.filename,
+        )
 
-        maintype, _, subtype = mime_type.partition("/")
-        if not subtype:
-            maintype, subtype = "application", "octet-stream"
-        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
-    return raw
+
+def _decode_b64url(data: str) -> bytes:
+    """Decode base64url, re-padding per RFC 4648 §5."""
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+def _split_mime(mime_type: str) -> tuple[str, str]:
+    """Split ``maintype/subtype``, defaulting to ``application/octet-stream``."""
+    maintype, _, subtype = mime_type.partition("/")
+    if not subtype:
+        return "application", "octet-stream"
+    return maintype, subtype
+
+
+def _set_message_body(
+    msg: EmailMessage, body: str, body_html: str | None
+) -> MIMEPart:
+    """Set the body and return the part inline images should relate to.
+
+    For plain+HTML the host is the HTML alternative subpart (so inline images
+    nest as ``alternative -> [plain, related -> [html, image]]``, the broadly
+    compatible shape); otherwise it is the message root.
+    """
+    if body_html and body:
+        msg.set_content(body, subtype="plain", charset="utf-8")
+        msg.add_alternative(body_html, subtype="html", charset="utf-8")
+        return list(msg.iter_parts())[-1]  # the HTML alternative subpart
+    if body_html:
+        msg.set_content(body_html, subtype="html", charset="utf-8")
+        return msg
+    msg.set_content(body, subtype="plain", charset="utf-8")
+    return msg
 
 
 def _headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:
@@ -490,7 +532,14 @@ def _parse_message_resource(msg: dict[str, Any]) -> dict[str, Any]:
         "from": headers.get("from"),
         "to": headers.get("to"),
         "cc": headers.get("cc"),
+        # Drafts retain Bcc in their stored MIME (it is only stripped once sent),
+        # so format=full surfaces it here and rebuilds can preserve it.
+        "bcc": headers.get("bcc"),
         "subject": headers.get("subject"),
+        # Reply threading headers, so a rebuild of a reply draft keeps non-Gmail
+        # MUAs threading the conversation.
+        "in_reply_to": headers.get("in-reply-to"),
+        "references": headers.get("references"),
         "date": None,
         "body_text": None,
         "body_html": None,
