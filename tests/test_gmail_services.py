@@ -1776,3 +1776,94 @@ class TestInlineImagePreservation(TestTemplate):
         assert imgs[0].get_payload(decode=True) == b"PNGDATA"
         # The newly-added file is a normal (mixed) attachment, not inline.
         assert _attachment_filenames_in_raw(raw) == ["doc.txt"]
+
+
+def _draft_alt_with_inline_image(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    img_cid: str = "img1",
+    img_bytes: bytes = b"PNGDATA",
+    plain: str = "plain fallback",
+    thread_id: str = "t-1",
+) -> dict:
+    """A draft with BOTH plain + HTML alternatives and an inline cid: image."""
+    html = f'<p>see <img src="cid:{img_cid}"></p>'
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": "see",
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "multipart/alternative",
+                "headers": _headers({"To": to, "Subject": subject}),
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": _b64url(plain), "size": len(plain)},
+                    },
+                    {
+                        "mimeType": "multipart/related",
+                        "parts": [
+                            {
+                                "mimeType": "text/html",
+                                "body": {"data": _b64url(html), "size": len(html)},
+                            },
+                            {
+                                "mimeType": "image/png",
+                                "headers": _headers({"Content-ID": f"<{img_cid}>"}),
+                                "body": {
+                                    "data": base64.urlsafe_b64encode(
+                                        img_bytes
+                                    ).decode("ascii"),
+                                    "size": len(img_bytes),
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+
+class TestInlineImageAlternativeStructure(TestTemplate):
+    def test_plain_and_html_inline_image_nests_related_under_alternative(self):
+        original = _draft_alt_with_inline_image(img_bytes=b"PNGDATA")
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", subject="New subj"
+                    )
+                )
+            finally:
+                _stop(patches)
+        raw = _last_update_raw(mock)
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        # Canonical, broadly-compatible shape: the related (html + image) nests
+        # INSIDE the alternative, not the other way around.
+        assert mime.get_content_type() == "multipart/alternative"
+        related = [
+            p for p in mime.walk() if p.get_content_type() == "multipart/related"
+        ]
+        assert len(related) == 1
+        related_types = [p.get_content_type() for p in related[0].walk()]
+        assert related_types == ["multipart/related", "text/html", "image/png"]
+        # Plain alternative is a sibling of the related, not nested inside it.
+        all_types = [p.get_content_type() for p in mime.walk()]
+        assert "text/plain" in all_types
+        assert "text/plain" not in related_types
+        # Image bytes and cid intact.
+        img = _parts_by_type(raw, "image/png")[0]
+        assert img.get("Content-ID") == "<img1>"
+        assert img.get_payload(decode=True) == b"PNGDATA"

@@ -18,7 +18,7 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from email.message import EmailMessage
+from email.message import EmailMessage, MIMEPart
 from typing import Any
 from urllib.parse import urlencode
 
@@ -380,13 +380,14 @@ def _build_raw_message(
     if references:
         msg["References"] = references
 
-    _set_message_body(msg, body, body_html)
-    # Inline images go in a multipart/related alongside the (HTML) body so the
-    # body's cid: references resolve; regular files become multipart/mixed
-    # attachments. EmailMessage rewraps the existing content automatically.
+    body_host = _set_message_body(msg, body, body_html)
+    # Inline images go in a multipart/related around the HTML part so the body's
+    # cid: references resolve; regular files become multipart/mixed attachments.
+    # The image must relate to the HTML part itself, not a multipart/alternative
+    # root, or clients showing the HTML alternative can't find the image.
     for img in inline_images or []:
         maintype, subtype = _split_mime(img.mime_type)
-        msg.add_related(
+        body_host.add_related(
             _decode_b64url(img.data_base64),
             maintype=maintype,
             subtype=subtype,
@@ -417,15 +418,24 @@ def _split_mime(mime_type: str) -> tuple[str, str]:
     return maintype, subtype
 
 
-def _set_message_body(msg: EmailMessage, body: str, body_html: str | None) -> None:
-    """Set the body: plain, HTML-only, or multipart/alternative (both)."""
+def _set_message_body(
+    msg: EmailMessage, body: str, body_html: str | None
+) -> MIMEPart:
+    """Set the body and return the part inline images should relate to.
+
+    For plain+HTML the host is the HTML alternative subpart (so inline images
+    nest as ``alternative -> [plain, related -> [html, image]]``, the broadly
+    compatible shape); otherwise it is the message root.
+    """
     if body_html and body:
         msg.set_content(body, subtype="plain", charset="utf-8")
         msg.add_alternative(body_html, subtype="html", charset="utf-8")
-    elif body_html:
+        return list(msg.iter_parts())[-1]  # the HTML alternative subpart
+    if body_html:
         msg.set_content(body_html, subtype="html", charset="utf-8")
-    else:
-        msg.set_content(body, subtype="plain", charset="utf-8")
+        return msg
+    msg.set_content(body, subtype="plain", charset="utf-8")
+    return msg
 
 
 def _headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:
