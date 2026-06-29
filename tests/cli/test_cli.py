@@ -95,12 +95,16 @@ class TestCLI(TestTemplate):
             assert result.exit_code == 0
             assert "Examples:" in result.output
 
-    def test_help_examples_are_runnable(self):
+    def test_help_examples_use_correct_flag_ordering(self):
         # Global flags (--dry-run/--format) must precede the subcommand, or the
-        # example fails with exit 2. Pin the corrected ordering.
-        result = runner.invoke(app, ["greet", "--help"])
-        assert "mymcp --dry-run greet" in result.output
-        assert "mymcp greet Ada --dry-run" not in result.output
+        # example fails with exit 2. Assert on the EPILOG source strings rather
+        # than rendered --help output, which word-wraps at the terminal width.
+        from src.cli.commands import doctor, greet  # noqa: PLC0415
+
+        assert "mymcp --dry-run greet" in greet.EPILOG
+        assert "mymcp greet Ada --dry-run" not in greet.EPILOG
+        assert "mymcp --format json doctor" in doctor.EPILOG
+        assert "mymcp doctor --format json" not in doctor.EPILOG
 
     def test_format_json(self):
         result = runner.invoke(app, ["--format", "json", "config", "show"])
