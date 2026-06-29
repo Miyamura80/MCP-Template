@@ -12,7 +12,7 @@ clients (Claude Cowork/Desktop 0.7+, Cursor, etc.) can connect directly:
 ```json
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "url": "https://YOUR-DEPLOYMENT/mcp",
       "headers": { "X-API-KEY": "sk_..." }
     }
@@ -42,9 +42,9 @@ Add to your Claude Desktop config file:
 ```json
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
       "env": {}
     }
   }
@@ -61,9 +61,9 @@ Add to your project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
       "env": {}
     }
   }
@@ -75,18 +75,18 @@ Add to your project's `.mcp.json`:
 
 Open **Cursor Settings > MCP** and add a new server with:
 
-- **Name**: `mycli`
+- **Name**: `mymcp`
 - **Type**: `command`
-- **Command**: `uv --directory /path/to/MCP-Template run mycli-mcp`
+- **Command**: `uv --directory /path/to/MCP-Template run mymcp-mcp`
 
 Or add to `.cursor/mcp.json` in your project root:
 
 ```json
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
       "env": {}
     }
   }
@@ -102,9 +102,9 @@ Add to your VS Code settings (`settings.json`) or workspace settings:
 {
   "mcp": {
     "servers": {
-      "mycli": {
+      "mymcp": {
         "command": "uv",
-        "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+        "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
         "env": {}
       }
     }
@@ -117,9 +117,9 @@ Or add to `.vscode/mcp.json` in your project root:
 ```json
 {
   "servers": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
       "env": {}
     }
   }
@@ -132,7 +132,7 @@ Or add to `.vscode/mcp.json` in your project root:
 Add to your project's `codex.json` or pass via CLI:
 
 ```bash
-codex --mcp-config '{"mycli": {"command": "uv", "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"]}}'
+codex --mcp-config '{"mymcp": {"command": "uv", "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"]}}'
 ```
 
 Or create a `mcp.json` in your project root:
@@ -140,9 +140,9 @@ Or create a `mcp.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
       "env": {}
     }
   }
@@ -157,9 +157,9 @@ Add to your Gemini CLI settings file (`~/.gemini/settings.json`):
 ```json
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
       "env": {}
     }
   }
@@ -174,9 +174,9 @@ Add to your OpenCode config (`opencode.json` in your project root):
 ```json
 {
   "mcp": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"]
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"]
     }
   }
 }
@@ -190,9 +190,9 @@ Add to your OpenClaw MCP config:
 ```json
 {
   "mcpServers": {
-    "mycli": {
+    "mymcp": {
       "command": "uv",
-      "args": ["--directory", "/path/to/MCP-Template", "run", "mycli-mcp"],
+      "args": ["--directory", "/path/to/MCP-Template", "run", "mymcp-mcp"],
       "env": {}
     }
   }
@@ -204,4 +204,4 @@ Add to your OpenClaw MCP config:
 
 ### Other MCP Clients
 
-Any MCP-compatible client can connect by spawning `uv --directory /path/to/MCP-Template run mycli-mcp` as a subprocess using stdio transport.
+Any MCP-compatible client can connect by spawning `uv --directory /path/to/MCP-Template run mymcp-mcp` as a subprocess using stdio transport.
