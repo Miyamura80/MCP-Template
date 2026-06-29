@@ -22,6 +22,7 @@ from services.gmail_draft_helpers import (
     _current_attachments,
     _existing_to_upload,
     _rebuild_draft,
+    _resolve_inline_images,
 )
 from services.gmail_svc import _get_gmail_client, _parse_message_resource
 
@@ -43,15 +44,22 @@ def _rebuild_preserving_content(
     svc: Any,
     *,
     draft_id: str,
+    message_id: str,
     parsed: dict[str, Any],
     attachment_uploads: list[AttachmentUpload],
 ) -> GmailDraftAttachmentsResult:
     """Rewrite a draft with a new file set, leaving content fields verbatim.
 
-    Every content field is sourced from the current draft: plain and HTML body,
-    recipients (including Bcc), and reply-threading headers - so an attachment
-    edit never disturbs the message itself.
+    Every content field is sourced from the current draft: plain and HTML body
+    (with its inline cid: images), recipients (including Bcc), and
+    reply-threading headers - so an attachment edit never disturbs the message
+    itself.
     """
+    inline_images = (
+        _resolve_inline_images(svc, message_id, parsed)
+        if parsed.get("body_html")
+        else []
+    )
     draft = _rebuild_draft(
         svc,
         draft_id=draft_id,
@@ -65,6 +73,7 @@ def _rebuild_preserving_content(
         attachment_uploads=attachment_uploads,
         in_reply_to=parsed.get("in_reply_to"),
         references=parsed.get("references"),
+        inline_images=inline_images,
     )
     return GmailDraftAttachmentsResult(
         draft_id=draft.draft_id, attachments=draft.attachments
@@ -101,7 +110,11 @@ def gmail_add_attachment(
         )
     )
     return _rebuild_preserving_content(
-        svc, draft_id=input.draft_id, parsed=parsed, attachment_uploads=uploads
+        svc,
+        draft_id=input.draft_id,
+        message_id=message_id,
+        parsed=parsed,
+        attachment_uploads=uploads,
     )
 
 
@@ -129,5 +142,9 @@ def gmail_remove_attachment(
         raise _attachment_not_found(input.attachment_id, input.draft_id)
     uploads = [_existing_to_upload(svc, message_id, a) for a in remaining]
     return _rebuild_preserving_content(
-        svc, draft_id=input.draft_id, parsed=parsed, attachment_uploads=uploads
+        svc,
+        draft_id=input.draft_id,
+        message_id=message_id,
+        parsed=parsed,
+        attachment_uploads=uploads,
     )

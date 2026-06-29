@@ -87,6 +87,20 @@ class AttachmentUpload(BaseModel):
     data_base64: str
 
 
+class InlineImageUpload(BaseModel):
+    """A CID-referenced inline image to re-emit when rebuilding an HTML body.
+
+    HTML draft bodies reference inline images by ``cid:<content_id>``. On a
+    whole-message rebuild these parts must be re-attached (as multipart/related
+    with their ``Content-ID``) or the HTML renders with broken images.
+    ``data_base64`` is base64url, matching ``AttachmentUpload``.
+    """
+
+    content_id: str
+    mime_type: str
+    data_base64: str
+
+
 class AttachmentReference(BaseModel):
     """Reference to an attachment already present on a draft, by its stable id.
 

@@ -37,6 +37,7 @@ from models.gmail import (
     GmailDisconnectResult,
     GmailStatusInput,
     GmailStatusResult,
+    InlineImageUpload,
 )
 from services import service
 
@@ -350,6 +351,7 @@ def _build_raw_message(
     in_reply_to: str | None = None,
     references: str | None = None,
     attachments: list[AttachmentUpload] | None = None,
+    inline_images: list[InlineImageUpload] | None = None,
 ) -> str:
     """Return a base64-url-encoded MIME message for ``drafts.create`` / ``messages.send``.
 
@@ -378,6 +380,45 @@ def _build_raw_message(
     if references:
         msg["References"] = references
 
+    _set_message_body(msg, body, body_html)
+    # Inline images go in a multipart/related alongside the (HTML) body so the
+    # body's cid: references resolve; regular files become multipart/mixed
+    # attachments. EmailMessage rewraps the existing content automatically.
+    for img in inline_images or []:
+        maintype, subtype = _split_mime(img.mime_type)
+        msg.add_related(
+            _decode_b64url(img.data_base64),
+            maintype=maintype,
+            subtype=subtype,
+            cid=f"<{img.content_id}>",
+        )
+    for att in attachments or []:
+        maintype, subtype = _split_mime(att.mime_type)
+        msg.add_attachment(
+            _decode_b64url(att.data_base64),
+            maintype=maintype,
+            subtype=subtype,
+            filename=att.filename,
+        )
+
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+
+def _decode_b64url(data: str) -> bytes:
+    """Decode base64url, re-padding per RFC 4648 §5."""
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+def _split_mime(mime_type: str) -> tuple[str, str]:
+    """Split ``maintype/subtype``, defaulting to ``application/octet-stream``."""
+    maintype, _, subtype = mime_type.partition("/")
+    if not subtype:
+        return "application", "octet-stream"
+    return maintype, subtype
+
+
+def _set_message_body(msg: EmailMessage, body: str, body_html: str | None) -> None:
+    """Set the body: plain, HTML-only, or multipart/alternative (both)."""
     if body_html and body:
         msg.set_content(body, subtype="plain", charset="utf-8")
         msg.add_alternative(body_html, subtype="html", charset="utf-8")
@@ -385,20 +426,6 @@ def _build_raw_message(
         msg.set_content(body_html, subtype="html", charset="utf-8")
     else:
         msg.set_content(body, subtype="plain", charset="utf-8")
-
-    for att in attachments or []:
-        data = base64.urlsafe_b64decode(
-            att.data_base64 + "=" * (-len(att.data_base64) % 4)
-        )
-        maintype, _, subtype = att.mime_type.partition("/")
-        if not subtype:
-            maintype, subtype = "application", "octet-stream"
-        msg.add_attachment(
-            data, maintype=maintype, subtype=subtype, filename=att.filename
-        )
-
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
-    return raw
 
 
 def _headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:

@@ -15,6 +15,7 @@ re-attached so they survive the replace.
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from models.gmail import (
@@ -23,6 +24,7 @@ from models.gmail import (
     GmailDraft,
     GmailDraftAttachment,
     GmailUpdateDraftInput,
+    InlineImageUpload,
 )
 from services.gmail_svc import _build_raw_message, _parse_message_resource
 
@@ -94,6 +96,39 @@ def _current_attachments(parsed: dict[str, Any]) -> list[dict[str, Any]]:
         for a in (parsed.get("attachments") or [])
         if a.get("filename") and (a.get("attachment_id") or a.get("data"))
     ]
+
+
+def _resolve_inline_images(
+    svc: Any, message_id: str, parsed: dict[str, Any]
+) -> list[InlineImageUpload]:
+    """Resolve CID-referenced inline images (filename-less ``Content-ID`` parts).
+
+    These belong to the HTML body, so they are preserved whenever the HTML body
+    is. ``_parse_message_resource`` captures inline-image bytes as *standard*
+    base64; normalize to base64url (the shape ``_build_raw_message`` decodes),
+    or re-download by ``attachmentId`` when the bytes were not inlined.
+    """
+    out: list[InlineImageUpload] = []
+    for a in parsed.get("attachments") or []:
+        content_id = a.get("content_id")
+        if not content_id or a.get("filename"):
+            continue
+        std_data = a.get("data")
+        if std_data:
+            raw = base64.b64decode(std_data + "=" * (-len(std_data) % 4))
+            data_b64 = base64.urlsafe_b64encode(raw).decode("ascii")
+        elif a.get("attachment_id"):
+            data_b64 = _download_attachment_data(svc, message_id, a["attachment_id"])
+        else:
+            continue
+        out.append(
+            InlineImageUpload(
+                content_id=content_id,
+                mime_type=a.get("mime_type") or "application/octet-stream",
+                data_base64=data_b64,
+            )
+        )
+    return out
 
 
 def _existing_to_upload(
@@ -179,13 +214,15 @@ def _rebuild_draft(
     body_html: str | None = None,
     in_reply_to: str | None = None,
     references: str | None = None,
+    inline_images: list[InlineImageUpload] | None = None,
 ) -> GmailDraft:
     """Replace a draft's MIME with the given state and return its echoed model.
 
     ``drafts().update`` is a whole-message replace; callers compute the desired
     field values (preserving what they did not change) and the full attachment
-    set before calling this. ``body_html`` preserves HTML-only bodies, and
-    ``in_reply_to``/``references`` preserve reply-threading headers.
+    set before calling this. ``body_html`` preserves HTML-only bodies,
+    ``inline_images`` keeps its cid: images, and ``in_reply_to``/``references``
+    preserve reply-threading headers.
     """
     raw = _build_raw_message(
         to=to,
@@ -197,6 +234,7 @@ def _rebuild_draft(
         in_reply_to=in_reply_to,
         references=references,
         attachments=attachment_uploads or None,
+        inline_images=inline_images or None,
     )
     body_dict = draft_message_body(raw, parsed.get("thread_id"))
     updated = (

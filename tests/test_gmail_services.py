@@ -1658,3 +1658,121 @@ class TestAppToolAttachmentCoercion(TestTemplate):
     def test_empty_attachment_dict_raises(self):
         with pytest.raises(ValueError, match="data_base64"):
             _coerce_attachments([{}])
+
+
+# ---------------------------------------------------------------------------
+# Inline (cid:) image preservation on rebuild
+# ---------------------------------------------------------------------------
+
+
+def _draft_resource_html_inline_image(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    img_cid: str = "img1",
+    img_bytes: bytes = b"PNGDATA",
+    thread_id: str = "t-1",
+) -> dict:
+    html = f'<p>see <img src="cid:{img_cid}"></p>'
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": "see",
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "multipart/related",
+                "headers": _headers({"To": to, "Subject": subject}),
+                "parts": [
+                    {
+                        "mimeType": "text/html",
+                        "body": {"data": _b64url(html), "size": len(html)},
+                    },
+                    {
+                        "mimeType": "image/png",
+                        "headers": _headers({"Content-ID": f"<{img_cid}>"}),
+                        "body": {
+                            "data": base64.urlsafe_b64encode(img_bytes).decode("ascii"),
+                            "size": len(img_bytes),
+                        },
+                    },
+                ],
+            },
+        },
+    }
+
+
+def _parts_by_type(raw_b64: str, content_type: str):
+    mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+    return [p for p in mime.walk() if p.get_content_type() == content_type]
+
+
+class TestInlineImagePreservation(TestTemplate):
+    def _run(self, original, update_input):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(update_input)
+            finally:
+                _stop(patches)
+        return _last_update_raw(mock)
+
+    def test_omitted_body_preserves_inline_image(self):
+        original = _draft_resource_html_inline_image(img_bytes=b"PNGDATA")
+        raw = self._run(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", subject="New subj"),
+        )
+        imgs = _parts_by_type(raw, "image/png")
+        assert len(imgs) == 1
+        assert imgs[0].get("Content-ID") == "<img1>"
+        assert imgs[0].get_payload(decode=True) == b"PNGDATA"
+        # The HTML body and its cid reference are intact.
+        assert any("cid:img1" in h for h in _mime_part_texts(raw, "text/html"))
+
+    def test_setting_plain_body_drops_orphaned_inline_image(self):
+        original = _draft_resource_html_inline_image()
+        raw = self._run(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="plain now"),
+        )
+        # HTML is gone, so the now-orphaned inline image is dropped too.
+        assert _parts_by_type(raw, "image/png") == []
+        assert any("plain now" in p for p in _mime_part_texts(raw, "text/plain"))
+
+    def test_add_attachment_keeps_inline_image(self):
+        original = _draft_resource_html_inline_image(img_bytes=b"PNGDATA")
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_add_attachment(
+                    GmailAddAttachmentInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachment=_new_upload(filename="doc.txt"),
+                    )
+                )
+            finally:
+                _stop(patches)
+        raw = _last_update_raw(mock)
+        imgs = _parts_by_type(raw, "image/png")
+        assert len(imgs) == 1
+        assert imgs[0].get("Content-ID") == "<img1>"
+        assert imgs[0].get_payload(decode=True) == b"PNGDATA"
+        # The newly-added file is a normal (mixed) attachment, not inline.
+        assert _attachment_filenames_in_raw(raw) == ["doc.txt"]

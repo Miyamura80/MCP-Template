@@ -39,6 +39,7 @@ from services import service
 from services.gmail_draft_helpers import (
     _draft_resource_to_model,
     _rebuild_draft,
+    _resolve_inline_images,
     _resolve_update_attachments,
     draft_message_body,
 )
@@ -207,13 +208,19 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
 
     # When the caller sets body, it replaces the content (plain text, no HTML).
     # When omitted, preserve whatever representation the draft already had -
-    # including an HTML-only body, which would otherwise be erased.
+    # including an HTML-only body (and its inline cid: images), which would
+    # otherwise be erased. Replacing the body with plain text orphans those
+    # images, so they are dropped along with the HTML.
     if "body" in fields_set:
         body = input.body or ""
         body_html = None
+        inline_images = []
     else:
         body = parsed.get("body_text") or ""
         body_html = parsed.get("body_html")
+        inline_images = (
+            _resolve_inline_images(svc, message_id, parsed) if body_html else []
+        )
 
     attachment_uploads = _resolve_update_attachments(svc, message_id, parsed, input)
 
@@ -230,6 +237,7 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
         attachment_uploads=attachment_uploads,
         in_reply_to=parsed.get("in_reply_to"),
         references=parsed.get("references"),
+        inline_images=inline_images,
     )
 
 
