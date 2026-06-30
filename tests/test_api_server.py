@@ -120,6 +120,15 @@ class TestAPIServer(TestTemplate):
         assert "/api/v1/services/greet" in routes
         assert "/api/v1/services/config_show" in routes
 
+    def test_mutating_service_requires_idempotency_key(self):
+        """gmail_send is mutating=True, so its route enforces Idempotency-Key."""
+        resp = self.client.post(
+            "/api/v1/services/gmail_send",
+            json={"draft_id": "draft-123"},
+        )
+        assert resp.status_code == 422
+        assert "Idempotency-Key" in resp.json()["error"]["message"]
+
     def test_billing_routes_registered(self):
         """Billing routes should be registered."""
         routes = [r.path for r in app.routes if hasattr(r, "path")]

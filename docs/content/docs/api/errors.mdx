@@ -45,8 +45,8 @@ request to thread your trace ID through the server logs.
 | `403` | `forbidden` | No | The key lacks the required [scope](/docs/api/authentication#scopes) |
 | `404` | `not_found` | No | Check the endpoint URL or resource ID |
 | `405` | `method_not_allowed` | No | Use the correct HTTP method |
-| `409` | `conflict` | Maybe | Resolve the conflicting state, then retry |
-| `422` | `validation_error` | No | Inspect `details.errors`; fix the body |
+| `409` | `conflict` | Maybe | A request with the same `Idempotency-Key` is still in progress - retry with backoff; a key left in-flight by a crashed request clears after the 24h retention window |
+| `422` | `validation_error` | No | Inspect `details.errors` and fix the body; also returned when an `Idempotency-Key` is reused with a different payload |
 | `429` | `rate_limited` | Yes | Back off and retry - honor `Retry-After`. See [Rate Limits](/docs/api/rate-limits) |
 | `500` | `internal_error` | Yes | Transient - retry with backoff; report the `request_id` if it persists |
 | `502` | `bad_gateway` | Yes | Upstream (e.g. payment provider) hiccup - retry with backoff |

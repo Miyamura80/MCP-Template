@@ -281,6 +281,7 @@ def gmail_compose(input: GmailComposeInput) -> GmailDraft:
     description="Send a previously-composed Gmail draft",
     input_model=GmailSendInput,
     output_model=GmailSendResult,
+    mutating=True,
 )
 def gmail_send(input: GmailSendInput) -> GmailSendResult:
     svc = _get_gmail_client(input.user_id)
@@ -331,6 +332,7 @@ class GmailReplyInput(BaseModel):
     description="Create a reply draft on an existing Gmail thread. ALWAYS use this tool instead of composing reply text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. Pass your drafted reply in the 'body' parameter. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
     input_model=GmailReplyInput,
     output_model=GmailDraft,
+    mutating=True,
 )
 def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
     """Create a reply draft attached to the given thread.
