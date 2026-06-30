@@ -54,6 +54,57 @@ class TestCLI(TestTemplate):
     def test_config_get_nonexistent(self):
         result = runner.invoke(app, ["config", "get", "nonexistent.key"])
         assert result.exit_code == 1
+        # Actionable error points at the discovery command.
+        assert "config show" in result.output
+
+    def test_config_set_dry_run(self):
+        result = runner.invoke(
+            app,
+            ["--dry-run", "config", "set", "llm_config.cache_enabled", "true"],
+        )
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+
+    def test_config_set_via_stdin_dry_run(self):
+        result = runner.invoke(
+            app,
+            ["--dry-run", "config", "set", "llm_config.cache_enabled", "--stdin"],
+            input="true\n",
+        )
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+
+    def test_config_set_missing_value_errors(self):
+        result = runner.invoke(app, ["config", "set", "some.key"], input="")
+        assert result.exit_code == 1
+        assert "no value" in result.output
+
+    def test_config_set_via_dash_sentinel_dry_run(self):
+        result = runner.invoke(
+            app,
+            ["--dry-run", "config", "set", "llm_config.cache_enabled", "-"],
+            input="true\n",
+        )
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.output
+        assert "true" in result.output
+
+    def test_help_shows_examples(self):
+        for cmd in (["greet"], ["doctor"], ["config", "set"], ["secrets", "set"]):
+            result = runner.invoke(app, [*cmd, "--help"])
+            assert result.exit_code == 0
+            assert "Examples:" in result.output
+
+    def test_help_examples_use_correct_flag_ordering(self):
+        # Global flags (--dry-run/--format) must precede the subcommand, or the
+        # example fails with exit 2. Assert on the EPILOG source strings rather
+        # than rendered --help output, which word-wraps at the terminal width.
+        from src.cli.commands import doctor, greet  # noqa: PLC0415
+
+        assert "mymcp --dry-run greet" in greet.EPILOG
+        assert "mymcp greet Ada --dry-run" not in greet.EPILOG
+        assert "mymcp --format json doctor" in doctor.EPILOG
+        assert "mymcp doctor --format json" not in doctor.EPILOG
 
     def test_format_json(self):
         result = runner.invoke(app, ["--format", "json", "config", "show"])
