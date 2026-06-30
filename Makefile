@@ -113,7 +113,7 @@ docs: ## Run docs with bun
 
 api: check_uv ## Run authenticated API server
 	@echo "$(GREEN)🌐 Starting API server...$(RESET)"
-	@$(PYTHON) mycli-api
+	@$(PYTHON) mymcp-serve
 
 mcp: check_uv ## Run MCP server locally (stdio)
 	@$(PYTHON) mymcp-mcp
