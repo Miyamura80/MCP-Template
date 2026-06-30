@@ -12,6 +12,23 @@ function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+/**
+ * Full "When to use" section (summary + when-to / when-not-to lists), shared by
+ * the long-form surfaces (llms-full.txt, agents.md). The concise llms.txt index
+ * renders a shorter variant inline.
+ */
+function whenToUseSection(): string {
+  return `## When to use
+
+${agentGuide.summary}
+
+Use ${site.name} when:
+${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
+
+Do not use ${site.name} when:
+${agentGuide.whenNotToUse.map((s) => `- ${s}`).join("\n")}`;
+}
+
 /** Concise llms.txt index (see https://llmstxt.org). */
 export function buildLlmsTxt(origin: string): string {
   const o = trimSlash(origin);
@@ -97,15 +114,7 @@ shared service registry over three interfaces - a CLI, an MCP server
 identically no matter how they are called. Any agent that speaks MCP can
 discover and call its tools.
 
-## When to use
-
-${agentGuide.summary}
-
-Use ${site.name} when:
-${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
-
-Do not use ${site.name} when:
-${agentGuide.whenNotToUse.map((s) => `- ${s}`).join("\n")}
+${whenToUseSection()}
 
 ## ${getStarted.heading}
 
@@ -202,15 +211,7 @@ ${site.description}
 This site documents an MCP server. Agents should connect over MCP to use its
 tools rather than scraping this page.
 
-## When to use
-
-${agentGuide.summary}
-
-Use ${site.name} when:
-${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
-
-Do not use ${site.name} when:
-${agentGuide.whenNotToUse.map((s) => `- ${s}`).join("\n")}
+${whenToUseSection()}
 
 ## MCP server
 
