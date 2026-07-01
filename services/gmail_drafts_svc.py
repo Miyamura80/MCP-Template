@@ -338,13 +338,17 @@ def _select_reply_recipient(
 
     for msg in reversed(messages):
         headers = _headers_to_dict((msg.get("payload") or {}).get("headers"))
-        sender = headers.get("reply-to") or headers.get("from") or ""
-        # Reply to the first message not sent solely by the owner. The sender
-        # header is returned verbatim (not self-stripped): a Reply-To is the
-        # address the sender explicitly asked replies to go to (RFC 5322 5.2.2),
-        # so we honor it as-is even in the rare case it also lists the owner.
-        if any(not _is_self(addr) for _, addr in _addresses(sender)):
-            return sender
+        # Ownership is decided by ``From`` - who actually sent the message - not
+        # ``Reply-To``. An owner-sent message may carry a non-self ``Reply-To``
+        # (e.g. "reply to my assistant"); it must still count as the owner's so
+        # the loop skips past it to the real other party. Messages with no
+        # attributable sender are skipped too.
+        from_addresses = _addresses(headers.get("from"))
+        if not from_addresses or all(_is_self(addr) for _, addr in from_addresses):
+            continue
+        # Incoming message: reply to the address its sender asked for - the
+        # ``Reply-To`` if present (RFC 5322 5.2.2), else ``From`` - verbatim.
+        return headers.get("reply-to") or headers.get("from") or ""
 
     # Every message in the thread was sent by the account owner: reply to the
     # people the latest message was addressed to (To + Cc), minus self.

@@ -1189,6 +1189,53 @@ class TestGmailReplyToThread(TestTemplate):
         mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
         assert mime["To"] == "chosen@example.com"
 
+    def test_owner_sent_last_with_non_self_reply_to_is_still_skipped(self):
+        # The owner (alice) sent the newest message and set a non-self Reply-To
+        # (e.g. "reply to my assistant"). Ownership is judged by From, so this
+        # message is still recognized as the owner's and skipped - the reply
+        # goes to the earlier other party (Tom), NOT the Reply-To address.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "Tom <tom@example.com>",
+                            "To": "alice@example.com",
+                            "Subject": "Question",
+                        },
+                    ),
+                    self._thread_msg(
+                        "m-2",
+                        {
+                            "From": "alice@example.com",
+                            "Reply-To": "assistant@other.com",
+                            "To": "Tom <tom@example.com>",
+                            "Subject": "Re: Question",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-rt", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
     def test_caller_supplied_cc_and_bcc_pass_through(self):
         with _patch_db() as factory:
             _seed_token(factory)
