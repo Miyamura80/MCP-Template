@@ -25,6 +25,7 @@ from models.gmail import (
     GmailDraftAttachment,
     GmailUpdateDraftInput,
     InlineImageUpload,
+    _UnsetType,
 )
 from services.gmail_svc import _build_raw_message, _parse_message_resource
 
@@ -62,6 +63,22 @@ def _draft_resource_to_model(draft: dict[str, Any]) -> GmailDraft:
         body=parsed.get("body_text") or parsed.get("body_html"),
         attachments=atts,
     )
+
+
+def _fetch_draft_model(svc: Any, draft_id: str) -> GmailDraft:
+    """Re-read a draft at ``format=full`` and map it - the authoritative saved state.
+
+    Gmail's ``drafts().create`` / ``drafts().update`` responses carry only a
+    minimal message (``id`` / ``threadId``), so mapping them directly yields an
+    all-null ``GmailDraft`` and misses the attachment ids Gmail assigns during
+    the whole-message replace. A follow-up ``get`` returns the persisted
+    recipients, subject, body, and current attachment ids that every draft
+    mutation's response contract promises.
+    """
+    full = (
+        svc.users().drafts().get(userId="me", id=draft_id, format="full").execute()
+    )
+    return _draft_resource_to_model(full)
 
 
 def _download_attachment_data(svc: Any, message_id: str, attachment_id: str) -> str:
@@ -157,14 +174,14 @@ def _resolve_update_attachments(
 ) -> list[AttachmentUpload]:
     """Resolve the desired attachment uploads for an update, honoring omit/null.
 
-    - ``attachments`` omitted (key absent)  -> preserve every existing file.
+    - ``attachments`` omitted (``UNSET``)   -> preserve every existing file.
     - ``attachments`` is ``null`` or ``[]`` -> clear all files.
     - ``attachments`` is a list            -> each item is a new upload
       (``AttachmentInput``) or a reference to keep an existing file
       (``AttachmentReference``).
     """
     current = _current_attachments(parsed)
-    if "attachments" not in input.model_fields_set:
+    if isinstance(input.attachments, _UnsetType):
         return [_existing_to_upload(svc, message_id, a) for a in current]
     if input.attachments is None:
         return []
@@ -237,7 +254,7 @@ def _rebuild_draft(
         inline_images=inline_images or None,
     )
     body_dict = draft_message_body(raw, parsed.get("thread_id"))
-    updated = (
-        svc.users().drafts().update(userId="me", id=draft_id, body=body_dict).execute()
-    )
-    return _draft_resource_to_model(updated)
+    svc.users().drafts().update(userId="me", id=draft_id, body=body_dict).execute()
+    # The update response omits the message payload and its post-replace
+    # attachment ids; re-fetch at format=full for the true saved state.
+    return _fetch_draft_model(svc, draft_id)

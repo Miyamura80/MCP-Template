@@ -53,7 +53,7 @@ from models.gmail import (
     GmailThreadMessage,
 )
 from services import service
-from services.gmail_drafts_svc import _draft_resource_to_model
+from services.gmail_draft_helpers import _draft_resource_to_model
 from services.gmail_svc import (
     _get_gmail_client,
     _headers_to_dict,

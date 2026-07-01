@@ -7,7 +7,61 @@ a later wiring step (we deliberately do not use ContextVars).
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+# ---------------------------------------------------------------------------
+# "Field omitted" vs "field set to null" sentinel
+# ---------------------------------------------------------------------------
+
+
+class _UnsetType:
+    """Sentinel that survives the MCP transport to mean "field was omitted".
+
+    A patch tool needs three distinct states per field: *omitted* (leave the
+    stored value untouched), *null* (clear the stored value), and *a value*
+    (overwrite). ``model_fields_set`` cannot supply this over MCP: FastMCP
+    materializes every declared parameter to its default before invoking the
+    tool (``func_metadata.model_dump_one_level`` calls ``getattr`` for every
+    field), so an omitted field arrives as its default and lands in
+    ``model_fields_set`` indistinguishably from one the caller passed. With a
+    default of ``None`` that collapses omitted into null and silently clears
+    fields the caller never mentioned.
+
+    A dedicated sentinel default survives that round-trip: omitted -> ``UNSET``
+    (preserve), ``null`` -> ``None`` (clear), value -> the value. Under
+    ``arbitrary_types_allowed`` Pydantic validates it by identity (no coercion)
+    and contributes no JSON schema for it, so the wire contract for these
+    fields stays ``string | null`` - the sentinel never leaks into the tool's
+    advertised input schema.
+    """
+
+    _instance: "_UnsetType | None" = None
+
+    def __new__(cls) -> "_UnsetType":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+UNSET = _UnsetType()
+
+
+def unset_to[T](value: T | _UnsetType, fallback: T) -> T:
+    """Resolve a patch field: ``fallback`` when omitted (``UNSET``), else ``value``.
+
+    ``value`` may itself be ``None`` (an explicit "clear"), which is returned
+    verbatim - only the ``UNSET`` sentinel selects the fallback.
+    """
+    if isinstance(value, _UnsetType):
+        return fallback
+    return value
+
 
 # ---------------------------------------------------------------------------
 # Connect / status / disconnect
@@ -193,6 +247,12 @@ class GmailUpdateDraftInput(BaseModel):
     draft; a field you set to ``null`` is cleared. This applies to ``to``,
     ``cc``, ``bcc``, ``subject``, ``body``, and ``attachments``.
 
+    The omitted-vs-null distinction is carried by the ``UNSET`` sentinel
+    default rather than ``model_fields_set``, because the latter cannot tell
+    the two apart over the MCP transport (see ``_UnsetType``). Every patchable
+    field therefore defaults to ``UNSET`` (preserve) instead of ``None``
+    (clear).
+
     ``attachments`` accepts a mix of new uploads (``AttachmentInput`` with
     base64 bytes) and references to files already on the draft
     (``AttachmentReference`` with just an ``attachment_id``), so a caller can
@@ -201,14 +261,17 @@ class GmailUpdateDraftInput(BaseModel):
     drop them all.
     """
 
+    # UNSET is not a Pydantic type, so allow it as a field default/value.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     user_id: str = ""
     draft_id: str
-    to: str | None = None
-    subject: str | None = None
-    body: str | None = None
-    cc: str | None = None
-    bcc: str | None = None
-    attachments: list[AttachmentInput | AttachmentReference] | None = None
+    to: str | None | _UnsetType = UNSET
+    subject: str | None | _UnsetType = UNSET
+    body: str | None | _UnsetType = UNSET
+    cc: str | None | _UnsetType = UNSET
+    bcc: str | None | _UnsetType = UNSET
+    attachments: list[AttachmentInput | AttachmentReference] | None | _UnsetType = UNSET
 
 
 class GmailAddAttachmentInput(BaseModel):
