@@ -50,6 +50,24 @@ class GmailNotConnectedError(Exception):
     """Raised when a Gmail-API service is invoked for a user with no active token row."""
 
 
+class GmailAttachmentTooLargeError(Exception):
+    """Raised when a fetched attachment exceeds the configured size ceiling.
+
+    Carries the sizes so a transport can build a precise client-facing message
+    (the HTTP API maps this to 413 Payload Too Large).
+    """
+
+    def __init__(self, *, attachment_id: str, size: int, max_bytes: int) -> None:
+        self.attachment_id = attachment_id
+        self.size = size
+        self.max_bytes = max_bytes
+        super().__init__(
+            f"Attachment {attachment_id} is {size} bytes, over the {max_bytes}-byte "
+            "limit (global_config.gmail.max_attachment_bytes). Raise the limit or "
+            "handle this file out of band."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------

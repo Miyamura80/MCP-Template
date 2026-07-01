@@ -1,33 +1,11 @@
-"""Gmail inbox / threads / curate services.
+"""Gmail inbox / thread / attachment services.
 
 All services here are headless: pure sync functions that take a Pydantic
 input model and return a Pydantic output model. UI/enhancer affordances
 live in ``mcp_server/enhancers`` and never touch this module.
 
-Importance scoring for ``gmail_curate_inbox`` is deterministic for v1:
-
-* +1.0  if it carries ``Needs Reply`` (dominates recency)
-* +0.3  if it carries the ``UNREAD`` label
-* +0.3  if it carries ``Customer/Prospect``
-* +0.25 if it carries ``To Do``
-* +0.2  if it carries ``Travel``
-* recency: ``0.3 * max(0, 1 - age_hours / 168)`` (linear decay over a week)
-
-Note: ``FYI`` label is intentionally excluded - too noisy to be a useful signal.
-
-Note: Gmail's auto-applied ``IMPORTANT`` label is intentionally excluded -
-its classifier is too noisy to be a reliable signal.
-
-Gmail category tabs ``Updates``, ``Promotions``, ``Social``, and ``Forums``
-are excluded from the curate query - only Primary tab emails enter the
-scoring pipeline. User-applied labels from the classification cronjob
-(``Newsletter``, ``Promotion``, ``Marketing``, ``Notifications``,
-``Product Updates``, ``Marketing/Webinar``, ``Webinar``, ``Cold Outbound``,
-``NPS Survey``, ``Survey``) are also excluded.
-
-Upgrade path: swap the deterministic scorer for a DSPY signature that
-ranks ``(subject, snippet, sender, age, labels)`` tuples; the function
-shape stays the same so callers are unaffected.
+The curated-inbox ranking lives in ``services.gmail_curate_svc``, which
+reuses ``_internal_date_to_dt`` and ``_BATCH_CHUNK_SIZE`` from here.
 """
 
 from __future__ import annotations
@@ -42,13 +20,9 @@ from pydantic import BaseModel
 from common import global_config
 from models.gmail import (
     GmailAttachmentData,
-    GmailCuratedThread,
-    GmailCurateInboxInput,
-    GmailCurateInboxResult,
     GmailDraft,
     GmailGetAttachmentInput,
     GmailGetThreadInput,
-    GmailLabelChip,
     GmailListInboxInput,
     GmailListInboxResult,
     GmailMessageSummary,
@@ -58,6 +32,7 @@ from models.gmail import (
 from services import service
 from services.gmail_drafts_svc import _draft_resource_to_model
 from services.gmail_svc import (
+    GmailAttachmentTooLargeError,
     _b64url_to_std,
     _get_gmail_client,
     _headers_to_dict,
@@ -245,43 +220,6 @@ def _resolve_inline_images(svc: Any, message_id: str, parsed: dict[str, Any]) ->
 _BATCH_CHUNK_SIZE = 50  # Gmail batch API limit is 100; stay well under
 
 
-def _batch_get_threads(
-    svc: Any,
-    thread_ids: list[str],
-    *,
-    fmt: str = "metadata",
-    metadata_headers: list[str] | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Fetch multiple threads in a single batched HTTP request.
-
-    Returns a dict mapping thread_id → thread payload. Threads that fail
-    (deleted between list and get) are silently skipped.
-    """
-    results: dict[str, dict[str, Any]] = {}
-
-    for offset in range(0, len(thread_ids), _BATCH_CHUNK_SIZE):
-        chunk = thread_ids[offset : offset + _BATCH_CHUNK_SIZE]
-        batch = svc.new_batch_http_request()
-        for tid in chunk:
-            kwargs: dict[str, Any] = {"userId": "me", "id": tid, "format": fmt}
-            if metadata_headers:
-                kwargs["metadataHeaders"] = metadata_headers
-            req = svc.users().threads().get(**kwargs)
-
-            def _cb(
-                request_id: str, response: Any, exception: Any, _tid: str = tid
-            ) -> None:
-                if exception is not None:
-                    log.warning("Batch thread fetch failed for {}: {}", _tid, exception)
-                    return
-                results[_tid] = response
-
-            batch.add(req, callback=_cb)
-        batch.execute()
-
-    return results
-
-
 def _batch_get_messages(
     svc: Any,
     message_ids: list[str],
@@ -315,100 +253,6 @@ def _batch_get_messages(
         batch.execute()
 
     return results
-
-
-_USER_LABEL_BOOSTS: dict[str, float] = {
-    "Needs Reply": 1.0,
-    "Customer/Prospect": 0.30,
-    "To Do": 0.25,
-    "Travel": 0.20,
-}
-
-_DISPLAY_ONLY_LABELS: set[str] = {
-    "FYI",
-    "Waiting",
-    "Action Required",
-    "High Priority",
-    "Follow-up",
-    "Needs Review",
-    "KYC",
-    "Fundraising",
-}
-
-_EXCLUDE_LABELS: set[str] = {
-    "Newsletter",
-    "Promotion",
-    "Marketing",
-    "Notifications",
-    "Product Updates",
-    "Marketing/Webinar",
-    "Webinar",
-    "Cold Outbound",
-    "NPS Survey",
-    "Survey",
-}
-
-_ALL_CHIP_LABELS: set[str] = set(_USER_LABEL_BOOSTS) | _DISPLAY_ONLY_LABELS
-
-_ALL_TRACKED_LABELS: set[str] = _ALL_CHIP_LABELS | _EXCLUDE_LABELS
-
-_SYSTEM_LABEL_COLORS: dict[str, tuple[str, str]] = {
-    "UNREAD": ("#e8f0fe", "#1a73e8"),
-}
-
-
-def _format_recency(age_hours: float) -> str:
-    if age_hours < 1:
-        return "Just now"
-    if age_hours < 24:
-        return f"{int(age_hours)}h ago"
-    days = age_hours / 24.0
-    if days < 7:
-        d = int(days)
-        return f"{d} day{'s' if d != 1 else ''} ago"
-    weeks = days / 7.0
-    w = int(weeks)
-    return f"{w} week{'s' if w != 1 else ''} ago"
-
-
-def _score_thread(
-    *,
-    label_ids: list[str],
-    label_names: set[str],
-    label_colors: dict[str, tuple[str, str]],
-    last_message_at: datetime | None,
-    now: datetime,
-) -> tuple[float, list[str], list[GmailLabelChip]]:
-    """Deterministic v1 importance score; see module docstring."""
-    score = 0.0
-    reasons: list[str] = []
-    chips: list[GmailLabelChip] = []
-
-    if "UNREAD" in label_ids:
-        score += 0.3
-        bg, text = _SYSTEM_LABEL_COLORS["UNREAD"]
-        chips.append(GmailLabelChip(name="Unread", bg_color=bg, text_color=text))
-
-    for name, boost in _USER_LABEL_BOOSTS.items():
-        if name in label_names:
-            score += boost
-            bg, text = label_colors.get(name, ("#f1f3f4", "#444444"))
-            chips.append(GmailLabelChip(name=name, bg_color=bg, text_color=text))
-
-    for name in _DISPLAY_ONLY_LABELS:
-        if name in label_names:
-            bg, text = label_colors.get(name, ("#f1f3f4", "#444444"))
-            chips.append(GmailLabelChip(name=name, bg_color=bg, text_color=text))
-
-    if last_message_at is not None:
-        age_seconds = (now - last_message_at).total_seconds()
-        age_hours = max(0.0, age_seconds / 3600.0)
-        recency = 0.3 * max(0.0, 1.0 - age_hours / 168.0)
-        if recency > 0:
-            score += recency
-            reasons.append(_format_recency(age_hours))
-
-    return score, reasons, chips
 
 
 _MCP_DONE_LABEL_NAME = "MCP/Done"
@@ -556,6 +400,23 @@ def gmail_get_thread(input: GmailGetThreadInput) -> GmailThread:
     )
 
 
+def _decoded_size(raw_size: Any, data_base64: str) -> int:
+    """Best-effort decoded byte count for an attachment.
+
+    Prefer Gmail's ``size`` metadata (which it may return as a string), and
+    fall back to estimating from the base64 payload length when it is missing
+    or unparseable - so a missing size can never silently bypass the cap.
+    """
+    if raw_size is not None:
+        try:
+            return int(raw_size)
+        except (TypeError, ValueError):
+            pass
+    # Standard base64 encodes 3 bytes per 4 chars; this slightly over-estimates
+    # by the padding, which is the safe direction for a ceiling check.
+    return (len(data_base64) * 3) // 4
+
+
 @service(
     name="gmail_get_attachment",
     description="Fetch the raw base64 bytes of a single attachment or inline image on a Gmail message, identified by the message_id + attachment_id echoed by gmail_get_thread. Use this to pull one file on demand instead of loading every attachment into the thread payload.",
@@ -571,169 +432,24 @@ def gmail_get_attachment(input: GmailGetAttachmentInput) -> GmailAttachmentData:
         .get(userId="me", messageId=input.message_id, id=input.attachment_id)
         .execute()
     )
+    data_base64 = _b64url_to_std(resp.get("data", "") or "")
     # The returned base64 lands directly in the model's context, so refuse files
     # larger than the configured ceiling rather than blowing the context window.
-    # Gmail can hand numeric fields back as strings (see _internal_date_to_dt),
-    # so coerce before comparing or the guard would silently skip a string size.
-    raw_size = resp.get("size")
-    try:
-        size: int | None = None if raw_size is None else int(raw_size)
-    except (TypeError, ValueError):
-        size = None
+    # Gmail can hand numeric fields back as strings (see _internal_date_to_dt);
+    # when the size metadata is missing or unparseable, estimate the decoded
+    # size from the payload we already fetched so the cap can't be bypassed.
+    size = _decoded_size(resp.get("size"), data_base64)
     max_bytes = global_config.gmail.max_attachment_bytes
-    if size is not None and size > max_bytes:
-        raise ValueError(
-            f"Attachment {input.attachment_id} is {size} bytes, over the "
-            f"{max_bytes}-byte limit (global_config.gmail.max_attachment_bytes). "
-            "Raise the limit or handle this file out of band."
+    if size > max_bytes:
+        raise GmailAttachmentTooLargeError(
+            attachment_id=input.attachment_id, size=size, max_bytes=max_bytes
         )
     return GmailAttachmentData(
         message_id=input.message_id,
         attachment_id=input.attachment_id,
         size=size,
-        data_base64=_b64url_to_std(resp.get("data", "") or ""),
+        data_base64=data_base64,
     )
-
-
-def _build_label_lookups(
-    svc: Any,
-) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
-    """Build label ID→name and name→(bg, text) color maps for tracked labels."""
-    label_id_to_name: dict[str, str] = {}
-    label_colors: dict[str, tuple[str, str]] = {}
-    labels_resp = svc.users().labels().list(userId="me").execute()
-    for lbl in labels_resp.get("labels", []):
-        name = lbl.get("name")
-        if name in _ALL_TRACKED_LABELS:
-            label_id_to_name[lbl["id"]] = name
-            color = lbl.get("color") or {}
-            bg = color.get("backgroundColor", "#f1f3f4")
-            text = color.get("textColor", "#444444")
-            label_colors[name] = (bg, text)
-    return label_id_to_name, label_colors
-
-
-def _build_draft_thread_map(svc: Any) -> dict[str, str]:
-    """Build thread_id → draft_id map from a single drafts.list call."""
-    draft_thread_map: dict[str, str] = {}
-    try:
-        drafts_resp = svc.users().drafts().list(userId="me", maxResults=100).execute()
-        for d in drafts_resp.get("drafts", []) or []:
-            d_msg = d.get("message") or {}
-            tid = d_msg.get("threadId")
-            if tid and d.get("id"):
-                draft_thread_map[tid] = d["id"]
-    except Exception:  # noqa: BLE001  # drafts lookup is best-effort; don't fail curate
-        log.debug("drafts.list failed during curate; proceeding without draft info")
-    return draft_thread_map
-
-
-def _thread_has_noise_labels(
-    messages: list[dict[str, Any]],
-    label_id_to_name: dict[str, str],
-) -> bool:
-    """Return ``True`` if any message in the thread carries an excluded label."""
-    for msg in messages:
-        for lid in msg.get("labelIds") or []:
-            name = label_id_to_name.get(lid)
-            if name and name in _EXCLUDE_LABELS:
-                return True
-    return False
-
-
-@service(
-    name="gmail_curate_inbox",
-    description="Rank recent inbox threads by a deterministic importance score. When an interactive UI is rendered alongside the result, keep your text response brief (a one-line summary) since the user can browse details in the UI. Only elaborate if the user asks.",
-    input_model=GmailCurateInboxInput,
-    output_model=GmailCurateInboxResult,
-)
-def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
-    svc = _get_gmail_client(input.user_id)
-    label_id_to_name, label_colors = _build_label_lookups(svc)
-    draft_thread_map = _build_draft_thread_map(svc)
-
-    base = (
-        "in:inbox -label:MCP-Done"
-        " -category:updates -category:promotions -category:social -category:forums"
-        " -label:Newsletter -label:Promotion -label:Marketing -label:Notifications"
-        ' -label:"Product Updates" -label:"Marketing/Webinar" -label:Webinar'
-        ' -label:"Cold Outbound" -label:"NPS Survey" -label:Survey'
-    )
-    q = f"{base} ({input.query})" if input.query else base
-    over_fetch = max(input.limit * 3, 30)
-    listing = (
-        svc.users().threads().list(userId="me", q=q, maxResults=over_fetch).execute()
-    )
-
-    now = datetime.now(UTC)
-
-    thread_ids = [
-        stub["id"] for stub in (listing.get("threads", []) or []) if stub.get("id")
-    ]
-    fetched_threads = (
-        _batch_get_threads(
-            svc,
-            thread_ids,
-            metadata_headers=["From", "Subject", "Date"],
-        )
-        if thread_ids
-        else {}
-    )
-
-    curated: list[GmailCuratedThread] = []
-
-    for thread_id in thread_ids:
-        thread = fetched_threads.get(thread_id)
-        if thread is None:
-            continue
-
-        messages = thread.get("messages") or []
-        if not messages:
-            continue
-
-        if _thread_has_noise_labels(messages, label_id_to_name):
-            continue
-
-        last_msg = messages[-1]
-        headers = _headers_to_dict((last_msg.get("payload") or {}).get("headers"))
-        last_message_at = _internal_date_to_dt(last_msg.get("internalDate"))
-        all_label_ids: set[str] = set()
-        for msg in messages:
-            all_label_ids.update(msg.get("labelIds") or [])
-        label_ids: list[str] = list(all_label_ids)
-        label_names = {
-            label_id_to_name[lid] for lid in label_ids if lid in label_id_to_name
-        }
-
-        score, reasons, chips = _score_thread(
-            label_ids=label_ids,
-            label_names=label_names,
-            label_colors=label_colors,
-            last_message_at=last_message_at,
-            now=now,
-        )
-
-        tid = thread.get("id") or thread_id
-        draft_id = draft_thread_map.get(tid)
-        curated.append(
-            GmailCuratedThread.model_validate(
-                {
-                    "thread_id": tid,
-                    "subject": headers.get("subject"),
-                    "from": headers.get("from"),
-                    "snippet": last_msg.get("snippet"),
-                    "last_message_at": last_message_at,
-                    "importance_score": score,
-                    "reasons": reasons,
-                    "labels": [c.model_dump() for c in chips],
-                    "has_draft": draft_id is not None,
-                    "draft_id": draft_id,
-                }
-            )
-        )
-
-    curated.sort(key=lambda t: t.importance_score, reverse=True)
-    return GmailCurateInboxResult(threads=curated[: input.limit])
 
 
 @service(

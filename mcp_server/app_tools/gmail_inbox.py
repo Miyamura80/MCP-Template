@@ -27,6 +27,9 @@ from models.gmail import (
     GmailGetThreadInput,
     GmailThread,
 )
+from services.gmail_curate_svc import (
+    gmail_curate_inbox as _gmail_curate_inbox,
+)
 from services.gmail_drafts_svc import (
     GmailReplyInput,
 )
@@ -45,9 +48,6 @@ from services.gmail_messages_svc import (
 )
 from services.gmail_messages_svc import (
     gmail_archive_thread as _gmail_archive_thread,
-)
-from services.gmail_messages_svc import (
-    gmail_curate_inbox as _gmail_curate_inbox,
 )
 from services.gmail_messages_svc import (
     gmail_get_thread as _gmail_get_thread,

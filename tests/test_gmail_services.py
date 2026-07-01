@@ -46,6 +46,7 @@ from services.gmail_attachments_svc import (
     gmail_add_attachment,
     gmail_remove_attachment,
 )
+from services.gmail_curate_svc import gmail_curate_inbox
 from services.gmail_drafts_svc import (
     GmailReplyInput,
     gmail_compose,
@@ -59,13 +60,13 @@ from services.gmail_drafts_svc import (
 from services.gmail_messages_svc import (
     GmailThreadModifyInput,
     gmail_archive_thread,
-    gmail_curate_inbox,
     gmail_get_attachment,
     gmail_get_thread,
     gmail_list_inbox,
     gmail_mark_thread_read,
 )
 from services.gmail_svc import (
+    GmailAttachmentTooLargeError,
     GmailNotConnectedError,
     _build_raw_message,
     _get_gmail_client,
@@ -344,6 +345,7 @@ def _patch_client(mock_svc: MagicMock):
         patch("services.gmail_svc._get_gmail_client", return_value=mock_svc),
         patch("services.gmail_drafts_svc._get_gmail_client", return_value=mock_svc),
         patch("services.gmail_messages_svc._get_gmail_client", return_value=mock_svc),
+        patch("services.gmail_curate_svc._get_gmail_client", return_value=mock_svc),
         patch(
             "services.gmail_attachments_svc._get_gmail_client", return_value=mock_svc
         ),
@@ -866,7 +868,33 @@ class TestGmailGetAttachment(TestTemplate):
             try:
                 with (
                     patch.object(global_config.gmail, "max_attachment_bytes", 5),
-                    pytest.raises(ValueError, match="over the 5-byte limit"),
+                    pytest.raises(
+                        GmailAttachmentTooLargeError, match="over the 5-byte limit"
+                    ),
+                ):
+                    gmail_get_attachment(
+                        GmailGetAttachmentInput(
+                            user_id="alice", message_id="m-1", attachment_id="att-1"
+                        )
+                    )
+            finally:
+                _stop(patches)
+
+    def test_missing_size_estimated_from_payload_and_capped(self):
+        # No 'size' metadata: the guard must estimate from the base64 payload
+        # so a missing size can't bypass the cap.
+        blob = _gmail_attachment_blob(b"PDFBYTESPDFBYTES")
+        blob.pop("size", None)
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().messages().attachments().get().execute.return_value = blob
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with (
+                    patch.object(global_config.gmail, "max_attachment_bytes", 2),
+                    pytest.raises(GmailAttachmentTooLargeError),
                 ):
                     gmail_get_attachment(
                         GmailGetAttachmentInput(
@@ -948,7 +976,7 @@ class TestGmailCurateInbox(TestTemplate):
             patches = _patch_client(mock)
             _apply(patches)
             with patch(
-                "services.gmail_messages_svc._batch_get_threads",
+                "services.gmail_curate_svc._batch_get_threads",
                 side_effect=fake_batch_get_threads,
             ):
                 try:
@@ -992,7 +1020,7 @@ class TestGmailCurateInbox(TestTemplate):
             patches = _patch_client(mock)
             _apply(patches)
             with patch(
-                "services.gmail_messages_svc._batch_get_threads",
+                "services.gmail_curate_svc._batch_get_threads",
                 side_effect=fake_batch_get_threads,
             ):
                 try:
