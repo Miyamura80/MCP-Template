@@ -188,16 +188,15 @@ def _resolve_signature_default(param: inspect.Parameter, field_info: Any) -> Any
     ... input_value=<factory>" and making a nominally optional field
     effectively required. Resolve the factory to a concrete value so the field
     stays genuinely optional.
+
+    ``FieldInfo.get_default`` runs the factory for us, dispatching between the
+    zero-arg and validated-data factory forms by arity (``validated_data`` is
+    ignored by a zero-arg factory) and returning a fresh value per call - so
+    mutable defaults stay isolated across tool invocations.
     """
     if field_info is None or field_info.default_factory is None:
         return param.default
-    factory = field_info.default_factory
-    try:
-        return factory()
-    except TypeError:
-        # Pydantic also allows a factory that receives already-validated data;
-        # we have none at registration time, so pass an empty mapping.
-        return factory({})
+    return field_info.get_default(call_default_factory=True, validated_data={})
 
 
 def _apply_tool_signature(
