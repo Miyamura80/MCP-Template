@@ -1056,6 +1056,107 @@ class TestGmailReplyToThread(TestTemplate):
             finally:
                 _stop(patches)
 
+    def _patch_multi_reply(self, *, messages: list[dict], created_draft: dict):
+        """Mock a thread with several messages (thread order) + drafts.create."""
+        mock = _make_mock_service()
+        mock.users().threads().get().execute.return_value = {
+            "id": "t-rep",
+            "messages": messages,
+        }
+        mock.users().drafts().create().execute.return_value = created_draft
+        return mock
+
+    @staticmethod
+    def _thread_msg(msg_id: str, headers: dict[str, str]) -> dict:
+        return {
+            "id": msg_id,
+            "internalDate": "1700000000000",
+            "payload": {"headers": _headers(headers)},
+        }
+
+    def test_replies_to_other_party_when_owner_sent_last_message(self):
+        # Seeded account is alice@example.com. Tom wrote first, then alice
+        # replied - so the latest message is from self. The reply must default
+        # to Tom, not alice, otherwise the owner emails themselves.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "Tom <tom@example.com>",
+                            "To": "alice@example.com",
+                            "Subject": "Question",
+                        },
+                    ),
+                    self._thread_msg(
+                        "m-2",
+                        {
+                            "From": "alice@example.com",
+                            "To": "Tom <tom@example.com>",
+                            "Subject": "Re: Question",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-self", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
+    def test_replies_to_recipients_when_all_messages_from_self(self):
+        # The only message in the thread was sent by the owner. Reply to the
+        # people it was addressed to (minus self), not the owner.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "Tom <tom@example.com>",
+                            "Cc": "alice@example.com, Sue <sue@example.com>",
+                            "Subject": "Heads up",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-self2", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        # Tom (To) and Sue (Cc) survive; alice (self, in Cc) is dropped.
+        assert mime["To"] == "Tom <tom@example.com>, Sue <sue@example.com>"
+
 
 # ---------------------------------------------------------------------------
 # Non-destructive update + stable attachment handles (this change)

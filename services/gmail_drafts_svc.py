@@ -13,6 +13,7 @@ user has no active token row; the FastMCP factory surfaces it as
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from email.utils import formataddr, getaddresses
 from typing import Any
 
 from loguru import logger as log
@@ -44,6 +45,7 @@ from services.gmail_draft_helpers import (
     draft_message_body,
 )
 from services.gmail_svc import (
+    _account_email,
     _build_raw_message,
     _get_gmail_client,
     _headers_to_dict,
@@ -312,6 +314,58 @@ def gmail_discard_draft(input: GmailDiscardDraftInput) -> GmailDiscardDraftResul
 # ---------------------------------------------------------------------------
 
 
+def _addresses(header_value: str | None) -> list[tuple[str, str]]:
+    """Parse an address header into ``[(display_name, email), ...]`` pairs.
+
+    Drops entries with no email address (e.g. a stray group syntax remnant).
+    """
+    if not header_value:
+        return []
+    return [(name, addr) for name, addr in getaddresses([header_value]) if addr]
+
+
+def _select_reply_recipient(
+    messages: list[dict[str, Any]], self_email: str | None
+) -> str:
+    """Choose the default ``To`` for a reply to ``messages`` (thread order).
+
+    A reply should reach the other party, not the account owner. Walk the
+    thread newest-first and reply to the sender (``Reply-To`` falling back to
+    ``From``, RFC 5322 5.2.2) of the most recent message NOT sent by the owner.
+    If every message was sent by the owner - e.g. they sent the last message
+    and are now following up - fall back to the recipients (``To`` + ``Cc``) of
+    the latest message with the owner removed, so the reply still addresses the
+    people in the conversation rather than the owner themselves.
+
+    When ``self_email`` is unknown (None) no address matches "self", so this
+    reduces to the historical behavior: reply to the last message's sender.
+    """
+    self_norm = self_email.strip().lower() if self_email else None
+
+    def _is_self(addr: str) -> bool:
+        return self_norm is not None and addr.strip().lower() == self_norm
+
+    for msg in reversed(messages):
+        headers = _headers_to_dict((msg.get("payload") or {}).get("headers"))
+        sender = headers.get("reply-to") or headers.get("from") or ""
+        if any(not _is_self(addr) for _, addr in _addresses(sender)):
+            return sender
+
+    # Every message in the thread was sent by the account owner: reply to the
+    # people the latest message was addressed to (To + Cc), minus self.
+    last_headers = _headers_to_dict((messages[-1].get("payload") or {}).get("headers"))
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for field in ("to", "cc"):
+        for name, addr in _addresses(last_headers.get(field)):
+            key = addr.lower()
+            if _is_self(addr) or key in seen:
+                continue
+            seen.add(key)
+            recipients.append(formataddr((name, addr)))
+    return ", ".join(recipients)
+
+
 class GmailReplyInput(BaseModel):
     """Input for ``gmail_reply_to_thread``: create a reply draft on a thread.
 
@@ -337,12 +391,14 @@ class GmailReplyInput(BaseModel):
 def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
     """Create a reply draft attached to the given thread.
 
-    Derives ``To`` from the last message's ``Reply-To`` header when present,
-    falling back to ``From`` (RFC 5322 5.2.2). Prefixes the subject with ``Re:``
-    unless the originating subject already starts with ``Re:``. Propagates the
-    parent's ``Message-ID`` as ``In-Reply-To`` and appends to ``References``
-    so non-Gmail MUAs also thread the conversation; Gmail itself uses the
-    ``threadId`` on the API wrapper.
+    Derives ``To`` from the sender (``Reply-To`` falling back to ``From``,
+    RFC 5322 5.2.2) of the most recent message the account owner did NOT send,
+    so a reply reaches the other party rather than defaulting to the owner's own
+    address when they happen to have sent the last message. Prefixes the subject
+    with ``Re:`` unless the originating subject already starts with ``Re:``.
+    Propagates the parent's ``Message-ID`` as ``In-Reply-To`` and appends to
+    ``References`` so non-Gmail MUAs also thread the conversation; Gmail itself
+    uses the ``threadId`` on the API wrapper.
     """
     svc = _get_gmail_client(input.user_id)
     thread = (
@@ -356,7 +412,7 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         raise ValueError(f"Thread {input.thread_id!r} has no messages to reply to")
     last_msg = messages[-1]
     headers = _headers_to_dict((last_msg.get("payload") or {}).get("headers"))
-    to = headers.get("reply-to") or headers.get("from") or ""
+    to = _select_reply_recipient(messages, _account_email(input.user_id))
     orig_subject = headers.get("subject") or ""
     if input.subject is not None:
         subject = input.subject

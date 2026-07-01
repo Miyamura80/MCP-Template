@@ -154,6 +154,18 @@ def _load_token_row(session: Session, user_id: str) -> GoogleToken | None:
     )
 
 
+def _account_email(user_id: str) -> str | None:
+    """Return the connected account's own email address, or None if unknown.
+
+    Sourced from the stored OAuth token row (populated at connect time from the
+    OpenID ``email`` claim) rather than an extra ``users.getProfile`` round-trip.
+    Used to keep the account owner out of a reply's default recipients.
+    """
+    with _get_db_session() as session:
+        row = _load_token_row(session, user_id)
+        return row.email if row is not None else None
+
+
 # ---------------------------------------------------------------------------
 # Services
 # ---------------------------------------------------------------------------
