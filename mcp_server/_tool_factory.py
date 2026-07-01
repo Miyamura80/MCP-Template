@@ -176,6 +176,30 @@ def _patch_output_schema(mcp: FastMCP, tool_name: str, output_model: type) -> No
     tool.__dict__["output_schema"] = output_model.model_json_schema()
 
 
+def _resolve_signature_default(param: inspect.Parameter, field_info: Any) -> Any:
+    """Return a signature-safe default for a synthesized tool parameter.
+
+    ``inspect.signature(model)`` renders a Pydantic ``default_factory`` field
+    with the private ``<factory>`` sentinel instead of a real value. FastMCP's
+    ``func_metadata`` copies each parameter's ``default`` verbatim into the
+    tool's argument model (see its ``func_arg_to_pydantic_field``), so that
+    sentinel would be handed back as the argument value whenever the caller
+    omits the field - failing validation with "Input should be a valid list
+    ... input_value=<factory>" and making a nominally optional field
+    effectively required. Resolve the factory to a concrete value so the field
+    stays genuinely optional.
+    """
+    if field_info is None or field_info.default_factory is None:
+        return param.default
+    factory = field_info.default_factory
+    try:
+        return factory()
+    except TypeError:
+        # Pydantic also allows a factory that receives already-validated data;
+        # we have none at registration time, so pass an empty mapping.
+        return factory({})
+
+
 def _apply_tool_signature(
     tool_fn: Any,
     entry: ServiceEntry,
@@ -193,7 +217,17 @@ def _apply_tool_signature(
     annotations["return"] = return_annotation
     tool_fn.__annotations__ = annotations
 
-    params = list(input_sig.parameters.values())
+    # Map each signature parameter to its FieldInfo (keyed by alias when set,
+    # matching how Pydantic names the synthesized __init__ parameters) so we can
+    # resolve default_factory sentinels below.
+    field_by_param = {
+        (fi.alias or name): fi
+        for name, fi in entry.input_model.model_fields.items()  # ty: ignore[unresolved-attribute]
+    }
+    params = [
+        p.replace(default=_resolve_signature_default(p, field_by_param.get(name)))
+        for name, p in input_sig.parameters.items()
+    ]
     if include_context:
         ctx_param = inspect.Parameter(
             "ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Context

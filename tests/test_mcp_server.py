@@ -94,6 +94,38 @@ class TestMCPServer(TestTemplate):
             assert "ctx" not in tool.parameters.get("properties", {})
             assert "ctx" not in tool.parameters.get("required", [])
 
+    def test_default_factory_fields_resolve_to_concrete_defaults(self):
+        # Regression: inspect.signature() renders a Pydantic default_factory
+        # field with the private <factory> sentinel. FastMCP copies each
+        # parameter default verbatim into the tool's argument model, so an
+        # unresolved sentinel is handed back as the value when the caller omits
+        # the field, failing validation ("Input should be a valid list ...
+        # input_value=<factory>") and making the field effectively required.
+        # _apply_tool_signature must resolve the factory to a concrete default.
+        for tool_name, tool in mcp._tool_manager._tools.items():
+            arg_model = tool.fn_metadata.arg_model
+            for name, field in arg_model.model_fields.items():
+                default_repr = repr(field.default)
+                assert "<factory>" not in default_repr, (
+                    f"{tool_name}.{name} leaks the default_factory sentinel "
+                    f"into its tool schema: {default_repr}"
+                )
+
+    def test_reply_to_thread_attachments_optional_without_factory_sentinel(self):
+        # Concrete end-to-end guard for the reported gmail_reply_to_thread bug:
+        # validating the tool's argument model with attachments omitted must
+        # yield a real empty list, and building the service input from it must
+        # not raise.
+        from services.gmail_drafts_svc import GmailReplyInput  # noqa: PLC0415
+
+        arg_model = mcp._tool_manager._tools[
+            "gmail_reply_to_thread"
+        ].fn_metadata.arg_model
+        validated = arg_model.model_validate({"thread_id": "t1"}).model_dump()
+        assert validated["attachments"] == []
+        # Downstream construction that previously raised the validation error.
+        assert GmailReplyInput(**validated).attachments == []
+
 
 class TestMCPServerIntegration(TestTemplate):
     """End-to-end integration tests calling tools through the registered FastMCP wrapper."""
