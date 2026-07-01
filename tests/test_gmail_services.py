@@ -1279,7 +1279,12 @@ class TestGmailReplyToThread(TestTemplate):
             "id": "t-rep",
             "messages": messages,
         }
-        mock.users().drafts().create().execute.return_value = created_draft
+        # Real Gmail returns only {id} from create; the service re-fetches the
+        # saved draft at format=full for the echoed state.
+        mock.users().drafts().create().execute.return_value = {
+            "id": created_draft["id"]
+        }
+        mock.users().drafts().get().execute.return_value = created_draft
         return mock
 
     @staticmethod
