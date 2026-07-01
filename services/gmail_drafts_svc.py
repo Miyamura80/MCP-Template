@@ -13,7 +13,7 @@ user has no active token row; the FastMCP factory surfaces it as
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from email.utils import formataddr, getaddresses
+from email.utils import formataddr
 from typing import Any
 
 from loguru import logger as log
@@ -46,6 +46,7 @@ from services.gmail_draft_helpers import (
 )
 from services.gmail_svc import (
     _account_email,
+    _addresses,
     _build_raw_message,
     _get_gmail_client,
     _headers_to_dict,
@@ -314,16 +315,6 @@ def gmail_discard_draft(input: GmailDiscardDraftInput) -> GmailDiscardDraftResul
 # ---------------------------------------------------------------------------
 
 
-def _addresses(header_value: str | None) -> list[tuple[str, str]]:
-    """Parse an address header into ``[(display_name, email), ...]`` pairs.
-
-    Drops entries with no email address (e.g. a stray group syntax remnant).
-    """
-    if not header_value:
-        return []
-    return [(name, addr) for name, addr in getaddresses([header_value]) if addr]
-
-
 def _select_reply_recipient(
     messages: list[dict[str, Any]], self_email: str | None
 ) -> str:
@@ -348,6 +339,10 @@ def _select_reply_recipient(
     for msg in reversed(messages):
         headers = _headers_to_dict((msg.get("payload") or {}).get("headers"))
         sender = headers.get("reply-to") or headers.get("from") or ""
+        # Reply to the first message not sent solely by the owner. The sender
+        # header is returned verbatim (not self-stripped): a Reply-To is the
+        # address the sender explicitly asked replies to go to (RFC 5322 5.2.2),
+        # so we honor it as-is even in the rare case it also lists the owner.
         if any(not _is_self(addr) for _, addr in _addresses(sender)):
             return sender
 

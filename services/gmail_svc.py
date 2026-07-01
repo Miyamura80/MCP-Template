@@ -19,6 +19,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from email.message import EmailMessage, MIMEPart
+from email.utils import getaddresses
 from typing import Any
 from urllib.parse import urlencode
 
@@ -459,6 +460,16 @@ def _headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:
         if isinstance(name, str) and isinstance(value, str):
             out[name.lower()] = value
     return out
+
+
+def _addresses(header_value: str | None) -> list[tuple[str, str]]:
+    """Parse an address header into ``[(display_name, email), ...]`` pairs.
+
+    Drops entries with no email address (e.g. a stray group syntax remnant).
+    """
+    if not header_value:
+        return []
+    return [(name, addr) for name, addr in getaddresses([header_value]) if addr]
 
 
 def _decode_body_data(data: str | None) -> str | None:
