@@ -43,7 +43,7 @@ dependencies = [
     "deptry>=0.23.0",
     "openfeature-sdk>=0.10.0",
     "scrubadub>=2.0.1",
-    "pydantic>=2.10.6",
+    "pydantic>=2.13.4",
     "numpy>=2.4.6",
     "typer",
     "questionary",
