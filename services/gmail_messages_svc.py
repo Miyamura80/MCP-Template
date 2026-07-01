@@ -40,10 +40,12 @@ from loguru import logger as log
 from pydantic import BaseModel
 
 from models.gmail import (
+    GmailAttachmentData,
     GmailCuratedThread,
     GmailCurateInboxInput,
     GmailCurateInboxResult,
     GmailDraft,
+    GmailGetAttachmentInput,
     GmailGetThreadInput,
     GmailLabelChip,
     GmailListInboxInput,
@@ -114,7 +116,70 @@ def _message_summary_from_metadata(msg: dict[str, Any]) -> GmailMessageSummary:
     )
 
 
-def _thread_message_from_parsed(parsed: dict[str, Any]) -> GmailThreadMessage:
+# Quoted-history markers, mirrored from the inbox app's splitHtmlAtQuote /
+# splitTextAtQuote (mcp_server/apps/gmail_inbox/src/Inbox.tsx) so the server-side
+# collapse matches what the reader UI hides behind its "..." toggle.
+_HTML_QUOTE_MARKERS = (
+    '<div class="gmail_quote"',
+    '<blockquote class="gmail_quote"',
+    '<div class=3D"gmail_quote"',
+)
+_ON_WROTE_HTML_RE = re.compile(
+    r"(<br\s*/?>[\s\S]{0,20}?On\s.{10,80}\s+wrote:\s*<br\s*/?>)", re.IGNORECASE
+)
+_ON_WROTE_TEXT_RE = re.compile(r"^On .{10,80} wrote:\s*$")
+
+
+def _strip_quoted_html(html: str) -> str:
+    """Return ``html`` with the quoted prior-message chain removed."""
+    for marker in _HTML_QUOTE_MARKERS:
+        idx = html.find(marker)
+        if idx > 0:
+            return html[:idx]
+    m = _ON_WROTE_HTML_RE.search(html)
+    if m and m.start() > 50:
+        return html[: m.start()]
+    return html
+
+
+def _strip_quoted_text(text: str) -> str:
+    """Return plain-text ``text`` with the quoted prior-message chain removed."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if i > 0 and _ON_WROTE_TEXT_RE.match(line):
+            return "\n".join(lines[:i])
+    first_q = -1
+    for i, line in enumerate(lines):
+        if line.startswith(">"):
+            if first_q == -1:
+                first_q = i
+        elif first_q != -1:
+            break
+    if first_q > 0 and len(lines) - first_q >= 3:
+        return "\n".join(lines[:first_q])
+    return text
+
+
+def _thread_message_from_parsed(
+    parsed: dict[str, Any],
+    *,
+    include_attachment_data: bool,
+    strip_quoted_replies: bool,
+) -> GmailThreadMessage:
+    attachments = parsed.get("attachments") or []
+    if not include_attachment_data:
+        # Drop the base64 blobs but keep every locator (attachment_id, filename,
+        # mime_type, size, content_id) so callers can fetch bytes on demand.
+        attachments = [{**a, "data": None} for a in attachments]
+
+    body_text = parsed.get("body_text")
+    body_html = parsed.get("body_html")
+    if strip_quoted_replies:
+        if body_text:
+            body_text = _strip_quoted_text(body_text)
+        if body_html:
+            body_html = _strip_quoted_html(body_html)
+
     return GmailThreadMessage.model_validate(
         {
             "message_id": parsed.get("message_id") or "",
@@ -123,9 +188,9 @@ def _thread_message_from_parsed(parsed: dict[str, Any]) -> GmailThreadMessage:
             "cc": parsed.get("cc"),
             "date": parsed.get("date"),
             "subject": parsed.get("subject"),
-            "body_text": parsed.get("body_text"),
-            "body_html": parsed.get("body_html"),
-            "attachments": parsed.get("attachments") or [],
+            "body_text": body_text,
+            "body_html": body_html,
+            "attachments": attachments,
         }
     )
 
@@ -428,7 +493,7 @@ def gmail_list_inbox(input: GmailListInboxInput) -> GmailListInboxResult:
 
 @service(
     name="gmail_get_thread",
-    description="Fetch a Gmail thread by id with full message bodies + attachments. When an interactive UI is rendered alongside the result, keep your text response brief since the user can browse the conversation in the UI.",
+    description="Fetch a Gmail thread by id with full message bodies. By default attachment/inline-image bytes are omitted (each attachment still carries filename, mime_type, size, attachment_id) to keep the payload small - fetch a file on demand with gmail_get_attachment. Pass include_attachment_data=true to inline bytes, or strip_quoted_replies=true to drop repeated quoted history. When an interactive UI is rendered alongside the result, keep your text response brief since the user can browse the conversation in the UI.",
     input_model=GmailGetThreadInput,
     output_model=GmailThread,
 )
@@ -470,13 +535,51 @@ def gmail_get_thread(input: GmailGetThreadInput) -> GmailThread:
         if "DRAFT" in labels:
             continue
         parsed = _parse_message_resource(m)
-        _resolve_inline_images(svc, msg_id or "", parsed)
-        messages.append(_thread_message_from_parsed(parsed))
+        # Inlining cid: images fetches + embeds their base64 into body_html,
+        # which is the bulk of a thread's size. Only do it when the caller
+        # actually wants the bytes.
+        if input.include_attachment_data:
+            _resolve_inline_images(svc, msg_id or "", parsed)
+        messages.append(
+            _thread_message_from_parsed(
+                parsed,
+                include_attachment_data=input.include_attachment_data,
+                strip_quoted_replies=input.strip_quoted_replies,
+            )
+        )
 
     return GmailThread(
         thread_id=thread.get("id") or input.thread_id,
         messages=messages,
         draft=draft,
+    )
+
+
+@service(
+    name="gmail_get_attachment",
+    description="Fetch the raw base64 bytes of a single attachment or inline image on a Gmail message, identified by the message_id + attachment_id echoed by gmail_get_thread. Use this to pull one file on demand instead of loading every attachment into the thread payload.",
+    input_model=GmailGetAttachmentInput,
+    output_model=GmailAttachmentData,
+)
+def gmail_get_attachment(input: GmailGetAttachmentInput) -> GmailAttachmentData:
+    svc = _get_gmail_client(input.user_id)
+    resp = (
+        svc.users()
+        .messages()
+        .attachments()
+        .get(userId="me", messageId=input.message_id, id=input.attachment_id)
+        .execute()
+    )
+    # Gmail returns base64url with padding stripped; normalize to standard,
+    # padded base64 so the bytes are ready to decode or re-upload.
+    raw = resp.get("data", "") or ""
+    data = raw.replace("-", "+").replace("_", "/")
+    data += "=" * (-len(data) % 4)
+    return GmailAttachmentData(
+        message_id=input.message_id,
+        attachment_id=input.attachment_id,
+        size=resp.get("size"),
+        data_base64=data,
     )
 
 

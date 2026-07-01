@@ -31,12 +31,14 @@ from models.gmail import (
     GmailComposeInput,
     GmailCurateInboxInput,
     GmailDiscardDraftInput,
+    GmailGetAttachmentInput,
     GmailGetDraftInput,
     GmailGetThreadInput,
     GmailListDraftsInput,
     GmailListInboxInput,
     GmailRemoveAttachmentInput,
     GmailSendInput,
+    GmailThread,
     GmailUpdateDraftInput,
 )
 from services.gmail_attachments_svc import (
@@ -57,6 +59,7 @@ from services.gmail_messages_svc import (
     GmailThreadModifyInput,
     gmail_archive_thread,
     gmail_curate_inbox,
+    gmail_get_attachment,
     gmail_get_thread,
     gmail_list_inbox,
     gmail_mark_thread_read,
@@ -704,6 +707,149 @@ class TestGmailGetThread(TestTemplate):
         assert len(thread.messages[1].attachments) == 1
         assert thread.messages[1].attachments[0].filename == "doc.pdf"
         assert thread.messages[1].attachments[0].attachment_id == "att-9"
+
+    def _inline_image_thread(self) -> dict:
+        """A one-message thread whose HTML body references a cid: inline image."""
+        return {
+            "id": "t-img",
+            "messages": [
+                {
+                    "id": "m-img",
+                    "threadId": "t-img",
+                    "snippet": "hi",
+                    "internalDate": "1700000000000",
+                    "payload": {
+                        "mimeType": "multipart/related",
+                        "headers": _headers(
+                            {"From": "a@x", "To": "b@y", "Subject": "s"}
+                        ),
+                        "parts": [
+                            {
+                                "mimeType": "text/html",
+                                "body": {
+                                    "data": _b64url('<p>sig <img src="cid:logo1"></p>'),
+                                    "size": 30,
+                                },
+                            },
+                            {
+                                "mimeType": "image/png",
+                                "filename": "",
+                                "headers": _headers({"Content-ID": "<logo1>"}),
+                                "body": {
+                                    "attachmentId": "att-img",
+                                    "size": 8,
+                                    "data": base64.urlsafe_b64encode(b"PNGDATA1")
+                                    .decode("ascii")
+                                    .rstrip("="),
+                                },
+                            },
+                        ],
+                    },
+                }
+            ],
+        }
+
+    def _run_get_thread(
+        self, thread_payload: dict, **kwargs
+    ) -> tuple[GmailThread, MagicMock]:
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().threads().get().execute.return_value = thread_payload
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                thread = gmail_get_thread(
+                    GmailGetThreadInput(user_id="alice", thread_id="t-x", **kwargs)
+                )
+                return thread, mock
+            finally:
+                _stop(patches)
+
+    def test_attachment_data_omitted_by_default(self):
+        thread, mock = self._run_get_thread(self._inline_image_thread())
+        att = thread.messages[0].attachments[0]
+        # Locators are preserved so the caller can fetch bytes on demand...
+        assert att.attachment_id == "att-img"
+        assert att.content_id == "logo1"
+        assert att.mime_type == "image/png"
+        # ...but the base64 blob and the inlined data: URI are gone.
+        assert att.data is None
+        assert "cid:logo1" in (thread.messages[0].body_html or "")
+        assert "data:image" not in (thread.messages[0].body_html or "")
+        # No per-image attachments.get() fetch happened for inlining.
+        mock.users().messages().attachments().get().execute.assert_not_called()
+
+    def test_include_attachment_data_inlines_images(self):
+        thread, _mock = self._run_get_thread(
+            self._inline_image_thread(), include_attachment_data=True
+        )
+        att = thread.messages[0].attachments[0]
+        assert att.data is not None
+        # cid: reference is rewritten to a data: URI in the HTML body.
+        body_html = thread.messages[0].body_html or ""
+        assert "data:image/png;base64," in body_html
+        assert "cid:logo1" not in body_html
+
+    def test_strip_quoted_replies_drops_history(self):
+        body = "My new reply\nOn Mon, someone <a@x.com> wrote:\n> old line\n> more"
+        thread_payload = {
+            "id": "t-q",
+            "messages": [
+                _plain_message(
+                    message_id="m-q",
+                    thread_id="t-q",
+                    headers={"From": "a@x", "Subject": "Re: s"},
+                    body=body,
+                    snippet="My new reply",
+                )
+            ],
+        }
+        thread, _mock = self._run_get_thread(thread_payload, strip_quoted_replies=True)
+        assert thread.messages[0].body_text == "My new reply"
+
+    def test_quoted_replies_kept_by_default(self):
+        body = "My new reply\nOn Mon, someone <a@x.com> wrote:\n> old line\n> more"
+        thread_payload = {
+            "id": "t-q",
+            "messages": [
+                _plain_message(
+                    message_id="m-q",
+                    thread_id="t-q",
+                    headers={"From": "a@x", "Subject": "Re: s"},
+                    body=body,
+                    snippet="My new reply",
+                )
+            ],
+        }
+        thread, _mock = self._run_get_thread(thread_payload)
+        assert "old line" in (thread.messages[0].body_text or "")
+
+
+class TestGmailGetAttachment(TestTemplate):
+    def test_returns_normalized_base64(self):
+        raw = b"\xff\xfe\xfd\xfc\xfb"  # bytes whose b64 uses - and _ chars
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob(raw)
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_get_attachment(
+                    GmailGetAttachmentInput(
+                        user_id="alice", message_id="m-1", attachment_id="att-1"
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        assert result.message_id == "m-1"
+        assert result.attachment_id == "att-1"
+        # Standard, padded base64 that decodes back to the original bytes.
+        assert base64.b64decode(result.data_base64) == raw
 
 
 class TestGmailCurateInbox(TestTemplate):

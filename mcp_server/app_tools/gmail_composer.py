@@ -156,7 +156,13 @@ def refresh(draft_id: str, user_id: str = "") -> GmailDraft:
 )
 def get_thread(thread_id: str, user_id: str = "") -> GmailThread:
     uid = guard_user_id(user_id)
-    return _gmail_get_thread(GmailGetThreadInput(user_id=uid, thread_id=thread_id))
+    # The composer's thread panel renders inline images, so it needs the full
+    # bytes the model-facing gmail_get_thread omits by default.
+    return _gmail_get_thread(
+        GmailGetThreadInput(
+            user_id=uid, thread_id=thread_id, include_attachment_data=True
+        )
+    )
 
 
 @mcp.tool(
