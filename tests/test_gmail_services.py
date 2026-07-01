@@ -10,6 +10,7 @@ the MIME helpers, and the Pydantic mapping.
 from __future__ import annotations
 
 import base64
+import json
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from email import message_from_bytes
@@ -23,8 +24,13 @@ from sqlalchemy.pool import StaticPool
 from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
-from mcp_server.app_tools.gmail_composer import _coerce_attachments
+from mcp_server.app_tools.gmail_composer import (
+    _coerce_attachments,
+    _patch_attachments,
+)
+from mcp_server.app_tools.gmail_composer import save_draft as _save_draft
 from models.gmail import (
+    UNSET,
     AttachmentInput,
     AttachmentReference,
     GmailAddAttachmentInput,
@@ -1804,6 +1810,69 @@ class TestAppToolAttachmentCoercion(TestTemplate):
     def test_empty_attachment_dict_raises(self):
         with pytest.raises(ValueError, match="data_base64"):
             _coerce_attachments([{}])
+
+    def test_unset_passes_through_to_preserve(self):
+        # The composer autosave omits attachments; UNSET must survive the patch
+        # coercion so the update preserves existing files instead of clearing.
+        assert _patch_attachments(UNSET) is UNSET
+        # None/[] still clear; a list still coerces to models.
+        assert _patch_attachments(None) is None
+        assert _patch_attachments([]) is None
+
+
+class TestComposerAutosavePreservesAttachments(TestTemplate):
+    """save_draft/send omit attachments on autosave - files must NOT be dropped."""
+
+    def _run_save_draft(self, **kwargs):
+        original = _draft_resource_with_attachment(body="draft body")
+        echoed = _draft_resource_with_attachment(body="draft body")
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.side_effect = [original, echoed]
+            mock.users().drafts().update().execute.return_value = {"id": "d-1"}
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                # Call the app-tool exactly as the composer does: text fields
+                # only, attachments omitted entirely.
+                result = _save_draft(draft_id="d-1", user_id="alice", **kwargs)
+            finally:
+                _stop(patches)
+        return result, _last_update_raw(mock)
+
+    def test_autosave_without_attachments_keeps_existing_file(self):
+        result, raw = self._run_save_draft(
+            to="a@x", cc="", bcc="", subject="Subj", body="edited body"
+        )
+        # The re-attached file survives in the outgoing MIME...
+        assert _attachment_filenames_in_raw(raw) == ["report.pdf"]
+        # ...and the echoed draft still reports it.
+        assert [a.filename for a in result.attachments] == ["report.pdf"]
+
+    def test_explicit_empty_list_still_clears(self):
+        # Distinct from omission: an explicit [] means "drop them all".
+        _result, raw = self._run_save_draft(
+            to="a@x", subject="S", body="b", attachments=[]
+        )
+        assert _attachment_filenames_in_raw(raw) == []
+
+
+class TestUpdateInputJsonSerializable(TestTemplate):
+    """UNSET must not make the patch model unserializable (idempotency/logging)."""
+
+    def test_partial_update_dumps_to_json_without_crashing(self):
+        m = GmailUpdateDraftInput(draft_id="d-1", to="a@b")
+        dumped = m.model_dump(mode="json")
+        # Omitted fields collapse to null on the wire; provided fields verbatim.
+        assert dumped["to"] == "a@b"
+        assert dumped["subject"] is None
+        assert dumped["body"] is None
+        # Round-trips through JSON (what the idempotency store does).
+        assert json.loads(json.dumps(dumped))["to"] == "a@b"
 
 
 # ---------------------------------------------------------------------------

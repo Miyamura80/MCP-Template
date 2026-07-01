@@ -9,6 +9,7 @@ principal when one is bound; see ``mcp_server/app_tools/_auth_guard.py``.
 from mcp_server.app_tools._auth_guard import guard_user_id
 from mcp_server.server import mcp
 from models.gmail import (
+    UNSET,
     AttachmentInput,
     AttachmentReference,
     GmailDiscardDraftInput,
@@ -20,6 +21,7 @@ from models.gmail import (
     GmailSendResult,
     GmailThread,
     GmailUpdateDraftInput,
+    _UnsetType,
 )
 from services.gmail_drafts_svc import (
     gmail_discard_draft as _gmail_discard_draft,
@@ -66,6 +68,21 @@ def _coerce_attachments(
     return out
 
 
+def _patch_attachments(
+    attachments: list[dict] | None | _UnsetType,
+) -> list[AttachmentInput | AttachmentReference] | None | _UnsetType:
+    """Apply patch semantics to the composer's ``attachments`` argument.
+
+    ``UNSET`` (the caller omitted it) is passed through so
+    ``gmail_update_draft`` preserves the draft's existing files - the composer's
+    debounced autosave sends only text fields and must not strip attachments.
+    ``None`` / ``[]`` still mean "clear". Anything else is coerced to models.
+    """
+    if isinstance(attachments, _UnsetType):
+        return attachments
+    return _coerce_attachments(attachments)
+
+
 @mcp.tool(
     name="gmail_composer.save_draft",
     description="Persist the current composer fields onto an existing Gmail draft.",
@@ -74,15 +91,16 @@ def _coerce_attachments(
 def save_draft(
     draft_id: str,
     user_id: str = "",
-    to: str | None = None,
-    subject: str | None = None,
-    body: str | None = None,
-    cc: str | None = None,
-    bcc: str | None = None,
-    attachments: list[dict] | None = None,
+    to: str | None | _UnsetType = UNSET,
+    subject: str | None | _UnsetType = UNSET,
+    body: str | None | _UnsetType = UNSET,
+    cc: str | None | _UnsetType = UNSET,
+    bcc: str | None | _UnsetType = UNSET,
+    attachments: list[dict] | None | _UnsetType = UNSET,
 ) -> GmailDraft:
+    # Defaults are UNSET, not None: a field the composer omits must be preserved
+    # (the patch contract), not cleared. None still means an explicit "clear".
     uid = guard_user_id(user_id)
-    atts = _coerce_attachments(attachments)
     return _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,
@@ -92,7 +110,7 @@ def save_draft(
             body=body,
             cc=cc,
             bcc=bcc,
-            attachments=atts,
+            attachments=_patch_attachments(attachments),
         )
     )
 
@@ -105,15 +123,16 @@ def save_draft(
 def send(
     draft_id: str,
     user_id: str = "",
-    to: str | None = None,
-    subject: str | None = None,
-    body: str | None = None,
-    cc: str | None = None,
-    bcc: str | None = None,
-    attachments: list[dict] | None = None,
+    to: str | None | _UnsetType = UNSET,
+    subject: str | None | _UnsetType = UNSET,
+    body: str | None | _UnsetType = UNSET,
+    cc: str | None | _UnsetType = UNSET,
+    bcc: str | None | _UnsetType = UNSET,
+    attachments: list[dict] | None | _UnsetType = UNSET,
 ) -> GmailSendResult:
+    # UNSET defaults preserve omitted fields (see save_draft); the composer's
+    # send path saves the visible fields then sends, leaving files intact.
     uid = guard_user_id(user_id)
-    atts = _coerce_attachments(attachments)
     _gmail_update_draft(
         GmailUpdateDraftInput(
             user_id=uid,
@@ -123,7 +142,7 @@ def send(
             body=body,
             cc=cc,
             bcc=bcc,
-            attachments=atts,
+            attachments=_patch_attachments(attachments),
         )
     )
     return _gmail_send(GmailSendInput(user_id=uid, draft_id=draft_id))
