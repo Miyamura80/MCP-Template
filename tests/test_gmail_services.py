@@ -1157,6 +1157,74 @@ class TestGmailReplyToThread(TestTemplate):
         # Tom (To) and Sue (Cc) survive; alice (self, in Cc) is dropped.
         assert mime["To"] == "Tom <tom@example.com>, Sue <sue@example.com>"
 
+    def test_raises_when_self_only_thread_has_no_other_recipient(self):
+        # Whole thread is from the owner and the last message names no other
+        # participant (To/Cc are only self) - there is nobody to reply to, so
+        # the service raises instead of creating a blank-To draft.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "alice@example.com",
+                            "Subject": "Note to self",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(draft_id="d-none", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="Cannot determine a reply recipient"):
+                    gmail_reply_to_thread(
+                        GmailReplyInput(user_id="alice", thread_id="t-rep")
+                    )
+            finally:
+                _stop(patches)
+
+    def test_self_only_thread_still_works_when_caller_supplies_to(self):
+        # The same self-only thread succeeds when the caller passes 'to'.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "alice@example.com",
+                            "Subject": "Note to self",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-ok", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        to="Tom <tom@example.com>",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
     def test_caller_supplied_to_overrides_thread_default(self):
         # When the caller sets 'to' explicitly it is used verbatim - the
         # thread-derived default is not consulted.

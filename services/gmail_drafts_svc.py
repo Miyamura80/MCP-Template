@@ -367,7 +367,7 @@ def _select_reply_recipient(
 
 @service(
     name="gmail_reply_to_thread",
-    description="Create a reply draft on an existing Gmail thread. ALWAYS use this tool instead of composing reply text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. Pass your drafted reply in the 'body' parameter. Recipients are yours to control: pass 'to', 'cc', and/or 'bcc' (each a comma-separated address list) to set them explicitly. If you omit 'to', it defaults to the other party in the thread (never the account owner); omitted 'cc'/'bcc' are left unset. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
+    description="Create a reply draft on an existing Gmail thread. ALWAYS use this tool instead of composing reply text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. Pass your drafted reply in the 'body' parameter. Recipients are yours to control: pass 'to', 'cc', and/or 'bcc' (each a comma-separated address list) to set them explicitly. If you omit 'to', it defaults to the other party in the thread (never the account owner); omitted 'cc'/'bcc' are left unset. If every message in the thread is yours (no other participant to reply to), you must pass 'to' explicitly or the call errors. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
     input_model=GmailReplyInput,
     output_model=GmailDraft,
     mutating=True,
@@ -379,7 +379,10 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
     when supplied. When ``to`` is omitted it defaults to the sender (``Reply-To``
     falling back to ``From``, RFC 5322 5.2.2) of the most recent message the
     account owner did NOT send, so a bare reply reaches the other party rather
-    than the owner's own address. Prefixes the subject with ``Re:`` unless the
+    than the owner's own address. If ``to`` is omitted and the thread has no
+    other participant to derive one from (every message is the owner's), raises
+    ``ValueError`` rather than creating a blank-``To`` draft - pass ``to``
+    explicitly for such threads. Prefixes the subject with ``Re:`` unless the
     originating subject already starts with ``Re:``. Propagates the parent's
     ``Message-ID`` as ``In-Reply-To`` and appends to ``References`` so non-Gmail
     MUAs also thread the conversation; Gmail itself uses the ``threadId`` on the
@@ -403,6 +406,15 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         to = input.to
     else:
         to = _select_reply_recipient(messages, _account_email(input.user_id))
+        if not to:
+            # Every message is from the owner and the thread names no other
+            # participant, so there is nobody to reply to. Fail clearly instead
+            # of creating a draft with a blank (malformed) To header.
+            raise ValueError(
+                f"Cannot determine a reply recipient for thread "
+                f"{input.thread_id!r}: every message is from you and the thread "
+                "has no other participants. Pass 'to' explicitly."
+            )
     orig_subject = headers.get("subject") or ""
     if input.subject is not None:
         subject = input.subject
