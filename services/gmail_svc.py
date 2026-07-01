@@ -51,6 +51,24 @@ class GmailNotConnectedError(Exception):
     """Raised when a Gmail-API service is invoked for a user with no active token row."""
 
 
+class GmailAttachmentTooLargeError(Exception):
+    """Raised when a fetched attachment exceeds the configured size ceiling.
+
+    Carries the sizes so a transport can build a precise client-facing message
+    (the HTTP API maps this to 413 Payload Too Large).
+    """
+
+    def __init__(self, *, attachment_id: str, size: int, max_bytes: int) -> None:
+        self.attachment_id = attachment_id
+        self.size = size
+        self.max_bytes = max_bytes
+        super().__init__(
+            f"Attachment {attachment_id} is {size} bytes, over the {max_bytes}-byte "
+            "limit (global_config.gmail.max_attachment_bytes). Raise the limit or "
+            "handle this file out of band."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -423,6 +441,17 @@ def _decode_b64url(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
 
+def _b64url_to_std(data: str) -> str:
+    """Convert Gmail's padding-stripped base64url to standard, padded base64.
+
+    Gmail returns attachment / inline-image bytes as base64url with padding
+    stripped; every consumer that wants to hand those bytes to a browser data:
+    URI or a standard base64 decoder needs this exact normalization.
+    """
+    std = data.replace("-", "+").replace("_", "/")
+    return std + "=" * (-len(std) % 4)
+
+
 def _split_mime(mime_type: str) -> tuple[str, str]:
     """Split ``maintype/subtype``, defaulting to ``application/octet-stream``."""
     maintype, _, subtype = mime_type.partition("/")
@@ -499,10 +528,7 @@ def _walk_parts(part: dict[str, Any], out: dict[str, Any]) -> None:
 
     if is_inline_image:
         raw_data = body.get("data")
-        b64_data: str | None = None
-        if raw_data:
-            b64_data = raw_data.replace("-", "+").replace("_", "/")
-            b64_data += "=" * (-len(b64_data) % 4)
+        b64_data: str | None = _b64url_to_std(raw_data) if raw_data else None
         out["attachments"].append(
             {
                 "filename": None,
@@ -515,10 +541,11 @@ def _walk_parts(part: dict[str, Any], out: dict[str, Any]) -> None:
         )
     elif filename and (body.get("attachmentId") or body.get("size")):
         raw_data = body.get("data")
-        b64_data = None
-        if raw_data and mime_type.startswith("image/"):
-            b64_data = raw_data.replace("-", "+").replace("_", "/")
-            b64_data += "=" * (-len(b64_data) % 4)
+        b64_data = (
+            _b64url_to_std(raw_data)
+            if raw_data and mime_type.startswith("image/")
+            else None
+        )
         out["attachments"].append(
             {
                 "filename": filename or None,

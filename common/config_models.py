@@ -256,3 +256,23 @@ class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 
     model_config = {"extra": "allow"}  # Allow arbitrary flags
+
+
+class GmailConfig(BaseModel):
+    """Gmail integration configuration."""
+
+    # Ceiling (in decoded bytes) on a single attachment fetched via
+    # ``gmail_get_attachment``. That tool returns the file's base64 straight
+    # into the model's context, so an unbounded fetch of a large file re-creates
+    # the very context-bloat the lean thread payload was designed to avoid.
+    # Deliberately set absurdly high for now (~1 TiB = effectively unbounded) so
+    # nothing is rejected until we pick a real limit; tighten this later.
+    max_attachment_bytes: int = Field(
+        default=1_099_511_627_776,
+        ge=0,
+        description=(
+            "Max decoded size (bytes) of a single attachment returned by "
+            "gmail_get_attachment before it is rejected. Effectively unbounded "
+            "by default; lower it to protect the model's context window."
+        ),
+    )

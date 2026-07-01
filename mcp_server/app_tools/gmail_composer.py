@@ -11,9 +11,11 @@ from mcp_server.server import mcp
 from models.gmail import (
     AttachmentInput,
     AttachmentReference,
+    GmailAttachmentData,
     GmailDiscardDraftInput,
     GmailDiscardDraftResult,
     GmailDraft,
+    GmailGetAttachmentInput,
     GmailGetDraftInput,
     GmailGetThreadInput,
     GmailSendInput,
@@ -34,9 +36,11 @@ from services.gmail_drafts_svc import (
     gmail_update_draft as _gmail_update_draft,
 )
 from services.gmail_messages_svc import (
+    gmail_get_attachment as _gmail_get_attachment,
+)
+from services.gmail_messages_svc import (
     gmail_get_thread as _gmail_get_thread,
 )
-from services.gmail_svc import _get_gmail_client
 
 _APP_META = {"ui": {"visibility": ["app"]}}
 
@@ -156,7 +160,13 @@ def refresh(draft_id: str, user_id: str = "") -> GmailDraft:
 )
 def get_thread(thread_id: str, user_id: str = "") -> GmailThread:
     uid = guard_user_id(user_id)
-    return _gmail_get_thread(GmailGetThreadInput(user_id=uid, thread_id=thread_id))
+    # The composer's thread panel renders inline images, so it needs the full
+    # bytes the model-facing gmail_get_thread omits by default.
+    return _gmail_get_thread(
+        GmailGetThreadInput(
+            user_id=uid, thread_id=thread_id, include_attachment_data=True
+        )
+    )
 
 
 @mcp.tool(
@@ -164,18 +174,17 @@ def get_thread(thread_id: str, user_id: str = "") -> GmailThread:
     description="Fetch the raw base64 data for an attachment on a message.",
     meta=_APP_META,
 )
-def get_attachment(message_id: str, attachment_id: str, user_id: str = "") -> dict:
-    """Return ``{data_base64}`` for the given attachment."""
+def get_attachment(
+    message_id: str, attachment_id: str, user_id: str = ""
+) -> GmailAttachmentData:
+    """Fetch an attachment's bytes for the composer's preview.
+
+    Thin adapter over the canonical ``gmail_get_attachment`` service; the
+    committed composer bundle reads ``data_base64`` off the structured content.
+    """
     uid = guard_user_id(user_id)
-    svc = _get_gmail_client(uid)
-    att = (
-        svc.users()
-        .messages()
-        .attachments()
-        .get(userId="me", messageId=message_id, id=attachment_id)
-        .execute()
+    return _gmail_get_attachment(
+        GmailGetAttachmentInput(
+            user_id=uid, message_id=message_id, attachment_id=attachment_id
+        )
     )
-    raw = att.get("data", "")
-    data = raw.replace("-", "+").replace("_", "/")
-    data += "=" * (-len(data) % 4)
-    return {"data_base64": data}

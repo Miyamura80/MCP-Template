@@ -330,6 +330,25 @@ class GmailListInboxResult(BaseModel):
 class GmailGetThreadInput(BaseModel):
     user_id: str = ""
     thread_id: str
+    include_attachment_data: bool = Field(
+        default=False,
+        description=(
+            "Inline the raw base64 bytes of attachments and cid: inline images "
+            "(e.g. signature logos) into the response. Off by default to keep "
+            "thread payloads small - attachments still carry filename, mime_type, "
+            "size, and attachment_id, so fetch a file's bytes on demand with "
+            "gmail_get_attachment using its message_id + attachment_id."
+        ),
+    )
+    strip_quoted_replies: bool = Field(
+        default=False,
+        description=(
+            "Collapse quoted prior-message history from each reply's body, "
+            "keeping only the newly written text. Off by default; turn on to "
+            "read long threads cheaply without every message re-quoting the whole "
+            "chain."
+        ),
+    )
 
 
 class GmailAttachment(BaseModel):
@@ -339,6 +358,30 @@ class GmailAttachment(BaseModel):
     attachment_id: str | None = None
     content_id: str | None = None
     data: str | None = None
+
+
+class GmailGetAttachmentInput(BaseModel):
+    user_id: str = ""
+    message_id: str = Field(
+        description="Id of the message the attachment lives on (from gmail_get_thread)",
+        min_length=1,
+    )
+    attachment_id: str = Field(
+        description="Stable attachment id from a gmail_get_thread attachment entry",
+        min_length=1,
+    )
+
+
+class GmailAttachmentData(BaseModel):
+    """Raw bytes of a single attachment, fetched on demand.
+
+    ``data_base64`` is standard base64 (padded), ready to decode or re-upload.
+    """
+
+    message_id: str
+    attachment_id: str
+    size: int | None = None
+    data_base64: str
 
 
 class GmailThreadMessage(BaseModel):
