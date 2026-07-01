@@ -17,7 +17,6 @@ from email.utils import formataddr
 from typing import Any
 
 from loguru import logger as log
-from pydantic import BaseModel, Field
 
 from models.gmail import (
     AttachmentInput,
@@ -29,6 +28,7 @@ from models.gmail import (
     GmailGetDraftInput,
     GmailListDraftsInput,
     GmailListDraftsResult,
+    GmailReplyInput,
     GmailSendInput,
     GmailSendResult,
     GmailUpdateDraftInput,
@@ -359,30 +359,6 @@ def _select_reply_recipient(
             seen.add(key)
             recipients.append(formataddr((name, addr)))
     return ", ".join(recipients)
-
-
-class GmailReplyInput(BaseModel):
-    """Input for ``gmail_reply_to_thread``: create a reply draft on a thread.
-
-    ``body`` defaults to an empty placeholder so the composer UI can populate
-    it on the next turn. ``subject`` defaults to ``Re: <orig>`` derived from
-    the thread's last message.
-
-    Recipients are caller-controlled: ``to``, ``cc``, and ``bcc`` each accept a
-    comma-separated address list and are used verbatim when provided. Only
-    ``to`` has a default - when omitted it is derived from the thread (the other
-    party in the conversation, never the account owner). ``cc``/``bcc`` are set
-    only when the caller passes them; the reply carries none otherwise.
-    """
-
-    user_id: str = ""
-    thread_id: str
-    body: str | None = None
-    subject: str | None = None
-    to: str | None = None
-    cc: str | None = None
-    bcc: str | None = None
-    attachments: list[AttachmentInput] = Field(default_factory=list)
 
 
 @service(
