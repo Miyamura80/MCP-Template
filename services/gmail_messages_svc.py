@@ -57,6 +57,7 @@ from models.gmail import (
 from services import service
 from services.gmail_drafts_svc import _draft_resource_to_model
 from services.gmail_svc import (
+    _b64url_to_std,
     _get_gmail_client,
     _headers_to_dict,
     _parse_message_resource,
@@ -219,9 +220,7 @@ def _resolve_inline_images(svc: Any, message_id: str, parsed: dict[str, Any]) ->
                     .get(userId="me", messageId=message_id, id=aid)
                     .execute()
                 )
-                raw = resp.get("data", "")
-                att["data"] = raw.replace("-", "+").replace("_", "/")
-                att["data"] += "=" * (-len(att["data"]) % 4)
+                att["data"] = _b64url_to_std(resp.get("data", ""))
             except Exception:  # noqa: BLE001  # best-effort image fetch
                 continue
 
@@ -537,9 +536,10 @@ def gmail_get_thread(input: GmailGetThreadInput) -> GmailThread:
         parsed = _parse_message_resource(m)
         # Inlining cid: images fetches + embeds their base64 into body_html,
         # which is the bulk of a thread's size. Only do it when the caller
-        # actually wants the bytes.
-        if input.include_attachment_data:
-            _resolve_inline_images(svc, msg_id or "", parsed)
+        # actually wants the bytes (and only when there's a message id to fetch
+        # attachments against).
+        if input.include_attachment_data and msg_id:
+            _resolve_inline_images(svc, msg_id, parsed)
         messages.append(
             _thread_message_from_parsed(
                 parsed,
@@ -570,16 +570,11 @@ def gmail_get_attachment(input: GmailGetAttachmentInput) -> GmailAttachmentData:
         .get(userId="me", messageId=input.message_id, id=input.attachment_id)
         .execute()
     )
-    # Gmail returns base64url with padding stripped; normalize to standard,
-    # padded base64 so the bytes are ready to decode or re-upload.
-    raw = resp.get("data", "") or ""
-    data = raw.replace("-", "+").replace("_", "/")
-    data += "=" * (-len(data) % 4)
     return GmailAttachmentData(
         message_id=input.message_id,
         attachment_id=input.attachment_id,
         size=resp.get("size"),
-        data_base64=data,
+        data_base64=_b64url_to_std(resp.get("data", "") or ""),
     )
 
 

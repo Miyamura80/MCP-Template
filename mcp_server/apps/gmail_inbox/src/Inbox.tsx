@@ -185,6 +185,10 @@ export function Inbox({ mcpApp }: InboxProps) {
   // attachment bytes, to keep the LLM context small). When that lean thread
   // arrives via ontoolresult, silently re-fetch the full version through the
   // app-only open_thread tool so inline images render in the reader.
+  // Only called from the ontoolresult handler: the functional-update thread_id
+  // check below is the whole race guard (a late upgrade for a thread the user
+  // navigated away from no-ops). Do not call this from interactive paths
+  // without routing it through openSeqRef like openThread does.
   const upgradeThread = async (thread_id: string) => {
     try {
       const raw = await mcpApp.callServerTool({
