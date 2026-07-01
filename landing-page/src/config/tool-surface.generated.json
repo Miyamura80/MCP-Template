@@ -28,12 +28,16 @@
     "description": "Revoke and remove the user's linked Gmail account"
   },
   {
+    "name": "gmail_get_attachment",
+    "description": "Fetch the raw base64 bytes of a single attachment or inline image on a Gmail message, identified by the message_id + attachment_id echoed by gmail_get_thread. Use this to pull one file on demand instead of loading every attachment into the thread payload."
+  },
+  {
     "name": "gmail_get_draft",
     "description": "Fetch a single Gmail draft by id"
   },
   {
     "name": "gmail_get_thread",
-    "description": "Fetch a Gmail thread by id with full message bodies + attachments. When an interactive UI is rendered alongside the result, keep your text response brief since the user can browse the conversation in the UI."
+    "description": "Fetch a Gmail thread by id with full message bodies. By default attachment/inline-image bytes are omitted (each attachment still carries filename, mime_type, size, attachment_id) to keep the payload small - fetch a file on demand with gmail_get_attachment. Pass include_attachment_data=true to inline bytes, or strip_quoted_replies=true to drop repeated quoted history. When an interactive UI is rendered alongside the result, keep your text response brief since the user can browse the conversation in the UI."
   },
   {
     "name": "gmail_list_drafts",
