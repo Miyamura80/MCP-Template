@@ -39,6 +39,7 @@ from typing import Any
 from loguru import logger as log
 from pydantic import BaseModel
 
+from common import global_config
 from models.gmail import (
     GmailAttachmentData,
     GmailCuratedThread,
@@ -570,10 +571,20 @@ def gmail_get_attachment(input: GmailGetAttachmentInput) -> GmailAttachmentData:
         .get(userId="me", messageId=input.message_id, id=input.attachment_id)
         .execute()
     )
+    # The returned base64 lands directly in the model's context, so refuse files
+    # larger than the configured ceiling rather than blowing the context window.
+    size = resp.get("size")
+    max_bytes = global_config.gmail.max_attachment_bytes
+    if isinstance(size, int) and size > max_bytes:
+        raise ValueError(
+            f"Attachment {input.attachment_id} is {size} bytes, over the "
+            f"{max_bytes}-byte limit (global_config.gmail.max_attachment_bytes). "
+            "Raise the limit or handle this file out of band."
+        )
     return GmailAttachmentData(
         message_id=input.message_id,
         attachment_id=input.attachment_id,
-        size=resp.get("size"),
+        size=size,
         data_base64=_b64url_to_std(resp.get("data", "") or ""),
     )
 

@@ -20,6 +20,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from common import global_config
 from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
@@ -850,6 +851,28 @@ class TestGmailGetAttachment(TestTemplate):
         assert result.attachment_id == "att-1"
         # Standard, padded base64 that decodes back to the original bytes.
         assert base64.b64decode(result.data_base64) == raw
+
+    def test_rejects_attachment_over_size_cap(self):
+        blob = _gmail_attachment_blob(b"PDFBYTES")
+        blob["size"] = 10_000  # bytes, over the patched cap below
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().messages().attachments().get().execute.return_value = blob
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with (
+                    patch.object(global_config.gmail, "max_attachment_bytes", 5),
+                    pytest.raises(ValueError, match="over the 5-byte limit"),
+                ):
+                    gmail_get_attachment(
+                        GmailGetAttachmentInput(
+                            user_id="alice", message_id="m-1", attachment_id="att-1"
+                        )
+                    )
+            finally:
+                _stop(patches)
 
 
 class TestGmailCurateInbox(TestTemplate):
