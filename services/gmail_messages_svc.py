@@ -412,9 +412,10 @@ def _decoded_size(raw_size: Any, data_base64: str) -> int:
             return int(raw_size)
         except (TypeError, ValueError):
             pass
-    # Standard base64 encodes 3 bytes per 4 chars; this slightly over-estimates
-    # by the padding, which is the safe direction for a ceiling check.
-    return (len(data_base64) * 3) // 4
+    # Standard base64 encodes 3 bytes per 4 chars; subtract the '=' padding to
+    # get the exact decoded length so the cap is applied at neither more nor
+    # less than the configured ceiling.
+    return (len(data_base64) * 3) // 4 - data_base64.count("=")
 
 
 @service(

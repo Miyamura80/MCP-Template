@@ -54,7 +54,9 @@ _USER_LABEL_BOOSTS: dict[str, float] = {
     "Travel": 0.20,
 }
 
-_DISPLAY_ONLY_LABELS: set[str] = {
+# Ordered (tuple, not set) so the display-only chips render in a stable order -
+# set iteration order isn't guaranteed and would make the UI output vary.
+_DISPLAY_ONLY_LABELS: tuple[str, ...] = (
     "FYI",
     "Waiting",
     "Action Required",
@@ -63,7 +65,7 @@ _DISPLAY_ONLY_LABELS: set[str] = {
     "Needs Review",
     "KYC",
     "Fundraising",
-}
+)
 
 _EXCLUDE_LABELS: set[str] = {
     "Newsletter",
@@ -78,7 +80,7 @@ _EXCLUDE_LABELS: set[str] = {
     "Survey",
 }
 
-_ALL_CHIP_LABELS: set[str] = set(_USER_LABEL_BOOSTS) | _DISPLAY_ONLY_LABELS
+_ALL_CHIP_LABELS: set[str] = set(_USER_LABEL_BOOSTS) | set(_DISPLAY_ONLY_LABELS)
 
 _ALL_TRACKED_LABELS: set[str] = _ALL_CHIP_LABELS | _EXCLUDE_LABELS
 
@@ -197,15 +199,29 @@ def _build_label_lookups(
 
 
 def _build_draft_thread_map(svc: Any) -> dict[str, str]:
-    """Build thread_id → draft_id map from a single drafts.list call."""
+    """Build a thread_id → draft_id map across all drafts.list pages.
+
+    Paginates via ``nextPageToken`` so ``has_draft`` isn't a false negative for
+    accounts with more than one page (100) of drafts.
+    """
     draft_thread_map: dict[str, str] = {}
+    page_token: str | None = None
     try:
-        drafts_resp = svc.users().drafts().list(userId="me", maxResults=100).execute()
-        for d in drafts_resp.get("drafts", []) or []:
-            d_msg = d.get("message") or {}
-            tid = d_msg.get("threadId")
-            if tid and d.get("id"):
-                draft_thread_map[tid] = d["id"]
+        while True:
+            drafts_resp = (
+                svc.users()
+                .drafts()
+                .list(userId="me", maxResults=100, pageToken=page_token)
+                .execute()
+            )
+            for d in drafts_resp.get("drafts", []) or []:
+                d_msg = d.get("message") or {}
+                tid = d_msg.get("threadId")
+                if tid and d.get("id"):
+                    draft_thread_map[tid] = d["id"]
+            page_token = drafts_resp.get("nextPageToken")
+            if not page_token:
+                break
     except Exception:  # noqa: BLE001  # drafts lookup is best-effort; don't fail curate
         log.debug("drafts.list failed during curate; proceeding without draft info")
     return draft_thread_map
@@ -235,8 +251,11 @@ def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
     label_id_to_name, label_colors = _build_label_lookups(svc)
     draft_thread_map = _build_draft_thread_map(svc)
 
+    # Exclude done threads. The mark-done service applies the label "MCP/Done"
+    # (see _MCP_DONE_LABEL_NAME in gmail_messages_svc), so the exclusion must use
+    # that exact name - "MCP-Done" would not match and done threads would leak in.
     base = (
-        "in:inbox -label:MCP-Done"
+        'in:inbox -label:"MCP/Done"'
         " -category:updates -category:promotions -category:social -category:forums"
         " -label:Newsletter -label:Promotion -label:Marketing -label:Notifications"
         ' -label:"Product Updates" -label:"Marketing/Webinar" -label:Webinar'
