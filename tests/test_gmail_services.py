@@ -1157,6 +1157,72 @@ class TestGmailReplyToThread(TestTemplate):
         # Tom (To) and Sue (Cc) survive; alice (self, in Cc) is dropped.
         assert mime["To"] == "Tom <tom@example.com>, Sue <sue@example.com>"
 
+    def test_caller_supplied_to_overrides_thread_default(self):
+        # When the caller sets 'to' explicitly it is used verbatim - the
+        # thread-derived default is not consulted.
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Original Subject",
+                },
+                created_draft=_draft_resource(draft_id="d-ov", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        to="chosen@example.com",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "chosen@example.com"
+
+    def test_caller_supplied_cc_and_bcc_pass_through(self):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Original Subject",
+                },
+                created_draft=_draft_resource(draft_id="d-cc", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        cc="cc@example.com",
+                        bcc="bcc@example.com",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        # 'to' still defaults from the thread; cc/bcc are the caller's verbatim.
+        assert mime["To"] == "sender@example.com"
+        assert mime["Cc"] == "cc@example.com"
+        assert mime["Bcc"] == "bcc@example.com"
+
 
 # ---------------------------------------------------------------------------
 # Non-destructive update + stable attachment handles (this change)

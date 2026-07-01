@@ -367,18 +367,27 @@ class GmailReplyInput(BaseModel):
     ``body`` defaults to an empty placeholder so the composer UI can populate
     it on the next turn. ``subject`` defaults to ``Re: <orig>`` derived from
     the thread's last message.
+
+    Recipients are caller-controlled: ``to``, ``cc``, and ``bcc`` each accept a
+    comma-separated address list and are used verbatim when provided. Only
+    ``to`` has a default - when omitted it is derived from the thread (the other
+    party in the conversation, never the account owner). ``cc``/``bcc`` are set
+    only when the caller passes them; the reply carries none otherwise.
     """
 
     user_id: str = ""
     thread_id: str
     body: str | None = None
     subject: str | None = None
+    to: str | None = None
+    cc: str | None = None
+    bcc: str | None = None
     attachments: list[AttachmentInput] = Field(default_factory=list)
 
 
 @service(
     name="gmail_reply_to_thread",
-    description="Create a reply draft on an existing Gmail thread. ALWAYS use this tool instead of composing reply text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. Pass your drafted reply in the 'body' parameter. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
+    description="Create a reply draft on an existing Gmail thread. ALWAYS use this tool instead of composing reply text in chat - it creates a real Gmail draft and opens an interactive composer UI where the user can review, edit, and send. Pass your drafted reply in the 'body' parameter. Recipients are yours to control: pass 'to', 'cc', and/or 'bcc' (each a comma-separated address list) to set them explicitly. If you omit 'to', it defaults to the other party in the thread (never the account owner); omitted 'cc'/'bcc' are left unset. When an interactive UI is rendered alongside the result, keep your text response brief since the user can edit in the UI.",
     input_model=GmailReplyInput,
     output_model=GmailDraft,
     mutating=True,
@@ -386,14 +395,15 @@ class GmailReplyInput(BaseModel):
 def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
     """Create a reply draft attached to the given thread.
 
-    Derives ``To`` from the sender (``Reply-To`` falling back to ``From``,
-    RFC 5322 5.2.2) of the most recent message the account owner did NOT send,
-    so a reply reaches the other party rather than defaulting to the owner's own
-    address when they happen to have sent the last message. Prefixes the subject
-    with ``Re:`` unless the originating subject already starts with ``Re:``.
-    Propagates the parent's ``Message-ID`` as ``In-Reply-To`` and appends to
-    ``References`` so non-Gmail MUAs also thread the conversation; Gmail itself
-    uses the ``threadId`` on the API wrapper.
+    Recipients are caller-controlled: ``to``/``cc``/``bcc`` are used verbatim
+    when supplied. When ``to`` is omitted it defaults to the sender (``Reply-To``
+    falling back to ``From``, RFC 5322 5.2.2) of the most recent message the
+    account owner did NOT send, so a bare reply reaches the other party rather
+    than the owner's own address. Prefixes the subject with ``Re:`` unless the
+    originating subject already starts with ``Re:``. Propagates the parent's
+    ``Message-ID`` as ``In-Reply-To`` and appends to ``References`` so non-Gmail
+    MUAs also thread the conversation; Gmail itself uses the ``threadId`` on the
+    API wrapper.
     """
     svc = _get_gmail_client(input.user_id)
     thread = (
@@ -407,7 +417,12 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         raise ValueError(f"Thread {input.thread_id!r} has no messages to reply to")
     last_msg = messages[-1]
     headers = _headers_to_dict((last_msg.get("payload") or {}).get("headers"))
-    to = _select_reply_recipient(messages, _account_email(input.user_id))
+    # Caller-supplied recipients win; only compute the default (and pay the
+    # token-row lookup) when the caller left ``to`` unset.
+    if input.to is not None:
+        to = input.to
+    else:
+        to = _select_reply_recipient(messages, _account_email(input.user_id))
     orig_subject = headers.get("subject") or ""
     if input.subject is not None:
         subject = input.subject
@@ -429,6 +444,8 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         to=to,
         subject=subject,
         body=body,
+        cc=input.cc,
+        bcc=input.bcc,
         in_reply_to_thread_id=input.thread_id,
         in_reply_to=in_reply_to,
         references=references,
