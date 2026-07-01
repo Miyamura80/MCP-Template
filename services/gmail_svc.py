@@ -19,6 +19,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from email.message import EmailMessage, MIMEPart
+from email.utils import getaddresses
 from typing import Any
 from urllib.parse import urlencode
 
@@ -152,6 +153,18 @@ def _load_token_row(session: Session, user_id: str) -> GoogleToken | None:
         .filter(GoogleToken.user_id == user_id, GoogleToken.revoked_at.is_(None))
         .one_or_none()
     )
+
+
+def _account_email(user_id: str) -> str | None:
+    """Return the connected account's own email address, or None if unknown.
+
+    Sourced from the stored OAuth token row (populated at connect time from the
+    OpenID ``email`` claim) rather than an extra ``users.getProfile`` round-trip.
+    Used to keep the account owner out of a reply's default recipients.
+    """
+    with _get_db_session() as session:
+        row = _load_token_row(session, user_id)
+        return row.email if row is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +460,16 @@ def _headers_to_dict(headers: list[dict[str, str]] | None) -> dict[str, str]:
         if isinstance(name, str) and isinstance(value, str):
             out[name.lower()] = value
     return out
+
+
+def _addresses(header_value: str | None) -> list[tuple[str, str]]:
+    """Parse an address header into ``[(display_name, email), ...]`` pairs.
+
+    Drops entries with no email address (e.g. a stray group syntax remnant).
+    """
+    if not header_value:
+        return []
+    return [(name, addr) for name, addr in getaddresses([header_value]) if addr]
 
 
 def _decode_body_data(data: str | None) -> str | None:

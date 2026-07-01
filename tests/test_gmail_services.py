@@ -1056,6 +1056,288 @@ class TestGmailReplyToThread(TestTemplate):
             finally:
                 _stop(patches)
 
+    def _patch_multi_reply(self, *, messages: list[dict], created_draft: dict):
+        """Mock a thread with several messages (thread order) + drafts.create."""
+        mock = _make_mock_service()
+        mock.users().threads().get().execute.return_value = {
+            "id": "t-rep",
+            "messages": messages,
+        }
+        mock.users().drafts().create().execute.return_value = created_draft
+        return mock
+
+    @staticmethod
+    def _thread_msg(msg_id: str, headers: dict[str, str]) -> dict:
+        return {
+            "id": msg_id,
+            "internalDate": "1700000000000",
+            "payload": {"headers": _headers(headers)},
+        }
+
+    def test_replies_to_other_party_when_owner_sent_last_message(self):
+        # Seeded account is alice@example.com. Tom wrote first, then alice
+        # replied - so the latest message is from self. The reply must default
+        # to Tom, not alice, otherwise the owner emails themselves.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "Tom <tom@example.com>",
+                            "To": "alice@example.com",
+                            "Subject": "Question",
+                        },
+                    ),
+                    self._thread_msg(
+                        "m-2",
+                        {
+                            "From": "alice@example.com",
+                            "To": "Tom <tom@example.com>",
+                            "Subject": "Re: Question",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-self", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
+    def test_replies_to_recipients_when_all_messages_from_self(self):
+        # The only message in the thread was sent by the owner. Reply to the
+        # people it was addressed to (minus self), not the owner.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "Tom <tom@example.com>",
+                            "Cc": "alice@example.com, Sue <sue@example.com>",
+                            "Subject": "Heads up",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-self2", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        # Tom (To) and Sue (Cc) survive; alice (self, in Cc) is dropped.
+        assert mime["To"] == "Tom <tom@example.com>, Sue <sue@example.com>"
+
+    def test_raises_when_self_only_thread_has_no_other_recipient(self):
+        # Whole thread is from the owner and the last message names no other
+        # participant (To/Cc are only self) - there is nobody to reply to, so
+        # the service raises instead of creating a blank-To draft.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "alice@example.com",
+                            "Subject": "Note to self",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(draft_id="d-none", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="Cannot determine a reply recipient"):
+                    gmail_reply_to_thread(
+                        GmailReplyInput(user_id="alice", thread_id="t-rep")
+                    )
+            finally:
+                _stop(patches)
+
+    def test_self_only_thread_still_works_when_caller_supplies_to(self):
+        # The same self-only thread succeeds when the caller passes 'to'.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "alice@example.com",
+                            "Subject": "Note to self",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-ok", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        to="Tom <tom@example.com>",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
+    def test_caller_supplied_to_overrides_thread_default(self):
+        # When the caller sets 'to' explicitly it is used verbatim - the
+        # thread-derived default is not consulted.
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Original Subject",
+                },
+                created_draft=_draft_resource(draft_id="d-ov", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        to="chosen@example.com",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "chosen@example.com"
+
+    def test_owner_sent_last_with_non_self_reply_to_is_still_skipped(self):
+        # The owner (alice) sent the newest message and set a non-self Reply-To
+        # (e.g. "reply to my assistant"). Ownership is judged by From, so this
+        # message is still recognized as the owner's and skipped - the reply
+        # goes to the earlier other party (Tom), NOT the Reply-To address.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "Tom <tom@example.com>",
+                            "To": "alice@example.com",
+                            "Subject": "Question",
+                        },
+                    ),
+                    self._thread_msg(
+                        "m-2",
+                        {
+                            "From": "alice@example.com",
+                            "Reply-To": "assistant@other.com",
+                            "To": "Tom <tom@example.com>",
+                            "Subject": "Re: Question",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-rt", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
+    def test_caller_supplied_cc_and_bcc_pass_through(self):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Original Subject",
+                },
+                created_draft=_draft_resource(draft_id="d-cc", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        cc="cc@example.com",
+                        bcc="bcc@example.com",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        # 'to' still defaults from the thread; cc/bcc are the caller's verbatim.
+        assert mime["To"] == "sender@example.com"
+        assert mime["Cc"] == "cc@example.com"
+        assert mime["Bcc"] == "bcc@example.com"
+
 
 # ---------------------------------------------------------------------------
 # Non-destructive update + stable attachment handles (this change)
