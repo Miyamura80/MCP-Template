@@ -854,7 +854,9 @@ class TestGmailGetAttachment(TestTemplate):
 
     def test_rejects_attachment_over_size_cap(self):
         blob = _gmail_attachment_blob(b"PDFBYTES")
-        blob["size"] = 10_000  # bytes, over the patched cap below
+        # A numeric *string* size (Gmail can return numbers as strings) must
+        # still be coerced and caught by the cap, not silently bypass it.
+        blob["size"] = "10000"  # bytes, over the patched cap below
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()

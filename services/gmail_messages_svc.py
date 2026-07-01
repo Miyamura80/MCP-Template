@@ -573,9 +573,15 @@ def gmail_get_attachment(input: GmailGetAttachmentInput) -> GmailAttachmentData:
     )
     # The returned base64 lands directly in the model's context, so refuse files
     # larger than the configured ceiling rather than blowing the context window.
-    size = resp.get("size")
+    # Gmail can hand numeric fields back as strings (see _internal_date_to_dt),
+    # so coerce before comparing or the guard would silently skip a string size.
+    raw_size = resp.get("size")
+    try:
+        size: int | None = None if raw_size is None else int(raw_size)
+    except (TypeError, ValueError):
+        size = None
     max_bytes = global_config.gmail.max_attachment_bytes
-    if isinstance(size, int) and size > max_bytes:
+    if size is not None and size > max_bytes:
         raise ValueError(
             f"Attachment {input.attachment_id} is {size} bytes, over the "
             f"{max_bytes}-byte limit (global_config.gmail.max_attachment_bytes). "
