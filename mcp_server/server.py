@@ -100,6 +100,14 @@ def _transport_security() -> TransportSecuritySettings:
 # render Apps - both happen *within* a single tool-call request's SSE stream - and
 # we use no server-initiated sampling (the one feature that hangs stateless; see
 # modelcontextprotocol/python-sdk issue 678).
+#
+# This is also where the spec is going: the MCP core is dropping session state at
+# the protocol layer (SEP-2567 removes Mcp-Session-Id, SEP-2575 removes the
+# initialize handshake; 2026-07-28 RC), so "any request can land on any instance."
+# stateless_http=True is the SDK option the transport roadmap points implementers
+# to today. It still runs the initialize handshake (the SDK keeps that until it
+# implements those SEPs) but stops persisting/validating per-session state, which
+# is what actually fixes the error - and it's forward-compatible with the RC.
 mcp: FastMCP = FastMCP(
     "mymcp",
     instructions=_MCP_INSTRUCTIONS,
