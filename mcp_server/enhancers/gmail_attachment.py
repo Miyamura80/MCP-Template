@@ -35,6 +35,10 @@ _IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"MM\x00*", "image/tiff"),
 )
 
+# Enough base64 chars to cover every magic number below - WebP needs the most
+# (12 bytes -> 16 chars); 24 leaves headroom and stays a whole base64 quantum.
+_HEADER_B64_CHARS = 24
+
 
 def _sniff_image_mime(data_base64: str) -> str | None:
     """Return an image mime type if the base64 bytes start with a known image
@@ -46,10 +50,10 @@ def _sniff_image_mime(data_base64: str) -> str | None:
     """
     if not data_base64:
         return None
-    # Decode only a small, 4-char-aligned prefix - enough for every magic number
-    # below (WebP needs 12 bytes -> 16 base64 chars) without decoding a large
-    # payload just to read its header.
-    prefix = data_base64[: min(len(data_base64) - len(data_base64) % 4, 24)]
+    # Decode only the header, not the (potentially multi-MB) whole payload. Trim
+    # to a 4-char-aligned length so the slice is a valid standalone base64 chunk.
+    aligned = len(data_base64) - len(data_base64) % 4
+    prefix = data_base64[: min(aligned, _HEADER_B64_CHARS)]
     if not prefix:
         return None
     try:

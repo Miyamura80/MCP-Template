@@ -68,7 +68,7 @@ class TestSniffImageMime(TestTemplate):
 class TestGmailAttachmentEnhancer(TestTemplate):
     """The gmail_get_attachment enhancer attaches an ImageContent block for images only."""
 
-    def _run(self, raw: bytes) -> EnhancedTool:
+    def _run(self, raw: bytes) -> tuple[EnhancedTool, GmailAttachmentData]:
         def fake_service(input: GmailGetAttachmentInput) -> GmailAttachmentData:
             return GmailAttachmentData(
                 message_id=input.message_id,
@@ -82,11 +82,11 @@ class TestGmailAttachmentEnhancer(TestTemplate):
             input=GmailGetAttachmentInput(message_id="m-1", attachment_id="att-1"),
             service_fn=fake_service,
         )
-        asyncio.run(gmail_get_attachment_enhanced(tool))
-        return tool
+        result = asyncio.run(gmail_get_attachment_enhanced(tool))
+        return tool, result
 
     def test_image_attachment_gets_image_content_block(self):
-        tool = self._run(_PNG)
+        tool, _ = self._run(_PNG)
         assert len(tool.extra_content) == 1
         block = tool.extra_content[0]
         assert block.type == "image"
@@ -95,12 +95,11 @@ class TestGmailAttachmentEnhancer(TestTemplate):
         assert block.data == _b64(_PNG)
 
     def test_non_image_attachment_has_no_extra_content(self):
-        tool = self._run(b"%PDF-1.7\nnot an image at all")
+        tool, _ = self._run(b"%PDF-1.7\nnot an image at all")
         assert tool.extra_content == []
 
     def test_enhancer_returns_service_result_unchanged(self):
-        tool = self._run(_JPEG)
-        result = asyncio.run(gmail_get_attachment_enhanced(tool))
+        _, result = self._run(_JPEG)
         # Structured result is the untouched service output (bytes reach non-vision
         # hosts via structuredContent regardless of the image block).
         assert result.message_id == "m-1"
