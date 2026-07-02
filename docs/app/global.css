@@ -96,6 +96,14 @@
   color: #9BA4A6 !important;
 }
 
+/* Card icon chips: the icon box (bg-fd-muted) renders as a light gray in both
+   themes, but in dark mode the stroke glyph otherwise inherits that same gray
+   (via the muted-foreground override above), making icons invisible. Pin the
+   glyph to a dark tone so it reads against the light chip. */
+.dark [data-card] svg {
+  color: #1a1b1f !important;
+}
+
 .dark .bg-fd-card a {
   color: #9BA4A6;
 }
