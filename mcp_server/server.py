@@ -87,10 +87,24 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
+# ``stateless_http=True`` makes every /mcp request self-contained: the server
+# does not persist per-session state keyed by ``Mcp-Session-Id`` in memory.
+# Stateful mode (the FastMCP default) breaks in exactly the deployments this
+# template targets - Render free-tier spins down when idle, redeploys restart
+# the process, and horizontal scaling routes requests across replicas - each of
+# which wipes/splits the in-memory session store, so a client's next POST fails
+# with "MCP session has been terminated or no longer exists on the server"
+# (mcp_session_terminated). Some clients (OpenAI, and connectors that DELETE the
+# session after each call) trigger the same error even single-replica. Stateless
+# mode sidesteps all of it. Safe here because our enhancers only elicit input and
+# render Apps - both happen *within* a single tool-call request's SSE stream - and
+# we use no server-initiated sampling (the one feature that hangs stateless; see
+# modelcontextprotocol/python-sdk issue 678).
 mcp: FastMCP = FastMCP(
     "mymcp",
     instructions=_MCP_INSTRUCTIONS,
     transport_security=_transport_security(),
+    stateless_http=True,
 )
 
 _populated: bool = False
