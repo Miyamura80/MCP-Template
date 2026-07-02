@@ -420,7 +420,7 @@ def _decoded_size(raw_size: Any, data_base64: str) -> int:
 
 @service(
     name="gmail_get_attachment",
-    description="Fetch the raw base64 bytes of a single attachment or inline image on a Gmail message, identified by the message_id + attachment_id echoed by gmail_get_thread. Use this to pull one file on demand instead of loading every attachment into the thread payload.",
+    description="Fetch the raw base64 bytes of a single attachment or inline image on a Gmail message, identified by the message_id + attachment_id echoed by gmail_get_thread. Use this to pull one file on demand instead of loading every attachment into the thread payload. data_base64 is raw encoded bytes, not a rendered image - you cannot read an image's contents from it; on vision-capable MCP hosts, image attachments are additionally rendered into context as a viewable image.",
     input_model=GmailGetAttachmentInput,
     output_model=GmailAttachmentData,
 )
