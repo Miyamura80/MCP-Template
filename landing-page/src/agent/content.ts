@@ -12,11 +12,7 @@ function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-/**
- * Full "When to use" section (summary + when-to / when-not-to lists), shared by
- * the long-form surfaces (llms-full.txt, agents.md). The concise llms.txt index
- * renders a shorter variant inline.
- */
+/** Full "When to use" section shared by the long-form surfaces (llms-full.txt, agents.md). */
 function whenToUseSection(): string {
   return `## When to use
 
