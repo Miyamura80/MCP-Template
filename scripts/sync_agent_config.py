@@ -355,8 +355,11 @@ def sync_agents_md_symlinks() -> list[str]:
 
     `CLAUDE.md` is the source of truth. A pre-existing real `AGENTS.md` (e.g. a
     drifted hand-written copy) is replaced by the managed symlink so the two can
-    never disagree. An `AGENTS.md` symlink left dangling by a removed `CLAUDE.md`
-    is pruned. Gitignored paths and submodule contents are out of scope.
+    never disagree. A pre-existing `AGENTS.md` *symlink* is left untouched -
+    whether it is the managed mirror or a user-managed link pointing elsewhere -
+    so custom link targets are never silently clobbered. An `AGENTS.md` symlink
+    left dangling by a removed `CLAUDE.md` is pruned. Gitignored paths and
+    submodule contents are out of scope.
     """
     changes: list[str] = []
     claude_dirs, agents_md_paths = _mirror_candidates()
@@ -365,10 +368,13 @@ def sync_agents_md_symlinks() -> list[str]:
         if not (d / "CLAUDE.md").is_file():
             continue  # staged deletion; nothing to mirror
         link = d / "AGENTS.md"
-        if _points_to_claude(link):
+        if link.is_symlink():
+            # Managed mirror already in place, or a user-managed symlink pointing
+            # elsewhere - leave non-managed link targets alone (same policy as
+            # sync_skill_symlinks). Only real files are reconciled below.
             continue
-        if link.is_symlink() or link.exists():
-            link.unlink()
+        if link.exists():
+            link.unlink()  # drifted real AGENTS.md -> replace with managed symlink
         link.symlink_to("CLAUDE.md")
         changes.append(f"symlinked {link.relative_to(REPO)} -> CLAUDE.md")
 
