@@ -261,6 +261,9 @@ class Config(BaseSettings):
     WEBHOOK_RUNNER_INTERVAL_S: int = 30
     # Max delivery attempts before an outbox row is marked "failed".
     WEBHOOK_MAX_ATTEMPTS: int = 6
+    # Shared bearer required by the internal POST /api/v1/google/internal/renew
+    # endpoint (WEBHOOK_RUNNER_MODE="endpoint"). Unset -> endpoint disabled.
+    WEBHOOK_RUNNER_TOKEN: str | None = None
 
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(
