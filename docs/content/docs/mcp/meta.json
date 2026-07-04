@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "setup",
+    "web-clients",
     "oauth",
     "tools",
     "debugging"

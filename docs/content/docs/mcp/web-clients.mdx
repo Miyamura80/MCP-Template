@@ -1,0 +1,115 @@
+---
+title: ChatGPT & Claude (web)
+description: Add the server as a remote connector in ChatGPT web and Claude web / Cowork
+---
+
+Cloud chat clients - ChatGPT on the web and Claude on the web / Cowork - connect
+to a **remote** MCP server over a public URL. They cannot spawn the local stdio
+process, so point them at your deployed `mymcp-serve` endpoint (`https://YOUR-DEPLOYMENT/mcp`).
+
+Both clients discover auth from the URL alone when [OAuth 2.1](/docs/mcp/oauth)
+is configured on the server: the client registers itself, opens a consent
+screen, and never needs a pasted key. If your deployment uses API-key auth
+instead, see [API key instead of OAuth](#api-key-instead-of-oauth) below.
+
+<Callout type="warn">
+Your connection is scoped to **you**. Don't add one shared connector for a whole
+team - each member should add their own so tool calls are attributed and
+policy-enforced per user. Treat any URL that embeds an API key like a password:
+anyone with it can call your tools as you.
+</Callout>
+
+<Tabs items={['Claude (web / Cowork)', 'ChatGPT (web)']} groupId="web-mcp-client">
+<Tab value="Claude (web / Cowork)">
+
+Custom connectors are available on Claude Pro, Max, Team, and Enterprise plans.
+
+<Steps>
+<Step>
+
+### Open connector settings
+
+Go to **Settings → Connectors** (or **Customize → Connectors**) and click
+**Add custom connector**.
+
+</Step>
+<Step>
+
+### Add the server
+
+- **Name**: `mymcp` (or any label you like)
+- **URL**: `https://YOUR-DEPLOYMENT/mcp`
+- Leave the OAuth Client ID / Secret fields **empty** - the server publishes
+  OAuth metadata and Claude provisions itself.
+
+Click **Add**. Claude opens a consent screen; approve it to link your account.
+
+</Step>
+<Step>
+
+### Enable it in a chat
+
+In any conversation, open the **+** / tools menu, find **mymcp** under
+connectors, and toggle it on. Claude can now call your tools.
+
+</Step>
+</Steps>
+
+</Tab>
+<Tab value="ChatGPT (web)">
+
+Custom connectors require a **ChatGPT Plus, Pro, Business, Enterprise, or Edu**
+plan (the free tier can't create them). On Business/Enterprise/Edu, an admin
+must enable developer mode first under **Workspace Settings → Connectors**.
+
+<Steps>
+<Step>
+
+### Turn on developer mode
+
+Go to **Settings → Apps & Connectors → Advanced settings** and toggle
+**Developer mode** on. This exposes the "create connector" flow with full
+read/write access to connector tools.
+
+</Step>
+<Step>
+
+### Create the connector
+
+Under **Settings → Apps & Connectors**, click **Create**, then:
+
+- **Name**: `mymcp`
+- **Server URL**: `https://YOUR-DEPLOYMENT/mcp`
+- **Authentication**: **OAuth** (ChatGPT runs the flow when it discovers the
+  server's OAuth metadata). Pick **No auth** only for an unauthenticated
+  deployment.
+- Check **I understand and want to continue**, then **Create**.
+
+</Step>
+<Step>
+
+### Use it in a chat
+
+Open the composer's **Tools** menu and enable **mymcp** for the conversation.
+
+</Step>
+</Steps>
+
+</Tab>
+</Tabs>
+
+## API key instead of OAuth
+
+If your deployment authenticates with `X-API-KEY` rather than OAuth, cloud
+clients that only accept a bare URL can't send a custom header. Two options:
+
+- **Enable [OAuth 2.1](/docs/mcp/oauth)** on the deployment - the recommended
+  path for hosted clients, and the only one that keeps keys out of the URL.
+- **Embed the key in the URL** if your gateway accepts it as a path or query
+  segment (e.g. `https://YOUR-DEPLOYMENT/mcp?api_key=sk_...`). This works but
+  puts a live credential in the connector config, so rotate it if it leaks and
+  never share the URL.
+
+For local desktop clients that read a config file (Claude Desktop stdio, Cursor,
+VS Code, Codex), use the [Setup](/docs/mcp/setup) page instead - those can set
+headers and don't need a public URL.
