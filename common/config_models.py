@@ -176,7 +176,7 @@ class WebBotAuthConfig(BaseModel):
     ``nbf`` is the publish time.
     """
 
-    key_lifetime_days: int = 365
+    key_lifetime_days: int = Field(default=365, ge=1)
 
 
 class RateLimitConfig(BaseModel):

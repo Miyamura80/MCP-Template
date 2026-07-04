@@ -41,6 +41,13 @@ class TestWebBotAuthDirectory:
         monkeypatch.setattr(well_known.global_config, "WEB_BOT_AUTH_PRIVATE_KEY", None)
         assert self._client().get(DIRECTORY_PATH).status_code == 404
 
+    def test_404_when_whitespace_only(self, monkeypatch):
+        # A blank-but-spaced secret is "unconfigured" (404), not a bad seed (500).
+        monkeypatch.setattr(
+            well_known.global_config, "WEB_BOT_AUTH_PRIVATE_KEY", "   "
+        )
+        assert self._client().get(DIRECTORY_PATH).status_code == 404
+
     def test_publishes_ed25519_jwk_set(self, monkeypatch):
         seed = _seed_b64()
         monkeypatch.setattr(well_known.global_config, "WEB_BOT_AUTH_PRIVATE_KEY", seed)

@@ -226,12 +226,14 @@ def _web_bot_auth_directory() -> dict:
     is not a valid 32-byte Ed25519 private key (a deployment misconfiguration we
     surface loudly rather than serving a bad directory).
     """
-    seed_b64 = global_config.WEB_BOT_AUTH_PRIVATE_KEY
+    # Strip before the emptiness check so a whitespace-only secret reads as
+    # "unconfigured" (404), not as a malformed seed (500).
+    seed_b64 = (global_config.WEB_BOT_AUTH_PRIVATE_KEY or "").strip()
     if not seed_b64:
         raise HTTPException(status_code=404, detail="Web Bot Auth is not configured")
 
     try:
-        jwk = dict(_signing_key_jwk(seed_b64.strip()))
+        jwk = dict(_signing_key_jwk(seed_b64))
     except ValueError as exc:
         # binascii.Error (bad base64) subclasses ValueError, as does an
         # incorrectly sized seed - both mean the secret is misconfigured.
