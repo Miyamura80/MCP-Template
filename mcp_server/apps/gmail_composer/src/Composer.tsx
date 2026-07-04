@@ -95,8 +95,15 @@ function useIsMobile(query = "(max-width: 600px)"): boolean {
     const mql = window.matchMedia(query);
     const onChange = () => setMatches(mql.matches);
     onChange();
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
+    // Safari < 14 (older iOS) has no addEventListener on MediaQueryList and
+    // only implements the legacy addListener/removeListener API. Calling the
+    // missing method would throw at mount, so fall back when it's absent.
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
   }, [query]);
   return matches;
 }
