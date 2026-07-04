@@ -369,9 +369,11 @@ def sync_agents_md_symlinks() -> list[str]:
             continue  # staged deletion; nothing to mirror
         link = d / "AGENTS.md"
         if link.is_symlink():
-            # Managed mirror already in place, or a user-managed symlink pointing
-            # elsewhere - leave non-managed link targets alone (same policy as
-            # sync_skill_symlinks). Only real files are reconciled below.
+            # Leave every existing symlink alone - the managed mirror, or a
+            # user-managed link pointing elsewhere we won't clobber. This is
+            # intentionally more conservative than sync_skill_symlinks' creation
+            # path (which re-points wrong-target links); only real drifted files
+            # are reconciled below. The shared policy is at prune time.
             continue
         if link.exists():
             link.unlink()  # drifted real AGENTS.md -> replace with managed symlink
