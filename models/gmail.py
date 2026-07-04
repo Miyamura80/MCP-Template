@@ -255,6 +255,32 @@ class GmailComposeInput(BaseModel):
     attachments: list[AttachmentInput] = Field(default_factory=list)
 
 
+class GmailReplyInput(BaseModel):
+    """Input for ``gmail_reply_to_thread``: create a reply draft on a thread.
+
+    ``body`` defaults to an empty placeholder so the composer UI can populate
+    it on the next turn. ``subject`` defaults to ``Re: <orig>`` derived from
+    the thread's last message.
+
+    Recipients are caller-controlled: ``to``, ``cc``, and ``bcc`` each accept a
+    comma-separated address list and are used verbatim when provided. Only
+    ``to`` has a default - when omitted it is derived from the thread (the other
+    party in the conversation, never the account owner). ``cc``/``bcc`` are set
+    only when the caller passes them; the reply carries none otherwise. Supplied
+    addresses are used as-is - they are NOT de-duplicated against the thread's
+    existing participants or the derived ``to`` default.
+    """
+
+    user_id: str = ""
+    thread_id: str
+    body: str | None = None
+    subject: str | None = None
+    to: str | None = None
+    cc: str | None = None
+    bcc: str | None = None
+    attachments: list[AttachmentInput] = Field(default_factory=list)
+
+
 class GmailSendInput(BaseModel):
     user_id: str = ""
     draft_id: str
@@ -304,6 +330,25 @@ class GmailListInboxResult(BaseModel):
 class GmailGetThreadInput(BaseModel):
     user_id: str = ""
     thread_id: str
+    include_attachment_data: bool = Field(
+        default=False,
+        description=(
+            "Inline the raw base64 bytes of attachments and cid: inline images "
+            "(e.g. signature logos) into the response. Off by default to keep "
+            "thread payloads small - attachments still carry filename, mime_type, "
+            "size, and attachment_id, so fetch a file's bytes on demand with "
+            "gmail_get_attachment using its message_id + attachment_id."
+        ),
+    )
+    strip_quoted_replies: bool = Field(
+        default=False,
+        description=(
+            "Collapse quoted prior-message history from each reply's body, "
+            "keeping only the newly written text. Off by default; turn on to "
+            "read long threads cheaply without every message re-quoting the whole "
+            "chain."
+        ),
+    )
 
 
 class GmailAttachment(BaseModel):
@@ -313,6 +358,30 @@ class GmailAttachment(BaseModel):
     attachment_id: str | None = None
     content_id: str | None = None
     data: str | None = None
+
+
+class GmailGetAttachmentInput(BaseModel):
+    user_id: str = ""
+    message_id: str = Field(
+        description="Id of the message the attachment lives on (from gmail_get_thread)",
+        min_length=1,
+    )
+    attachment_id: str = Field(
+        description="Stable attachment id from a gmail_get_thread attachment entry",
+        min_length=1,
+    )
+
+
+class GmailAttachmentData(BaseModel):
+    """Raw bytes of a single attachment, fetched on demand.
+
+    ``data_base64`` is standard base64 (padded), ready to decode or re-upload.
+    """
+
+    message_id: str
+    attachment_id: str
+    size: int | None = None
+    data_base64: str
 
 
 class GmailThreadMessage(BaseModel):

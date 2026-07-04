@@ -11,6 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from api_server.middleware.error_handler import (
     ErrorHandlerMiddleware,
     RequestIdMiddleware,
+    attachment_too_large_handler,
 )
 from api_server.middleware.mcp_auth import MCPAuthMiddleware
 from api_server.middleware.rate_limit import RateLimitMiddleware
@@ -27,6 +28,7 @@ from api_server.routes.payments import checkout, metering, subscription, webhook
 from common import global_config
 from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
+from services.gmail_svc import GmailAttachmentTooLargeError
 
 try:
     _APP_VERSION = _pkg_version("mcp-template")
@@ -87,6 +89,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Exception handlers ---------------------------------------------------
+# Map the oversized-attachment domain error to 413 so an over-cap
+# gmail_get_attachment request is a client error, not a generic 500.
+app.add_exception_handler(GmailAttachmentTooLargeError, attachment_too_large_handler)
 
 # --- Routes ---------------------------------------------------------------
 

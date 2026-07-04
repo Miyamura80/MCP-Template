@@ -2,7 +2,7 @@
 
 import json
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
 from api_server.server import app
+from common import global_config
 from db.base import Base
 from db.engine import get_db_session
 from tests.test_template import TestTemplate
@@ -128,6 +129,26 @@ class TestAPIServer(TestTemplate):
         )
         assert resp.status_code == 422
         assert "Idempotency-Key" in resp.json()["error"]["message"]
+
+    def test_oversized_attachment_returns_413(self):
+        """An over-cap gmail_get_attachment surfaces as 413, not a generic 500."""
+        mock_svc = MagicMock()
+        mock_svc.users().messages().attachments().get().execute.return_value = {
+            "data": "QUJD",  # "ABC"
+            "size": 10_000,
+        }
+        with (
+            patch(
+                "services.gmail_messages_svc._get_gmail_client", return_value=mock_svc
+            ),
+            patch.object(global_config.gmail, "max_attachment_bytes", 5),
+        ):
+            resp = self.client.post(
+                "/api/v1/services/gmail_get_attachment",
+                json={"message_id": "m-1", "attachment_id": "att-1"},
+            )
+        assert resp.status_code == 413
+        assert resp.json()["error"]["code"] == "payload_too_large"
 
     def test_billing_routes_registered(self):
         """Billing routes should be registered."""

@@ -181,6 +181,29 @@ export function Inbox({ mcpApp }: InboxProps) {
   // Monotonic id for openThread; only the most-recent request may mutate state.
   const openSeqRef = useRef(0);
 
+  // The model-facing gmail_get_thread payload is lean (no inline-image or
+  // attachment bytes, to keep the LLM context small). When that lean thread
+  // arrives via ontoolresult, silently re-fetch the full version through the
+  // app-only open_thread tool so inline images render in the reader.
+  // Only called from the ontoolresult handler: the functional-update thread_id
+  // check below is the whole race guard (a late upgrade for a thread the user
+  // navigated away from no-ops). Do not call this from interactive paths
+  // without routing it through openSeqRef like openThread does.
+  const upgradeThread = async (thread_id: string) => {
+    try {
+      const raw = await mcpApp.callServerTool({
+        name: "gmail_inbox.open_thread",
+        arguments: { thread_id },
+      });
+      const full = extractStructuredContent<Thread>(raw);
+      if (full && Array.isArray(full.messages) && full.thread_id === thread_id) {
+        setThread((cur) => (cur && cur.thread_id === thread_id ? full : cur));
+      }
+    } catch {
+      // Keep the lean thread on failure - text still renders fine.
+    }
+  };
+
   useEffect(() => {
     let received = false;
     const handler = (raw: unknown) => {
@@ -200,6 +223,7 @@ export function Inbox({ mcpApp }: InboxProps) {
         setSelectedId(data.thread_id);
         setViewMode("reader");
         pushThreadContext(data as unknown as Thread);
+        void upgradeThread(data.thread_id);
       }
     };
     mcpApp.ontoolresult = handler;
