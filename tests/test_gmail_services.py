@@ -48,6 +48,7 @@ from models.gmail import (
     GmailThread,
     GmailUpdateDraftInput,
 )
+from services import get_registry
 from services.gmail_attachments_svc import (
     gmail_add_attachment,
     gmail_remove_attachment,
@@ -2359,6 +2360,17 @@ class TestUpdateInputJsonSerializable(TestTemplate):
         assert dumped["body"] is None
         # Round-trips through JSON (what the idempotency store does).
         assert json.loads(json.dumps(dumped))["to"] == "a@b"
+
+    def test_update_draft_is_mutating_and_survives_idempotency_dump(self):
+        # gmail_update_draft patches server state, so its API route is
+        # idempotency-guarded like compose/reply/send. That guard dumps the
+        # request body via model_dump(mode="json") - which only works because
+        # UNSET is serializable (above). Lock both facts together.
+        entry = next(e for e in get_registry() if e.name == "gmail_update_draft")
+        assert entry.mutating is True
+        partial = GmailUpdateDraftInput(draft_id="d-1", body="just the body")
+        # Exactly what api_server.idempotency.execute_idempotent stores.
+        assert partial.model_dump(mode="json")["body"] == "just the body"
 
 
 # ---------------------------------------------------------------------------

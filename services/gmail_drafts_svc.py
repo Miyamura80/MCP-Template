@@ -185,6 +185,7 @@ def gmail_get_draft(input: GmailGetDraftInput) -> GmailDraft:
     ),
     input_model=GmailUpdateDraftInput,
     output_model=GmailDraft,
+    mutating=True,
 )
 def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
     """Patch a draft non-destructively: omitted fields stay, null clears them.
