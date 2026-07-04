@@ -2,13 +2,16 @@
 # requires-python = ">=3.12"
 # dependencies = ["pyyaml>=6.0", "tomli_w>=1.0"]
 # ///
-"""Sync Claude <-> Codex skills, rules, and subagents.
+"""Sync Claude <-> Codex skills, rules, subagents, and AGENTS.md mirrors.
 
 - Symlinks `.claude/skills/<name>` -> `../../.agents/skills/<name>` for every
   directory under `.agents/skills/`.
 - Symlinks `.agents/rules/<name>.md` -> `../../.claude/rules/<name>.md` for every
   non-symlink `.md` file under `.claude/rules/`.
 - Regenerates `.codex/agents/<name>.toml` from each `.claude/agents/<name>.md`.
+- Symlinks `AGENTS.md` -> `CLAUDE.md` in every directory (recursively) that
+  contains a `CLAUDE.md`. `CLAUDE.md` is the source of truth; Codex reads the
+  `AGENTS.md` mirror.
 - Auto-prunes dangling symlinks and orphaned TOMLs silently.
 """
 
@@ -30,6 +33,19 @@ CLAUDE_AGENTS = REPO / ".claude" / "agents"
 CODEX_AGENTS = REPO / ".codex" / "agents"
 SHARED_RULES = REPO / ".agents" / "rules"
 CLAUDE_RULES = REPO / ".claude" / "rules"
+
+# Directory names never descended into when discovering CLAUDE.md files.
+# Hidden dirs (`.git`, `.claude`, `.agents`, ...) are skipped separately so the
+# recursive walk can't loop through the skill/rule symlinks it just created.
+AGENTS_MD_SKIP_DIRS = {
+    "node_modules",
+    "venv",
+    ".venv",
+    "__pycache__",
+    "dist",
+    "build",
+    "target",
+}
 
 FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?(.*)$", re.DOTALL)
 CLAUDE_ONLY_KEYS = {
@@ -269,6 +285,38 @@ def sync_rule_symlinks() -> list[str]:
     return changes
 
 
+def sync_agents_md_symlinks() -> list[str]:
+    """Mirror every `CLAUDE.md` to a sibling `AGENTS.md` symlink, recursively.
+
+    `CLAUDE.md` is the source of truth. A pre-existing real `AGENTS.md` (e.g. a
+    drifted hand-written copy) is replaced by the managed symlink so the two can
+    never disagree. An `AGENTS.md` symlink left dangling by a removed `CLAUDE.md`
+    is pruned.
+    """
+    changes: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(REPO):
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in AGENTS_MD_SKIP_DIRS and not d.startswith(".")
+        ]
+        link = Path(dirpath) / "AGENTS.md"
+        points_to_claude = link.is_symlink() and (
+            os.path.normpath(os.readlink(link)) == "CLAUDE.md"
+        )
+        if "CLAUDE.md" in filenames:
+            if points_to_claude:
+                continue
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to("CLAUDE.md")
+            changes.append(f"symlinked {link.relative_to(REPO)} -> CLAUDE.md")
+        elif points_to_claude:
+            link.unlink()
+            changes.append(f"pruned dangling {link.relative_to(REPO)}")
+    return changes
+
+
 def sync_agents() -> list[str]:
     changes: list[str] = []
     CODEX_AGENTS.mkdir(parents=True, exist_ok=True)
@@ -300,7 +348,12 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    changes = sync_skill_symlinks() + sync_rule_symlinks() + sync_agents()
+    changes = (
+        sync_skill_symlinks()
+        + sync_rule_symlinks()
+        + sync_agents()
+        + sync_agents_md_symlinks()
+    )
     for c in changes:
         print(c)
     if args.check and changes:
