@@ -42,6 +42,7 @@ Four documents live here:
 """
 
 import base64
+import functools
 import hashlib
 import json
 import time
@@ -68,10 +69,6 @@ _as_metadata_cache: dict[str, tuple[float, dict]] = {}
 # Media type for the Web Bot Auth key directory (the JWKS variant defined by
 # draft-meunier-http-message-signatures-directory).
 _WEB_BOT_AUTH_MEDIA_TYPE = "application/http-message-signatures-directory+json"
-# The directory is deterministic for a given key, so build it once and reuse it
-# (keyed by the configured seed). Caching also pins ``nbf``/``exp`` to first
-# publish instead of drifting on every request.
-_directory_cache: dict[str, dict] = {}
 
 
 def _server_version() -> str:
@@ -199,6 +196,29 @@ def _jwk_thumbprint(x: str) -> str:
     return _b64url(hashlib.sha256(canonical.encode("utf-8")).digest())
 
 
+@functools.cache
+def _signing_key_jwk(seed_b64: str) -> dict:
+    """The stable JWK members for a configured Ed25519 seed.
+
+    Everything except the ``nbf``/``exp`` validity window, which is derived per
+    response (see ``_web_bot_auth_directory``) so it tracks wall-clock instead of
+    freezing to one process's first request. Cached because the derivation (key
+    load + RFC 7638 thumbprint) is deterministic for a given seed. Raises
+    ``ValueError`` on a malformed seed.
+    """
+    private_key = Ed25519PrivateKey.from_private_bytes(_b64url_decode(seed_b64))
+    public_bytes = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    x = _b64url(public_bytes)
+    return {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": x,
+        "kid": _jwk_thumbprint(x),
+        "use": "sig",
+        "alg": "EdDSA",
+    }
+
+
 def _web_bot_auth_directory() -> dict:
     """Build the Ed25519 JWK Set for /.well-known/http-message-signatures-directory.
 
@@ -209,14 +229,9 @@ def _web_bot_auth_directory() -> dict:
     seed_b64 = global_config.WEB_BOT_AUTH_PRIVATE_KEY
     if not seed_b64:
         raise HTTPException(status_code=404, detail="Web Bot Auth is not configured")
-    seed_b64 = seed_b64.strip()
-
-    cached = _directory_cache.get(seed_b64)
-    if cached is not None:
-        return cached
 
     try:
-        private_key = Ed25519PrivateKey.from_private_bytes(_b64url_decode(seed_b64))
+        jwk = dict(_signing_key_jwk(seed_b64.strip()))
     except ValueError as exc:
         # binascii.Error (bad base64) subclasses ValueError, as does an
         # incorrectly sized seed - both mean the secret is misconfigured.
@@ -225,22 +240,13 @@ def _web_bot_auth_directory() -> dict:
             detail="WEB_BOT_AUTH_PRIVATE_KEY is not a valid Ed25519 seed",
         ) from exc
 
-    public_bytes = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-    x = _b64url(public_bytes)
+    # Derive the validity window per response: it then follows wall-clock and
+    # stays consistent no matter which replica - or how long-lived a process -
+    # serves the request, rather than freezing to one first-publish instant.
     issued = int(time.time())
-    jwk = {
-        "kty": "OKP",
-        "crv": "Ed25519",
-        "x": x,
-        "kid": _jwk_thumbprint(x),
-        "use": "sig",
-        "alg": "EdDSA",
-        "nbf": issued,
-        "exp": issued + global_config.web_bot_auth.key_lifetime_days * 86_400,
-    }
-    directory = {"keys": [jwk]}
-    _directory_cache[seed_b64] = directory
-    return directory
+    jwk["nbf"] = issued
+    jwk["exp"] = issued + global_config.web_bot_auth.key_lifetime_days * 86_400
+    return {"keys": [jwk]}
 
 
 @router.get("/.well-known/http-message-signatures-directory")

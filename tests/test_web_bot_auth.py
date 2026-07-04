@@ -34,8 +34,8 @@ class TestWebBotAuthDirectory:
         return TestClient(app)
 
     def setup_method(self):
-        # The directory caches per seed; isolate each test from the others.
-        well_known._directory_cache.clear()
+        # Key material is memoized per seed; isolate each test from the others.
+        well_known._signing_key_jwk.cache_clear()
 
     def test_404_when_unconfigured(self, monkeypatch):
         monkeypatch.setattr(well_known.global_config, "WEB_BOT_AUTH_PRIVATE_KEY", None)
