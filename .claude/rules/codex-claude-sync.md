@@ -87,7 +87,7 @@ Claude reads `CLAUDE.md`; Codex reads `AGENTS.md`. To keep them identical withou
 - A pre-existing real `AGENTS.md` (a drifted hand-written copy) is **replaced** by the symlink - edit `CLAUDE.md`, never `AGENTS.md`.
 - An `AGENTS.md` symlink orphaned by a removed `CLAUDE.md` is pruned.
 
-Because they're the same file, the `CLAUDE.md`-only guidance in `.claude/rules/claude-md-guide.md` (density, section headings, where content belongs) governs both. Vendored trees (`node_modules`, `.venv`, `dist`, `build`, `target`) and hidden dirs are not walked.
+Because they're the same file, the `CLAUDE.md`-only guidance in `.claude/rules/claude-md-guide.md` (density, section headings, where content belongs) governs both. Scope is decided by `git ls-files`, so gitignored paths and submodule contents are excluded; a non-git fallback walk skips hidden and vendored dirs.
 
 ## Do not try to sync these
 

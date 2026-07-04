@@ -9,9 +9,9 @@
 - Symlinks `.agents/rules/<name>.md` -> `../../.claude/rules/<name>.md` for every
   non-symlink `.md` file under `.claude/rules/`.
 - Regenerates `.codex/agents/<name>.toml` from each `.claude/agents/<name>.md`.
-- Symlinks `AGENTS.md` -> `CLAUDE.md` in every directory (recursively) that
-  contains a `CLAUDE.md`. `CLAUDE.md` is the source of truth; Codex reads the
-  `AGENTS.md` mirror.
+- Symlinks `AGENTS.md` -> `CLAUDE.md` in every git-scoped directory that
+  contains a `CLAUDE.md` (gitignored paths and submodules excluded).
+  `CLAUDE.md` is the source of truth; Codex reads the `AGENTS.md` mirror.
 - Auto-prunes dangling symlinks and orphaned TOMLs silently.
 """
 
@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,9 +35,10 @@ CODEX_AGENTS = REPO / ".codex" / "agents"
 SHARED_RULES = REPO / ".agents" / "rules"
 CLAUDE_RULES = REPO / ".claude" / "rules"
 
-# Directory names never descended into when discovering CLAUDE.md files.
-# Hidden dirs (`.git`, `.claude`, `.agents`, ...) are skipped separately so the
-# recursive walk can't loop through the skill/rule symlinks it just created.
+# Only used by the non-git fallback walk (see _mirror_candidates). Under git,
+# scope is decided by `git ls-files`, which already excludes these when ignored.
+# Hidden dirs (`.git`, `.claude`, ...) are skipped separately so the walk can't
+# loop through the skill/rule symlinks it just created.
 AGENTS_MD_SKIP_DIRS = {
     "node_modules",
     "venv",
@@ -285,33 +287,95 @@ def sync_rule_symlinks() -> list[str]:
     return changes
 
 
-def sync_agents_md_symlinks() -> list[str]:
-    """Mirror every `CLAUDE.md` to a sibling `AGENTS.md` symlink, recursively.
+def _points_to_claude(link: Path) -> bool:
+    return link.is_symlink() and os.path.normpath(os.readlink(link)) == "CLAUDE.md"
 
-    `CLAUDE.md` is the source of truth. A pre-existing real `AGENTS.md` (e.g. a
-    drifted hand-written copy) is replaced by the managed symlink so the two can
-    never disagree. An `AGENTS.md` symlink left dangling by a removed `CLAUDE.md`
-    is pruned.
+
+def _git_scoped_files() -> list[str] | None:
+    """Repo-relative paths git considers in scope: tracked plus untracked-but-
+    not-ignored. Gitignored files and submodule contents are excluded (git does
+    not recurse into submodules here). Returns None when git is unavailable or
+    REPO is not a git work tree, so the caller can fall back to a walk.
     """
-    changes: list[str] = []
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(REPO),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return [p for p in result.stdout.split("\0") if p]
+
+
+def _mirror_candidates() -> tuple[set[Path], set[Path]]:
+    """(dirs holding a CLAUDE.md, existing AGENTS.md paths) to consider.
+
+    Uses `git ls-files` so gitignored paths and submodules are excluded. Falls
+    back to a filesystem walk (hidden + vendored dirs pruned) outside git.
+    """
+    claude_dirs: set[Path] = set()
+    agents_md: set[Path] = set()
+    files = _git_scoped_files()
+    if files is not None:
+        for rel in files:
+            p = REPO / rel
+            if p.name == "CLAUDE.md":
+                claude_dirs.add(p.parent)
+            elif p.name == "AGENTS.md":
+                agents_md.add(p)
+        return claude_dirs, agents_md
     for dirpath, dirnames, filenames in os.walk(REPO):
         dirnames[:] = [
             d
             for d in dirnames
             if d not in AGENTS_MD_SKIP_DIRS and not d.startswith(".")
         ]
-        link = Path(dirpath) / "AGENTS.md"
-        points_to_claude = link.is_symlink() and (
-            os.path.normpath(os.readlink(link)) == "CLAUDE.md"
-        )
+        d = Path(dirpath)
         if "CLAUDE.md" in filenames:
-            if points_to_claude:
-                continue
-            if link.is_symlink() or link.exists():
-                link.unlink()
-            link.symlink_to("CLAUDE.md")
-            changes.append(f"symlinked {link.relative_to(REPO)} -> CLAUDE.md")
-        elif points_to_claude:
+            claude_dirs.add(d)
+        if "AGENTS.md" in filenames:
+            agents_md.add(d / "AGENTS.md")
+    return claude_dirs, agents_md
+
+
+def sync_agents_md_symlinks() -> list[str]:
+    """Mirror every in-scope `CLAUDE.md` to a sibling `AGENTS.md` symlink.
+
+    `CLAUDE.md` is the source of truth. A pre-existing real `AGENTS.md` (e.g. a
+    drifted hand-written copy) is replaced by the managed symlink so the two can
+    never disagree. An `AGENTS.md` symlink left dangling by a removed `CLAUDE.md`
+    is pruned. Gitignored paths and submodule contents are out of scope.
+    """
+    changes: list[str] = []
+    claude_dirs, agents_md_paths = _mirror_candidates()
+
+    for d in sorted(claude_dirs):
+        if not (d / "CLAUDE.md").is_file():
+            continue  # staged deletion; nothing to mirror
+        link = d / "AGENTS.md"
+        if _points_to_claude(link):
+            continue
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to("CLAUDE.md")
+        changes.append(f"symlinked {link.relative_to(REPO)} -> CLAUDE.md")
+
+    for link in sorted(agents_md_paths):
+        if (link.parent / "CLAUDE.md").is_file():
+            continue
+        if _points_to_claude(link):
             link.unlink()
             changes.append(f"pruned dangling {link.relative_to(REPO)}")
     return changes
