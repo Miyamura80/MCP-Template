@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sanitizeHtml } from "./sanitize";
 
 export type Draft = {
@@ -101,6 +101,40 @@ function useIsMobile(query = "(max-width: 600px)"): boolean {
   return matches;
 }
 
+// Grows a textarea to fit its content while `enabled`, so there is no inner
+// scroll region for a touch drag to fight. Recomputes on three triggers:
+//   - `value` changes (typing / an agent rewriting the body),
+//   - `enabled` flips (crossing the mobile breakpoint),
+//   - the element's own width changes (host iframe resized *without* crossing
+//     the breakpoint - otherwise the height would go stale and, because the
+//     mobile style hides overflow, the extra lines would be unreachable).
+// Uses useLayoutEffect so the box is sized before paint, avoiding a one-frame
+// clip on each keystroke. When disabled it clears the inline height so the
+// CSS fixed-height (desktop) box takes back over.
+function useAutoGrow(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  value: string,
+  enabled: boolean,
+) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!enabled) {
+      el.style.height = "";
+      return;
+    }
+    const resize = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    resize();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(resize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, value, enabled]);
+}
+
 export function Composer({ mcpApp }: ComposerProps) {
   const isMobile = useIsMobile();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -119,20 +153,10 @@ export function Composer({ mcpApp }: ComposerProps) {
     draftRef.current = draft;
   }, [draft]);
 
-  // On mobile, grow the body to fit its content so there is no inner scroll
-  // region competing with the page scroll - the whole iframe scrolls
-  // naturally under a finger drag. On desktop the box keeps its fixed height
-  // and its own scrollbar.
-  useEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    if (!isMobile) {
-      el.style.height = "";
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [draft?.body, isMobile]);
+  // On mobile the body grows to fit its content so there is no inner scroll
+  // region competing with the page scroll - the whole iframe scrolls naturally
+  // under a finger drag. Desktop keeps its fixed height and own scrollbar.
+  useAutoGrow(bodyRef, draft?.body ?? "", isMobile);
 
   useEffect(() => {
     const handler = (raw: unknown) => {
@@ -327,7 +351,9 @@ export function Composer({ mcpApp }: ComposerProps) {
         <ThreadPanel
           thread={thread}
           collapsed={threadCollapsedEffective}
-          isMobile={isMobile}
+          messagesStyle={
+            isMobile ? mobileThreadMessagesContainer : threadMessagesContainer
+          }
           onToggle={() => setThreadCollapsed(!threadCollapsedEffective)}
         />
       )}
@@ -458,12 +484,12 @@ function extractThread(raw: unknown): Thread | null {
 function ThreadPanel({
   thread,
   collapsed,
-  isMobile,
+  messagesStyle,
   onToggle,
 }: {
   thread: Thread;
   collapsed: boolean;
-  isMobile: boolean;
+  messagesStyle: React.CSSProperties;
   onToggle: () => void;
 }) {
   return (
@@ -473,7 +499,7 @@ function ThreadPanel({
         {thread.messages.length === 1 ? "" : "s"})
       </button>
       {!collapsed && (
-        <div style={isMobile ? mobileThreadMessagesContainer : threadMessagesContainer}>
+        <div style={messagesStyle}>
           {thread.messages.map((m, i) => (
             <ThreadMessageView
               key={m.message_id}

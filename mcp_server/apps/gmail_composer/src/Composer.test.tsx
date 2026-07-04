@@ -13,24 +13,27 @@ function makeMcpApp(callResult: unknown = null) {
 
 // Installs a matchMedia stub so useIsMobile() resolves deterministically.
 // jsdom ships no matchMedia, so tests without this helper exercise the
-// desktop path (the graceful fallback in useIsMobile).
+// desktop path (the graceful fallback in useIsMobile). Uses vi.stubGlobal so
+// unstubAllGlobals restores the original absence without us hand-deleting a
+// global we don't own.
 function mockViewport(isMobile: boolean) {
-  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-    matches: isMobile,
-    media: query,
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }));
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches: isMobile,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  );
 }
 
 afterEach(() => {
-  // Undo mockViewport so the default (no matchMedia) path is restored.
-  // @ts-expect-error - deleting the stub to reset jsdom's default absence.
-  delete window.matchMedia;
+  vi.unstubAllGlobals();
 });
 
 const threadDraft: Draft = {
