@@ -132,6 +132,17 @@ web_bot_auth:
   key_lifetime_days: 365   # per-key exp, relative to first publish
 
 ########################################################
+# Gmail integration
+########################################################
+gmail:
+  # Max decoded size (bytes) of a single attachment returned by
+  # gmail_get_attachment before it is rejected. gmail_get_attachment returns the
+  # file's base64 straight into the model's context, so this guards the context
+  # window against an unbounded fetch. Set absurdly high for now (~1 TiB =
+  # effectively unbounded); tighten to a real limit later.
+  max_attachment_bytes: 1099511627776
+
+########################################################
 # CLI
 ########################################################
 telemetry:

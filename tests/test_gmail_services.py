@@ -20,20 +20,33 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from common import global_config
 from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
+from mcp_server.app_tools.gmail_composer import _coerce_attachments
 from models.gmail import (
+    AttachmentInput,
+    AttachmentReference,
+    GmailAddAttachmentInput,
     GmailComposeInput,
     GmailCurateInboxInput,
     GmailDiscardDraftInput,
+    GmailGetAttachmentInput,
     GmailGetDraftInput,
     GmailGetThreadInput,
     GmailListDraftsInput,
     GmailListInboxInput,
+    GmailRemoveAttachmentInput,
     GmailSendInput,
+    GmailThread,
     GmailUpdateDraftInput,
 )
+from services.gmail_attachments_svc import (
+    gmail_add_attachment,
+    gmail_remove_attachment,
+)
+from services.gmail_curate_svc import gmail_curate_inbox
 from services.gmail_drafts_svc import (
     GmailReplyInput,
     gmail_compose,
@@ -47,12 +60,13 @@ from services.gmail_drafts_svc import (
 from services.gmail_messages_svc import (
     GmailThreadModifyInput,
     gmail_archive_thread,
-    gmail_curate_inbox,
+    gmail_get_attachment,
     gmail_get_thread,
     gmail_list_inbox,
     gmail_mark_thread_read,
 )
 from services.gmail_svc import (
+    GmailAttachmentTooLargeError,
     GmailNotConnectedError,
     _build_raw_message,
     _get_gmail_client,
@@ -157,6 +171,68 @@ def _draft_resource(
             snippet=body[:50],
         ),
     }
+
+
+def _draft_resource_with_attachment(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    body: str = "hello world",
+    thread_id: str = "t-1",
+    attachment_id: str = "att-1",
+    filename: str = "report.pdf",
+    mime_type: str = "application/pdf",
+    size: int = 1024,
+    cc: str | None = None,
+) -> dict:
+    """A draft whose message is multipart/mixed with one named attachment."""
+    headers = {"To": to, "Subject": subject}
+    if cc is not None:
+        headers["Cc"] = cc
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": body[:50],
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "headers": _headers(headers),
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": _b64url(body), "size": len(body)},
+                    },
+                    {
+                        "mimeType": mime_type,
+                        "filename": filename,
+                        "body": {"attachmentId": attachment_id, "size": size},
+                    },
+                ],
+            },
+        },
+    }
+
+
+def _gmail_attachment_blob(raw: bytes = b"PDFBYTES") -> dict:
+    """Mimic ``messages().attachments().get()`` - base64url data, padding stripped."""
+    data = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return {"data": data, "size": len(raw)}
+
+
+def _attachment_filenames_in_raw(raw_b64: str) -> list[str]:
+    """Filenames of attachment parts inside a base64url-encoded MIME message."""
+    mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+    return [name for p in mime.walk() if (name := p.get_filename())]
+
+
+def _last_update_raw(mock: MagicMock) -> str:
+    """The raw MIME of the most recent ``drafts().update(body=...)`` call."""
+    update_calls = [c for c in mock.users().drafts().update.call_args_list if c.kwargs]
+    assert update_calls, "drafts().update() was not called with kwargs"
+    return update_calls[-1].kwargs["body"]["message"]["raw"]
 
 
 def _make_mock_service() -> MagicMock:
@@ -269,6 +345,10 @@ def _patch_client(mock_svc: MagicMock):
         patch("services.gmail_svc._get_gmail_client", return_value=mock_svc),
         patch("services.gmail_drafts_svc._get_gmail_client", return_value=mock_svc),
         patch("services.gmail_messages_svc._get_gmail_client", return_value=mock_svc),
+        patch("services.gmail_curate_svc._get_gmail_client", return_value=mock_svc),
+        patch(
+            "services.gmail_attachments_svc._get_gmail_client", return_value=mock_svc
+        ),
     ]
 
 
@@ -631,6 +711,199 @@ class TestGmailGetThread(TestTemplate):
         assert thread.messages[1].attachments[0].filename == "doc.pdf"
         assert thread.messages[1].attachments[0].attachment_id == "att-9"
 
+    def _inline_image_thread(self) -> dict:
+        """A one-message thread whose HTML body references a cid: inline image."""
+        return {
+            "id": "t-img",
+            "messages": [
+                {
+                    "id": "m-img",
+                    "threadId": "t-img",
+                    "snippet": "hi",
+                    "internalDate": "1700000000000",
+                    "payload": {
+                        "mimeType": "multipart/related",
+                        "headers": _headers(
+                            {"From": "a@x", "To": "b@y", "Subject": "s"}
+                        ),
+                        "parts": [
+                            {
+                                "mimeType": "text/html",
+                                "body": {
+                                    "data": _b64url('<p>sig <img src="cid:logo1"></p>'),
+                                    "size": 30,
+                                },
+                            },
+                            {
+                                "mimeType": "image/png",
+                                "filename": "",
+                                "headers": _headers({"Content-ID": "<logo1>"}),
+                                "body": {
+                                    "attachmentId": "att-img",
+                                    "size": 8,
+                                    "data": base64.urlsafe_b64encode(b"PNGDATA1")
+                                    .decode("ascii")
+                                    .rstrip("="),
+                                },
+                            },
+                        ],
+                    },
+                }
+            ],
+        }
+
+    def _run_get_thread(
+        self, thread_payload: dict, **kwargs
+    ) -> tuple[GmailThread, MagicMock]:
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().threads().get().execute.return_value = thread_payload
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                thread = gmail_get_thread(
+                    GmailGetThreadInput(user_id="alice", thread_id="t-x", **kwargs)
+                )
+                return thread, mock
+            finally:
+                _stop(patches)
+
+    def test_attachment_data_omitted_by_default(self):
+        thread, mock = self._run_get_thread(self._inline_image_thread())
+        att = thread.messages[0].attachments[0]
+        # Locators are preserved so the caller can fetch bytes on demand...
+        assert att.attachment_id == "att-img"
+        assert att.content_id == "logo1"
+        assert att.mime_type == "image/png"
+        # ...but the base64 blob and the inlined data: URI are gone.
+        assert att.data is None
+        assert "cid:logo1" in (thread.messages[0].body_html or "")
+        assert "data:image" not in (thread.messages[0].body_html or "")
+        # No per-image attachments.get() fetch happened for inlining.
+        mock.users().messages().attachments().get().execute.assert_not_called()
+
+    def test_include_attachment_data_inlines_images(self):
+        thread, _mock = self._run_get_thread(
+            self._inline_image_thread(), include_attachment_data=True
+        )
+        att = thread.messages[0].attachments[0]
+        assert att.data is not None
+        # cid: reference is rewritten to a data: URI in the HTML body.
+        body_html = thread.messages[0].body_html or ""
+        assert "data:image/png;base64," in body_html
+        assert "cid:logo1" not in body_html
+
+    def test_strip_quoted_replies_drops_history(self):
+        body = "My new reply\nOn Mon, someone <a@x.com> wrote:\n> old line\n> more"
+        thread_payload = {
+            "id": "t-q",
+            "messages": [
+                _plain_message(
+                    message_id="m-q",
+                    thread_id="t-q",
+                    headers={"From": "a@x", "Subject": "Re: s"},
+                    body=body,
+                    snippet="My new reply",
+                )
+            ],
+        }
+        thread, _mock = self._run_get_thread(thread_payload, strip_quoted_replies=True)
+        assert thread.messages[0].body_text == "My new reply"
+
+    def test_quoted_replies_kept_by_default(self):
+        body = "My new reply\nOn Mon, someone <a@x.com> wrote:\n> old line\n> more"
+        thread_payload = {
+            "id": "t-q",
+            "messages": [
+                _plain_message(
+                    message_id="m-q",
+                    thread_id="t-q",
+                    headers={"From": "a@x", "Subject": "Re: s"},
+                    body=body,
+                    snippet="My new reply",
+                )
+            ],
+        }
+        thread, _mock = self._run_get_thread(thread_payload)
+        assert "old line" in (thread.messages[0].body_text or "")
+
+
+class TestGmailGetAttachment(TestTemplate):
+    def test_returns_normalized_base64(self):
+        raw = b"\xff\xfe\xfd\xfc\xfb"  # bytes whose b64 uses - and _ chars
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob(raw)
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_get_attachment(
+                    GmailGetAttachmentInput(
+                        user_id="alice", message_id="m-1", attachment_id="att-1"
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        assert result.message_id == "m-1"
+        assert result.attachment_id == "att-1"
+        # Standard, padded base64 that decodes back to the original bytes.
+        assert base64.b64decode(result.data_base64) == raw
+
+    def test_rejects_attachment_over_size_cap(self):
+        blob = _gmail_attachment_blob(b"PDFBYTES")
+        # A numeric *string* size (Gmail can return numbers as strings) must
+        # still be coerced and caught by the cap, not silently bypass it.
+        blob["size"] = "10000"  # bytes, over the patched cap below
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().messages().attachments().get().execute.return_value = blob
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with (
+                    patch.object(global_config.gmail, "max_attachment_bytes", 5),
+                    pytest.raises(
+                        GmailAttachmentTooLargeError, match="over the 5-byte limit"
+                    ),
+                ):
+                    gmail_get_attachment(
+                        GmailGetAttachmentInput(
+                            user_id="alice", message_id="m-1", attachment_id="att-1"
+                        )
+                    )
+            finally:
+                _stop(patches)
+
+    def test_missing_size_estimated_from_payload_and_capped(self):
+        # No 'size' metadata: the guard must estimate from the base64 payload
+        # so a missing size can't bypass the cap.
+        blob = _gmail_attachment_blob(b"PDFBYTESPDFBYTES")
+        blob.pop("size", None)
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().messages().attachments().get().execute.return_value = blob
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with (
+                    patch.object(global_config.gmail, "max_attachment_bytes", 2),
+                    pytest.raises(GmailAttachmentTooLargeError),
+                ):
+                    gmail_get_attachment(
+                        GmailGetAttachmentInput(
+                            user_id="alice", message_id="m-1", attachment_id="att-1"
+                        )
+                    )
+            finally:
+                _stop(patches)
+
 
 class TestGmailCurateInbox(TestTemplate):
     def test_ranks_by_score_deterministically(self):
@@ -703,7 +976,7 @@ class TestGmailCurateInbox(TestTemplate):
             patches = _patch_client(mock)
             _apply(patches)
             with patch(
-                "services.gmail_messages_svc._batch_get_threads",
+                "services.gmail_curate_svc._batch_get_threads",
                 side_effect=fake_batch_get_threads,
             ):
                 try:
@@ -747,7 +1020,7 @@ class TestGmailCurateInbox(TestTemplate):
             patches = _patch_client(mock)
             _apply(patches)
             with patch(
-                "services.gmail_messages_svc._batch_get_threads",
+                "services.gmail_curate_svc._batch_get_threads",
                 side_effect=fake_batch_get_threads,
             ):
                 try:
@@ -981,3 +1254,1097 @@ class TestGmailReplyToThread(TestTemplate):
                     )
             finally:
                 _stop(patches)
+
+    def _patch_multi_reply(self, *, messages: list[dict], created_draft: dict):
+        """Mock a thread with several messages (thread order) + drafts.create."""
+        mock = _make_mock_service()
+        mock.users().threads().get().execute.return_value = {
+            "id": "t-rep",
+            "messages": messages,
+        }
+        mock.users().drafts().create().execute.return_value = created_draft
+        return mock
+
+    @staticmethod
+    def _thread_msg(msg_id: str, headers: dict[str, str]) -> dict:
+        return {
+            "id": msg_id,
+            "internalDate": "1700000000000",
+            "payload": {"headers": _headers(headers)},
+        }
+
+    def test_replies_to_other_party_when_owner_sent_last_message(self):
+        # Seeded account is alice@example.com. Tom wrote first, then alice
+        # replied - so the latest message is from self. The reply must default
+        # to Tom, not alice, otherwise the owner emails themselves.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "Tom <tom@example.com>",
+                            "To": "alice@example.com",
+                            "Subject": "Question",
+                        },
+                    ),
+                    self._thread_msg(
+                        "m-2",
+                        {
+                            "From": "alice@example.com",
+                            "To": "Tom <tom@example.com>",
+                            "Subject": "Re: Question",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-self", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
+    def test_replies_to_recipients_when_all_messages_from_self(self):
+        # The only message in the thread was sent by the owner. Reply to the
+        # people it was addressed to (minus self), not the owner.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "Tom <tom@example.com>",
+                            "Cc": "alice@example.com, Sue <sue@example.com>",
+                            "Subject": "Heads up",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-self2", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        # Tom (To) and Sue (Cc) survive; alice (self, in Cc) is dropped.
+        assert mime["To"] == "Tom <tom@example.com>, Sue <sue@example.com>"
+
+    def test_raises_when_self_only_thread_has_no_other_recipient(self):
+        # Whole thread is from the owner and the last message names no other
+        # participant (To/Cc are only self) - there is nobody to reply to, so
+        # the service raises instead of creating a blank-To draft.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "alice@example.com",
+                            "Subject": "Note to self",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(draft_id="d-none", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="Cannot determine a reply recipient"):
+                    gmail_reply_to_thread(
+                        GmailReplyInput(user_id="alice", thread_id="t-rep")
+                    )
+            finally:
+                _stop(patches)
+
+    def test_self_only_thread_still_works_when_caller_supplies_to(self):
+        # The same self-only thread succeeds when the caller passes 'to'.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "alice@example.com",
+                            "To": "alice@example.com",
+                            "Subject": "Note to self",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-ok", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        to="Tom <tom@example.com>",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
+    def test_caller_supplied_to_overrides_thread_default(self):
+        # When the caller sets 'to' explicitly it is used verbatim - the
+        # thread-derived default is not consulted.
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Original Subject",
+                },
+                created_draft=_draft_resource(draft_id="d-ov", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        to="chosen@example.com",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "chosen@example.com"
+
+    def test_owner_sent_last_with_non_self_reply_to_is_still_skipped(self):
+        # The owner (alice) sent the newest message and set a non-self Reply-To
+        # (e.g. "reply to my assistant"). Ownership is judged by From, so this
+        # message is still recognized as the owner's and skipped - the reply
+        # goes to the earlier other party (Tom), NOT the Reply-To address.
+        with _patch_db() as factory:
+            _seed_token(factory)  # alice@example.com
+            mock = self._patch_multi_reply(
+                messages=[
+                    self._thread_msg(
+                        "m-1",
+                        {
+                            "From": "Tom <tom@example.com>",
+                            "To": "alice@example.com",
+                            "Subject": "Question",
+                        },
+                    ),
+                    self._thread_msg(
+                        "m-2",
+                        {
+                            "From": "alice@example.com",
+                            "Reply-To": "assistant@other.com",
+                            "To": "Tom <tom@example.com>",
+                            "Subject": "Re: Question",
+                        },
+                    ),
+                ],
+                created_draft=_draft_resource(
+                    draft_id="d-rt", to="Tom <tom@example.com>", thread_id="t-rep"
+                ),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(user_id="alice", thread_id="t-rep")
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        assert mime["To"] == "Tom <tom@example.com>"
+
+    def test_caller_supplied_cc_and_bcc_pass_through(self):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = self._patch_reply(
+                last_msg_headers={
+                    "From": "sender@example.com",
+                    "Subject": "Original Subject",
+                },
+                created_draft=_draft_resource(draft_id="d-cc", thread_id="t-rep"),
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_reply_to_thread(
+                    GmailReplyInput(
+                        user_id="alice",
+                        thread_id="t-rep",
+                        cc="cc@example.com",
+                        bcc="bcc@example.com",
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        create_calls = [
+            c for c in mock.users().drafts().create.call_args_list if c.kwargs
+        ]
+        raw_b64 = create_calls[-1].kwargs["body"]["message"]["raw"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+        # 'to' still defaults from the thread; cc/bcc are the caller's verbatim.
+        assert mime["To"] == "sender@example.com"
+        assert mime["Cc"] == "cc@example.com"
+        assert mime["Bcc"] == "bcc@example.com"
+
+
+# ---------------------------------------------------------------------------
+# Non-destructive update + stable attachment handles (this change)
+# ---------------------------------------------------------------------------
+
+
+def _new_upload(filename: str = "new.txt", body: bytes = b"NEWFILE") -> AttachmentInput:
+    return AttachmentInput(
+        filename=filename,
+        mime_type="text/plain",
+        data_base64=base64.urlsafe_b64encode(body).decode("ascii"),
+    )
+
+
+class TestUpdateDraftPreservesAttachments(TestTemplate):
+    """Acceptance: updating only the body leaves an existing attachment intact."""
+
+    def test_omitting_attachments_reattaches_existing_file(self):
+        original = _draft_resource_with_attachment(body="Original body")
+        echoed = _draft_resource_with_attachment(body="New body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                draft = gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", body="New body"
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        # The raw MIME actually sent to Gmail still carries the file (proof the
+        # bytes were re-downloaded and re-attached, not dropped).
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == ["report.pdf"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Subject"] == "hi"
+        # The existing attachment bytes were re-fetched from the current message.
+        mock.users().messages().attachments().get.assert_called()
+
+        # Response echoes the live attachment metadata - no follow-up get needed.
+        assert len(draft.attachments) == 1
+        assert draft.attachments[0].filename == "report.pdf"
+        assert draft.attachments[0].size_bytes == 1024
+        assert draft.attachments[0].attachment_id == "att-1"
+        assert draft.body_preview == "New body"
+
+    def test_explicit_null_clears_attachments(self):
+        original = _draft_resource_with_attachment(body="body")
+        echoed = _draft_resource(draft_id="d-1", to="b@y", subject="hi", body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                draft = gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", attachments=None
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == []
+        assert draft.attachments == []
+
+    def test_explicit_null_clears_a_scalar_field(self):
+        original = _draft_resource(
+            draft_id="d-1", to="b@y", subject="Keep me", body="hi"
+        )
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", subject=None
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        mime = message_from_bytes(
+            base64.urlsafe_b64decode(_last_update_raw(mock).encode("ascii"))
+        )
+        # Cleared subject -> empty header; To preserved.
+        assert (mime["Subject"] or "") == ""
+        assert mime["To"] == "b@y"
+
+    def test_attachment_by_reference_preserves_without_reupload(self):
+        original = _draft_resource_with_attachment(body="body")
+        echoed = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        body="body",
+                        attachments=[AttachmentReference(attachment_id="att-1")],
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == ["report.pdf"]
+        # Referenced by id -> bytes pulled from the existing message.
+        get_call = mock.users().messages().attachments().get.call_args_list[-1]
+        assert get_call.kwargs["id"] == "att-1"
+
+    def test_reference_to_unknown_id_raises(self):
+        original = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="not on draft"):
+                    gmail_update_draft(
+                        GmailUpdateDraftInput(
+                            user_id="alice",
+                            draft_id="d-1",
+                            attachments=[AttachmentReference(attachment_id="nope")],
+                        )
+                    )
+            finally:
+                _stop(patches)
+
+    def test_mix_reference_and_new_upload(self):
+        original = _draft_resource_with_attachment(body="body")
+        echoed = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachments=[
+                            AttachmentReference(attachment_id="att-1"),
+                            _new_upload(filename="extra.txt"),
+                        ],
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert sorted(_attachment_filenames_in_raw(raw)) == ["extra.txt", "report.pdf"]
+
+
+class TestEditBodyRepeatedlyKeepsAttachment(TestTemplate):
+    """Acceptance: change the body three times without re-uploading or losing the file."""
+
+    def test_three_body_edits_in_a_row(self):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            # The server always reports the file still on the draft.
+            mock.users().drafts().get().execute.return_value = (
+                _draft_resource_with_attachment(body="v0")
+            )
+            mock.users().drafts().update().execute.return_value = (
+                _draft_resource_with_attachment(body="vN")
+            )
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            drafts = []
+            try:
+                for new_body in ("v1", "v2", "v3"):
+                    drafts.append(
+                        gmail_update_draft(
+                            GmailUpdateDraftInput(
+                                user_id="alice", draft_id="d-1", body=new_body
+                            )
+                        )
+                    )
+                    # Each round re-attaches the file in the outgoing MIME.
+                    assert _attachment_filenames_in_raw(_last_update_raw(mock)) == [
+                        "report.pdf"
+                    ]
+            finally:
+                _stop(patches)
+
+        # Three edits happened, and the file is still present at the end -
+        # without ever supplying attachment bytes.
+        assert len(drafts) == 3
+        assert len(drafts[-1].attachments) == 1
+        assert drafts[-1].attachments[0].filename == "report.pdf"
+
+
+class TestAddRemoveAttachment(TestTemplate):
+    def test_add_attachment_appends_and_keeps_content(self):
+        original = _draft_resource_with_attachment(
+            body="Keep this body", subject="Keep subj", to="keep@x"
+        )
+        echoed = _draft_resource_with_attachment(body="Keep this body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_add_attachment(
+                    GmailAddAttachmentInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachment=_new_upload(filename="added.txt"),
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        # Both the existing and the newly-added file are present.
+        assert sorted(_attachment_filenames_in_raw(raw)) == ["added.txt", "report.pdf"]
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        # Content fields untouched.
+        assert mime["To"] == "keep@x"
+        assert mime["Subject"] == "Keep subj"
+        body_part = next(
+            p for p in mime.walk() if p.get_content_type() == "text/plain"
+        )
+        decoded = body_part.get_payload(decode=True)
+        assert isinstance(decoded, bytes)
+        assert "Keep this body" in decoded.decode("utf-8")
+        assert result.draft_id == "d-1"
+        assert isinstance(result.attachments, list)
+
+    def test_remove_attachment_drops_only_that_file(self):
+        original = _draft_resource_with_attachment(
+            body="Body stays", subject="Subj stays", to="stay@x"
+        )
+        echoed = _draft_resource(draft_id="d-1", to="stay@x", subject="Subj stays", body="Body stays")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                result = gmail_remove_attachment(
+                    GmailRemoveAttachmentInput(
+                        user_id="alice", draft_id="d-1", attachment_id="att-1"
+                    )
+                )
+            finally:
+                _stop(patches)
+
+        raw = _last_update_raw(mock)
+        assert _attachment_filenames_in_raw(raw) == []
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["To"] == "stay@x"
+        assert mime["Subject"] == "Subj stays"
+        assert result.attachments == []
+
+    def test_remove_unknown_attachment_raises(self):
+        original = _draft_resource_with_attachment(body="body")
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                with pytest.raises(ValueError, match="not on draft"):
+                    gmail_remove_attachment(
+                        GmailRemoveAttachmentInput(
+                            user_id="alice", draft_id="d-1", attachment_id="ghost"
+                        )
+                    )
+            finally:
+                _stop(patches)
+
+
+# ---------------------------------------------------------------------------
+# Rebuild preserves content beyond plain body (cubic review fixes)
+# ---------------------------------------------------------------------------
+
+
+def _draft_with_headers(
+    headers: dict[str, str],
+    *,
+    body: str = "hi",
+    draft_id: str = "d-1",
+    thread_id: str = "t-1",
+) -> dict:
+    return {
+        "id": draft_id,
+        "message": _plain_message(
+            message_id=f"m-{draft_id}",
+            thread_id=thread_id,
+            headers=headers,
+            body=body,
+        ),
+    }
+
+
+def _draft_resource_html_only(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    html: str = "<p>hello</p>",
+    thread_id: str = "t-1",
+) -> dict:
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": "hello",
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "text/html",
+                "headers": _headers({"To": to, "Subject": subject}),
+                "body": {"data": _b64url(html), "size": len(html)},
+            },
+        },
+    }
+
+
+def _mime_part_texts(raw_b64: str, content_type: str) -> list[str]:
+    mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+    out = []
+    for p in mime.walk():
+        if p.get_content_type() == content_type:
+            payload = p.get_payload(decode=True)
+            if isinstance(payload, bytes):
+                out.append(payload.decode("utf-8"))
+    return out
+
+
+class TestRebuildPreservesContent(TestTemplate):
+    def _run_update(self, original, update_input, echoed=None):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = echoed or original
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(update_input)
+            finally:
+                _stop(patches)
+        return _last_update_raw(mock)
+
+    def test_omitted_body_preserves_html_only_body(self):
+        original = _draft_resource_html_only(html="<p>keep me</p>")
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", subject="New subj"),
+        )
+        # The HTML body survived; it was not flattened to an empty plain body.
+        html_parts = _mime_part_texts(raw, "text/html")
+        assert any("keep me" in h for h in html_parts)
+
+    def test_setting_body_replaces_with_plain_text(self):
+        original = _draft_resource_html_only(html="<p>old html</p>")
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="brand new"),
+        )
+        plain = _mime_part_texts(raw, "text/plain")
+        assert any("brand new" in p for p in plain)
+        assert not any("old html" in h for h in _mime_part_texts(raw, "text/html"))
+
+    def test_omitted_bcc_is_preserved(self):
+        original = _draft_with_headers(
+            {"To": "a@x", "Subject": "S", "Bcc": "secret@x"}, body="b"
+        )
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="new body"),
+        )
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Bcc"] == "secret@x"
+
+    def test_explicit_null_clears_bcc(self):
+        original = _draft_with_headers(
+            {"To": "a@x", "Subject": "S", "Bcc": "secret@x"}, body="b"
+        )
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", bcc=None),
+        )
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Bcc"] is None
+
+    def test_reply_threading_headers_preserved(self):
+        original = _draft_with_headers(
+            {
+                "To": "a@x",
+                "Subject": "Re: S",
+                "In-Reply-To": "<parent@m>",
+                "References": "<root@m> <parent@m>",
+            },
+            body="b",
+        )
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="edited"),
+        )
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["In-Reply-To"] == "<parent@m>"
+        assert mime["References"] == "<root@m> <parent@m>"
+
+    def test_inline_attachment_without_id_does_not_crash(self):
+        # A named part with a size but no attachmentId and no inline data:
+        # it has no retrievable bytes, so a body-only edit must skip it, not
+        # call the attachments API with an empty id and error.
+        original = {
+            "id": "d-1",
+            "message": {
+                "id": "m-d-1",
+                "threadId": "t-1",
+                "snippet": "s",
+                "internalDate": "1700000000000",
+                "payload": {
+                    "mimeType": "multipart/mixed",
+                    "headers": _headers({"To": "a@x", "Subject": "S"}),
+                    "parts": [
+                        {
+                            "mimeType": "text/plain",
+                            "body": {"data": _b64url("body here"), "size": 9},
+                        },
+                        {
+                            "mimeType": "application/pdf",
+                            "filename": "weird.pdf",
+                            "body": {"size": 10},  # no attachmentId, no data
+                        },
+                    ],
+                },
+            },
+        }
+        raw = self._run_update(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="new"),
+        )
+        # No crash; the un-retrievable part is dropped rather than erroring.
+        assert _attachment_filenames_in_raw(raw) == []
+        assert any("new" in p for p in _mime_part_texts(raw, "text/plain"))
+
+
+class TestAddAttachmentPreservesHtmlAndBcc(TestTemplate):
+    def test_add_attachment_keeps_html_body_and_bcc(self):
+        original = {
+            "id": "d-1",
+            "message": {
+                "id": "m-d-1",
+                "threadId": "t-1",
+                "snippet": "s",
+                "internalDate": "1700000000000",
+                "payload": {
+                    "mimeType": "text/html",
+                    "headers": _headers(
+                        {"To": "a@x", "Subject": "S", "Bcc": "secret@x"}
+                    ),
+                    "body": {"data": _b64url("<p>html body</p>"), "size": 16},
+                },
+            },
+        }
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_add_attachment(
+                    GmailAddAttachmentInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachment=_new_upload(filename="a.txt"),
+                    )
+                )
+            finally:
+                _stop(patches)
+        raw = _last_update_raw(mock)
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        assert mime["Bcc"] == "secret@x"
+        assert _attachment_filenames_in_raw(raw) == ["a.txt"]
+        html = _mime_part_texts(raw, "text/html")
+        assert any("html body" in h for h in html)
+
+
+class TestAppToolAttachmentCoercion(TestTemplate):
+    def test_reference_dict_becomes_attachment_reference(self):
+        out = _coerce_attachments([{"attachment_id": "att-1"}])
+        assert out is not None
+        assert isinstance(out[0], AttachmentReference)
+        assert out[0].attachment_id == "att-1"
+
+    def test_upload_dict_becomes_attachment_input(self):
+        out = _coerce_attachments(
+            [
+                {
+                    "filename": "f.txt",
+                    "mime_type": "text/plain",
+                    "data_base64": base64.urlsafe_b64encode(b"x").decode("ascii"),
+                }
+            ]
+        )
+        assert out is not None
+        assert isinstance(out[0], AttachmentInput)
+
+    def test_mixed_list_routes_each_item(self):
+        out = _coerce_attachments(
+            [
+                {"attachment_id": "att-1"},
+                {
+                    "filename": "f.txt",
+                    "mime_type": "text/plain",
+                    "data_base64": base64.urlsafe_b64encode(b"x").decode("ascii"),
+                },
+            ]
+        )
+        assert out is not None
+        assert isinstance(out[0], AttachmentReference)
+        assert isinstance(out[1], AttachmentInput)
+
+    def test_empty_attachment_dict_raises(self):
+        with pytest.raises(ValueError, match="data_base64"):
+            _coerce_attachments([{}])
+
+
+# ---------------------------------------------------------------------------
+# Inline (cid:) image preservation on rebuild
+# ---------------------------------------------------------------------------
+
+
+def _draft_resource_html_inline_image(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    img_cid: str = "img1",
+    img_bytes: bytes = b"PNGDATA",
+    thread_id: str = "t-1",
+) -> dict:
+    html = f'<p>see <img src="cid:{img_cid}"></p>'
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": "see",
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "multipart/related",
+                "headers": _headers({"To": to, "Subject": subject}),
+                "parts": [
+                    {
+                        "mimeType": "text/html",
+                        "body": {"data": _b64url(html), "size": len(html)},
+                    },
+                    {
+                        "mimeType": "image/png",
+                        "headers": _headers({"Content-ID": f"<{img_cid}>"}),
+                        "body": {
+                            "data": base64.urlsafe_b64encode(img_bytes).decode("ascii"),
+                            "size": len(img_bytes),
+                        },
+                    },
+                ],
+            },
+        },
+    }
+
+
+def _parts_by_type(raw_b64: str, content_type: str):
+    mime = message_from_bytes(base64.urlsafe_b64decode(raw_b64.encode("ascii")))
+    return [p for p in mime.walk() if p.get_content_type() == content_type]
+
+
+class TestInlineImagePreservation(TestTemplate):
+    def _run(self, original, update_input):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(update_input)
+            finally:
+                _stop(patches)
+        return _last_update_raw(mock)
+
+    def test_omitted_body_preserves_inline_image(self):
+        original = _draft_resource_html_inline_image(img_bytes=b"PNGDATA")
+        raw = self._run(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", subject="New subj"),
+        )
+        imgs = _parts_by_type(raw, "image/png")
+        assert len(imgs) == 1
+        assert imgs[0].get("Content-ID") == "<img1>"
+        assert imgs[0].get_payload(decode=True) == b"PNGDATA"
+        # The HTML body and its cid reference are intact.
+        assert any("cid:img1" in h for h in _mime_part_texts(raw, "text/html"))
+
+    def test_setting_plain_body_drops_orphaned_inline_image(self):
+        original = _draft_resource_html_inline_image()
+        raw = self._run(
+            original,
+            GmailUpdateDraftInput(user_id="alice", draft_id="d-1", body="plain now"),
+        )
+        # HTML is gone, so the now-orphaned inline image is dropped too.
+        assert _parts_by_type(raw, "image/png") == []
+        assert any("plain now" in p for p in _mime_part_texts(raw, "text/plain"))
+
+    def test_add_attachment_keeps_inline_image(self):
+        original = _draft_resource_html_inline_image(img_bytes=b"PNGDATA")
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_add_attachment(
+                    GmailAddAttachmentInput(
+                        user_id="alice",
+                        draft_id="d-1",
+                        attachment=_new_upload(filename="doc.txt"),
+                    )
+                )
+            finally:
+                _stop(patches)
+        raw = _last_update_raw(mock)
+        imgs = _parts_by_type(raw, "image/png")
+        assert len(imgs) == 1
+        assert imgs[0].get("Content-ID") == "<img1>"
+        assert imgs[0].get_payload(decode=True) == b"PNGDATA"
+        # The newly-added file is a normal (mixed) attachment, not inline.
+        assert _attachment_filenames_in_raw(raw) == ["doc.txt"]
+
+
+def _draft_alt_with_inline_image(
+    *,
+    draft_id: str = "d-1",
+    to: str = "b@y",
+    subject: str = "hi",
+    img_cid: str = "img1",
+    img_bytes: bytes = b"PNGDATA",
+    plain: str = "plain fallback",
+    thread_id: str = "t-1",
+) -> dict:
+    """A draft with BOTH plain + HTML alternatives and an inline cid: image."""
+    html = f'<p>see <img src="cid:{img_cid}"></p>'
+    return {
+        "id": draft_id,
+        "message": {
+            "id": f"m-{draft_id}",
+            "threadId": thread_id,
+            "snippet": "see",
+            "internalDate": "1700000000000",
+            "payload": {
+                "mimeType": "multipart/alternative",
+                "headers": _headers({"To": to, "Subject": subject}),
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": _b64url(plain), "size": len(plain)},
+                    },
+                    {
+                        "mimeType": "multipart/related",
+                        "parts": [
+                            {
+                                "mimeType": "text/html",
+                                "body": {"data": _b64url(html), "size": len(html)},
+                            },
+                            {
+                                "mimeType": "image/png",
+                                "headers": _headers({"Content-ID": f"<{img_cid}>"}),
+                                "body": {
+                                    "data": base64.urlsafe_b64encode(
+                                        img_bytes
+                                    ).decode("ascii"),
+                                    "size": len(img_bytes),
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+
+class TestInlineImageAlternativeStructure(TestTemplate):
+    def test_plain_and_html_inline_image_nests_related_under_alternative(self):
+        original = _draft_alt_with_inline_image(img_bytes=b"PNGDATA")
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.return_value = original
+            mock.users().drafts().update().execute.return_value = original
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", subject="New subj"
+                    )
+                )
+            finally:
+                _stop(patches)
+        raw = _last_update_raw(mock)
+        mime = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+        # Canonical, broadly-compatible shape: the related (html + image) nests
+        # INSIDE the alternative, not the other way around.
+        assert mime.get_content_type() == "multipart/alternative"
+        related = [
+            p for p in mime.walk() if p.get_content_type() == "multipart/related"
+        ]
+        assert len(related) == 1
+        related_types = [p.get_content_type() for p in related[0].walk()]
+        assert related_types == ["multipart/related", "text/html", "image/png"]
+        # Plain alternative is a sibling of the related, not nested inside it.
+        all_types = [p.get_content_type() for p in mime.walk()]
+        assert "text/plain" in all_types
+        assert "text/plain" not in related_types
+        # Image bytes and cid intact.
+        img = _parts_by_type(raw, "image/png")[0]
+        assert img.get("Content-ID") == "<img1>"
+        assert img.get_payload(decode=True) == b"PNGDATA"

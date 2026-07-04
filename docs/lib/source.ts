@@ -34,6 +34,11 @@ function mdxBodyToMarkdown(raw: string): string {
     .replace(/^---\n[\s\S]*?\n---\n?/, "")
     // Drop MDX `import`/`export` statements.
     .replace(/^\s*(?:import|export)\s.+$/gm, "")
+    // Drop JSX expression-container props (e.g. `icon={<Rocket />}`). The `>`
+    // inside a nested component would otherwise terminate the `[^>]*` tag scans
+    // below early, leaving raw JSX in the output. We only emit title/href, so
+    // these props are noise for the LLM text anyway.
+    .replace(/\s+[A-Za-z_][\w-]*=\{[^}]*\}/g, "")
     // <Card title="X" href="Y" /> -> a Markdown link to the related resource.
     .replace(/<Card\b[^>]*\/?>/g, (tag) => {
       const title = tag.match(/title=["']([^"']*)["']/)?.[1];

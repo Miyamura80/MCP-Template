@@ -22,6 +22,7 @@ from .config_models import (
     DefaultLlm,
     ExampleParent,
     FeaturesConfig,
+    GmailConfig,
     LlmConfig,
     LoggingConfig,
     RateLimitConfig,
@@ -195,6 +196,7 @@ class Config(BaseSettings):
         default_factory=lambda: AgenticPaymentsConfig()
     )
     web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
+    gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
 
     # Environment variables
     DEV_ENV: str
