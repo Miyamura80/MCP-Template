@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { Composer, type Draft } from "./Composer";
+import { Composer, type Draft, type Thread } from "./Composer";
 
 function makeMcpApp(callResult: unknown = null) {
   const callServerTool = vi.fn(async () => callResult);
@@ -10,6 +10,45 @@ function makeMcpApp(callResult: unknown = null) {
   };
   return { app, callServerTool };
 }
+
+// Installs a matchMedia stub so useIsMobile() resolves deterministically.
+// jsdom ships no matchMedia, so tests without this helper exercise the
+// desktop path (the graceful fallback in useIsMobile).
+function mockViewport(isMobile: boolean) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: isMobile,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
+afterEach(() => {
+  // Undo mockViewport so the default (no matchMedia) path is restored.
+  // @ts-expect-error - deleting the stub to reset jsdom's default absence.
+  delete window.matchMedia;
+});
+
+const threadDraft: Draft = {
+  draft_id: "d-thread",
+  from: "alice@example.com",
+  to: "bob@example.com",
+  subject: "Re: Project",
+  body: "Reply body",
+  thread_id: "t-1",
+};
+
+const sampleThread: Thread = {
+  thread_id: "t-1",
+  messages: [
+    { message_id: "m-1", from: "bob@example.com", body_text: "First message" },
+    { message_id: "m-2", from: "alice@example.com", body_text: "Second message" },
+  ],
+};
 
 const sampleDraft: Draft = {
   draft_id: "d-1",
@@ -154,5 +193,37 @@ describe("Composer", () => {
       app.ontoolresult?.({ structuredContent: updated });
     });
     expect(screen.getByLabelText("Subject")).toHaveValue("From agent");
+  });
+
+  it("collapses the conversation by default on mobile", async () => {
+    mockViewport(true);
+    const { app } = makeMcpApp({ structuredContent: sampleThread });
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: threadDraft });
+    });
+    const toggle = await screen.findByRole("button", { name: /conversation/i });
+    // Collapsed: the ▶ affordance shows and message bodies are not rendered.
+    expect(toggle.textContent).toContain("▶");
+    expect(screen.queryByText("Second message")).not.toBeInTheDocument();
+    // User can expand.
+    fireEvent.click(toggle);
+    expect(
+      screen.getByRole("button", { name: /conversation/i }).textContent,
+    ).toContain("▼");
+    expect(await screen.findByText("Second message")).toBeInTheDocument();
+  });
+
+  it("expands the conversation by default on desktop", async () => {
+    mockViewport(false);
+    const { app } = makeMcpApp({ structuredContent: sampleThread });
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: threadDraft });
+    });
+    const toggle = await screen.findByRole("button", { name: /conversation/i });
+    expect(toggle.textContent).toContain("▼");
+    // Latest message is expanded by default, so its body is visible.
+    expect(await screen.findByText("Second message")).toBeInTheDocument();
   });
 });
