@@ -8,11 +8,15 @@ httpx.MockTransport so no network is touched.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from unittest.mock import patch
 
 import httpx
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -28,12 +32,11 @@ from models.webhooks import (
     WebhookSubscribeInput,
     WebhookUnsubscribeInput,
 )
-from services.webhook_delivery_svc import drain_due_deliveries
+from services.webhook_delivery_svc import _backoff_seconds, drain_due_deliveries
 from services.webhooks_svc import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     enqueue_event,
-    sign_payload,
     webhook_list,
     webhook_rotate_secret,
     webhook_subscribe,
@@ -141,6 +144,28 @@ class TestWebhookSubscriptions(TestTemplate):
             assert rotated.secret != res.secret
             assert rotated.secret.startswith("whsec_")
 
+    def test_subscribe_rejects_private_and_metadata_ips(self):
+        # SSRF guard: literal private / link-local addresses are blocked
+        # regardless of DEV_ENV so a tenant cannot reach cloud metadata.
+        with _patch_db(), _plaintext_encryption():
+            for bad in (
+                "https://169.254.169.254/latest/meta-data/",  # link-local
+                "https://10.0.0.5/internal",  # private
+                "https://192.168.1.1/admin",  # private
+            ):
+                with pytest.raises(ValueError, match="private|reserved|loopback"):
+                    webhook_subscribe(WebhookSubscribeInput(user_id="u1", url=bad))
+
+    def test_subscribe_rejects_plaintext_http_to_public_host(self):
+        with (
+            _patch_db(),
+            _plaintext_encryption(),
+            pytest.raises(ValueError, match="https"),
+        ):
+            webhook_subscribe(
+                WebhookSubscribeInput(user_id="u1", url="http://example.com/h")
+            )
+
 
 # ---------------------------------------------------------------------------
 # Fan-out
@@ -189,6 +214,29 @@ class TestEnqueueEvent(TestTemplate):
             with db_engine.use_db_session() as session:
                 assert session.query(WebhookDelivery).count() == 0
 
+    def test_fans_out_to_all_matching_subs_only(self):
+        with _patch_db(), _plaintext_encryption():
+            self._make_sub("u1")  # matches all (no filter)
+            self._make_sub("u1", event_types=["gmail.message.new"])  # matches
+            self._make_sub("u1", event_types=["other.event"])  # no match
+            inactive = self._make_sub("u1")
+            webhook_unsubscribe(
+                WebhookUnsubscribeInput(user_id="u1", subscription_id=inactive.id)
+            )
+            with db_engine.use_db_session() as session:
+                event_id = enqueue_event(
+                    session,
+                    user_id="u1",
+                    event_type="gmail.message.new",
+                    payload={"snippet": "x"},
+                )
+                session.commit()
+            with db_engine.use_db_session() as session:
+                deliveries = session.query(WebhookDelivery).all()
+                # Exactly the two active matching subs; all point at one event.
+                assert len(deliveries) == 2
+                assert {d.event_id for d in deliveries} == {event_id}
+
 
 # ---------------------------------------------------------------------------
 # Delivery runner
@@ -226,10 +274,24 @@ class TestDelivery(TestTemplate):
                 counts = drain_due_deliveries()
 
             assert counts["sent"] == 1
-            # Recompute the HMAC the subscriber would verify.
+
+            # Independently recompute the HMAC a subscriber would verify -
+            # using the stdlib directly, not sign_payload, so a bug in the
+            # signer can't make this pass circularly.
             ts = int(captured["headers"][TIMESTAMP_HEADER])
-            expected = "sha256=" + sign_payload(res.secret, ts, captured["body"])
-            assert captured["headers"][SIGNATURE_HEADER] == expected
+            body = captured["body"]
+            mac = hmac.new(
+                res.secret.encode("utf-8"),
+                f"{ts}.".encode() + body,
+                hashlib.sha256,
+            ).hexdigest()
+            assert captured["headers"][SIGNATURE_HEADER] == f"sha256={mac}"
+
+            # The delivered body carries the event envelope.
+            decoded = json.loads(body)
+            assert set(decoded) == {"id", "type", "created_at", "data"}
+            assert decoded["type"] == "gmail.message.new"
+            assert decoded["data"] == {"snippet": "hello"}
 
             with db_engine.use_db_session() as session:
                 d = session.query(WebhookDelivery).one()
@@ -277,3 +339,57 @@ class TestDelivery(TestTemplate):
                 d = session.query(WebhookDelivery).one()
                 assert d.status == "failed"
                 assert d.attempts == 1
+
+    def test_inactive_subscription_is_dropped_without_attempt(self):
+        calls = {"n": 0}
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            return httpx.Response(200)
+
+        with _patch_db(), _plaintext_encryption():
+            res = self._seed()
+            # Deactivate the sub after the delivery was enqueued.
+            webhook_unsubscribe(
+                WebhookUnsubscribeInput(user_id="u1", subscription_id=res.id)
+            )
+            with _mock_http(handler):
+                counts = drain_due_deliveries()
+
+            assert counts["dropped"] == 1
+            assert calls["n"] == 0  # never POSTed
+            with db_engine.use_db_session() as session:
+                d = session.query(WebhookDelivery).one()
+                assert d.status == "failed"
+                assert d.attempts == 0
+                assert "inactive" in (d.last_error or "")
+
+    def test_non_http_error_is_isolated_not_raised(self):
+        # A secret that cannot be decrypted must not wedge the outbox: the row
+        # follows the normal retry path instead of propagating.
+        def boom(_ciphertext):
+            raise ValueError("undecryptable secret")
+
+        with _patch_db(), _plaintext_encryption():
+            self._seed()
+            with patch(
+                "services.webhook_delivery_svc.decrypt_secret", side_effect=boom
+            ):
+                counts = drain_due_deliveries()
+
+            assert counts["retry"] == 1
+            with db_engine.use_db_session() as session:
+                d = session.query(WebhookDelivery).one()
+                assert d.status == "pending"
+                assert d.attempts == 1
+                assert "undecryptable" in (d.last_error or "")
+
+
+class TestBackoffSchedule(TestTemplate):
+    def test_backoff_doubles_then_caps(self):
+        assert _backoff_seconds(1) == 30
+        assert _backoff_seconds(2) == 60
+        assert _backoff_seconds(3) == 120
+        assert _backoff_seconds(4) == 240
+        # Saturates at the 1-hour cap.
+        assert _backoff_seconds(20) == 3600

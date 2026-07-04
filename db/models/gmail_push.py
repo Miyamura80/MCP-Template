@@ -21,8 +21,11 @@ class ProcessedPubsubMessage(Base):
     message_id: Mapped[str] = mapped_column(
         String(255), primary_key=True, nullable=False
     )
+    # Indexed for the periodic cleanup sweep (DELETE WHERE received_at < cutoff),
+    # matching ix_processed_pubsub_messages_received_at in migration 008.
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(UTC),
+        index=True,
     )

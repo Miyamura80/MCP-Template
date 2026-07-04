@@ -17,13 +17,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import secrets
+import socket
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger as log
 from sqlalchemy.orm import Session
 
+from common import global_config
 from common.token_encryption import require_encryption
 from db.engine import use_db_session
 from db.models.webhooks import WebhookDelivery, WebhookEvent, WebhookSubscription
@@ -85,6 +89,74 @@ def decrypt_secret(ciphertext: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Subscriber URL validation (https-only + SSRF guard)
+# ---------------------------------------------------------------------------
+
+
+def _is_dev() -> bool:
+    return (getattr(global_config, "DEV_ENV", "") or "").lower() in {"local", "dev"}
+
+
+def _candidate_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Best-effort resolution of ``host`` to IPs. Empty if it cannot resolve.
+
+    A literal IP resolves to itself. For a hostname we do a DNS lookup; if that
+    fails (offline, bogus name) we return [] and let the guard pass - the
+    delivery attempt will simply fail later rather than blocking subscription.
+    """
+    try:
+        return [ipaddress.ip_address(host)]
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return []
+    ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        addr = str(info[4][0]).split("%")[0]  # strip IPv6 scope id
+        try:
+            ips.append(ipaddress.ip_address(addr))
+        except ValueError:
+            continue
+    return ips
+
+
+def _validate_webhook_url(url: str) -> None:
+    """Reject non-https and SSRF-prone subscriber URLs.
+
+    Blocks private / link-local / reserved / multicast destinations so a tenant
+    cannot point the delivery worker at cloud metadata endpoints or internal
+    services. Loopback + cleartext http are permitted only in dev for local
+    testing.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Webhook url must be an http(s) URL")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Webhook url must include a host")
+
+    dev = _is_dev()
+    is_loopback_name = host.lower() in {"localhost", "ip6-localhost"}
+    if parsed.scheme == "http" and not (dev and is_loopback_name):
+        raise ValueError("Webhook url must use https")
+
+    for ip in _candidate_ips(host):
+        if ip.is_loopback:
+            if not dev:
+                raise ValueError("Webhook url must not target a loopback address")
+        elif (
+            ip.is_private
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError("Webhook url must not target a private/reserved address")
+
+
+# ---------------------------------------------------------------------------
 # Services (CRUD over subscriptions)
 # ---------------------------------------------------------------------------
 
@@ -97,8 +169,7 @@ def decrypt_secret(ciphertext: bytes) -> str:
 )
 def webhook_subscribe(input: WebhookSubscribeInput) -> WebhookSubscribeResult:
     """Create a subscription and return its one-time signing secret."""
-    if not input.url.lower().startswith(("http://", "https://")):
-        raise ValueError("Webhook url must be an http(s) URL")
+    _validate_webhook_url(input.url)
 
     secret = _new_secret()
     secret_enc, key_id = _encrypt_secret(secret)
