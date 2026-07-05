@@ -78,5 +78,9 @@
   {
     "name": "gmail_update_draft",
     "description": "Patch fields on an existing Gmail draft and open an interactive composer UI. Non-destructive by default: any field you OMIT is left unchanged on the draft, and a field set to null is CLEARED - this holds for to, cc, bcc, subject, body, and attachments. Omit 'attachments' to keep every existing file untouched (so you can edit the body repeatedly without re-uploading); pass null or [] to drop them all. 'attachments' may mix new uploads (filename + mime_type + data_base64) with references to existing files ({attachment_id}) taken from a prior response, letting you preserve specific files by id. To add or remove a single file without touching the body, prefer gmail_add_attachment / gmail_remove_attachment. The returned draft echoes the saved state (recipients, subject, body_preview, and the full attachment list with ids/filenames/sizes). ALWAYS call this tool to write or edit draft content - NEVER compose email text as plain chat text. Pass your composed text in the 'body' parameter. Keep your chat response to one brief sentence since the user can edit in the UI."
+  },
+  {
+    "name": "pdf_open",
+    "description": "Open a PDF into a server-side editing session and return everything needed to plan edits: a doc_id handle, the fillable form-field inventory (name, type, current value, page, rect), and - for flat PDFs without form fields - the existing text layout with coordinates for anchoring text overlays. The PDF bytes stay server-side; every later pdf_* call takes the doc_id. Optionally pass render_pages (1-based page numbers) to also get PNG renders of pages for visual inspection. Coordinates are PDF user space: origin at the page's bottom-left corner, in points (1/72 inch)."
   }
 ]

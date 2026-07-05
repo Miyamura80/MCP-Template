@@ -25,6 +25,7 @@ from .config_models import (
     GmailConfig,
     LlmConfig,
     LoggingConfig,
+    PdfFormsConfig,
     RateLimitConfig,
     ServerConfig,
     SubscriptionConfig,
@@ -197,6 +198,7 @@ class Config(BaseSettings):
     )
     web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
     gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
+    pdf_forms: PdfFormsConfig = Field(default_factory=lambda: PdfFormsConfig())
 
     # Environment variables
     DEV_ENV: str

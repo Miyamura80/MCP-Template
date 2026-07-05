@@ -69,6 +69,9 @@ dependencies = [
     "google-auth>=2.53.0",
     "psycopg2-binary>=2.9.12",
     "sse-starlette>=3.3.3",
+    "pypdf>=6.14.2",
+    "pyhanko>=0.35.1",
+    "pypdfium2>=5.10.1",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
@@ -195,6 +198,10 @@ exclude = [
     "tests/test_gmail_services.py",
     "tests/test_mcp_oauth.py",
     "tests/test_mcp_e2e.py",
+    "tests/test_pdf_documents_repo.py",
+    "tests/test_pdf_gmail_bridge.py",
+    "tests/test_pdf_forms_svc.py",
+    "tests/pdf_fixtures.py",
 ]
 
 [tool.file_length]

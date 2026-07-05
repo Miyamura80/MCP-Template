@@ -294,3 +294,62 @@ class GmailConfig(BaseModel):
             "by default; lower it to protect the model's context window."
         ),
     )
+
+
+class PdfSigningConfig(BaseModel):
+    """Server-held sealing certificate for user-gated PDF signing.
+
+    The seal is a platform certificate (DocuSign-style), not a per-user
+    identity. In production point both paths at a real key pair; when unset in
+    dev, a self-signed certificate is generated once and cached under
+    ``dev_cert_dir``.
+    """
+
+    cert_path: str | None = Field(
+        default=None, description="PEM certificate used for the PAdES seal."
+    )
+    key_path: str | None = Field(
+        default=None, description="PEM private key matching cert_path."
+    )
+    dev_cert_dir: str = Field(
+        default=".pdf_signing",
+        description=(
+            "Directory (relative to repo root) where the auto-generated dev "
+            "self-signed certificate is cached when cert_path is unset."
+        ),
+    )
+
+
+class PdfFormsConfig(BaseModel):
+    """PDF form-filling and signing configuration (loaded from pdf_forms.yaml)."""
+
+    max_document_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        ge=0,
+        description="Max size (decoded bytes) of a PDF accepted into a doc session.",
+    )
+    text_layout_max_lines: int = Field(
+        default=400,
+        ge=0,
+        description=(
+            "Cap on extracted text-layout lines returned by pdf_open for flat "
+            "PDFs, keeping tool responses bounded."
+        ),
+    )
+    render_dpi: int = Field(
+        default=110,
+        ge=18,
+        le=300,
+        description="Rasterization DPI for render_pages page images.",
+    )
+    render_max_pages: int = Field(
+        default=4,
+        ge=1,
+        description="Max pages a single render_pages request may rasterize.",
+    )
+    session_ttl_hours: int = Field(
+        default=72,
+        ge=1,
+        description="Age after which unexported document sessions may be swept.",
+    )
+    signing: PdfSigningConfig = Field(default_factory=PdfSigningConfig)
