@@ -284,7 +284,16 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
         row.revoked_at = datetime.now(UTC)
         session.commit()
         _invalidate_gmail_client(input.user_id)
-        return GmailDisconnectResult(revoked=True)
+
+    # Purge all banked curation for this user: disconnecting Gmail must leave no
+    # derived inbox content behind. Call-time import avoids a module-load cycle
+    # (curation_ledger is DB-only and does not import this module).
+    from services.curation_ledger import purge_user  # noqa: PLC0415
+
+    purged = purge_user(input.user_id)
+    if purged:
+        log.debug("Purged {} curation rows for user {}", purged, input.user_id)
+    return GmailDisconnectResult(revoked=True)
 
 
 # ---------------------------------------------------------------------------

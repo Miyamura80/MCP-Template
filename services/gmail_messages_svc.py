@@ -18,6 +18,7 @@ from loguru import logger as log
 from pydantic import BaseModel
 
 from common import global_config
+from models.curation import CurationState
 from models.gmail import (
     GmailAttachmentData,
     GmailDraft,
@@ -30,6 +31,7 @@ from models.gmail import (
     GmailThreadMessage,
 )
 from services import service
+from services.curation_ledger import mark_state_best_effort
 from services.gmail_draft_helpers import _draft_resource_to_model
 from services.gmail_svc import (
     GmailAttachmentTooLargeError,
@@ -471,7 +473,7 @@ def gmail_mark_thread_read(input: GmailThreadModifyInput) -> GmailMarkReadResult
 
 @service(
     name="gmail_archive_thread",
-    description="Archive a Gmail thread by removing the INBOX label",
+    description="Archive a Gmail thread by removing the INBOX label. Also marks the thread dismissed in the curation ledger. During a triage pass, continue on to the next uncurated or stale thread.",
     input_model=GmailThreadModifyInput,
     output_model=GmailArchiveResult,
 )
@@ -482,12 +484,15 @@ def gmail_archive_thread(input: GmailThreadModifyInput) -> GmailArchiveResult:
         id=input.thread_id,
         body={"removeLabelIds": ["INBOX"]},
     ).execute()
+    # Archiving removes the thread from the triageable inbox: the ledger row (if
+    # any) is now dismissed. Best-effort - never fail the archive on a DB hiccup.
+    mark_state_best_effort(input.user_id, input.thread_id, CurationState.dismissed)
     return GmailArchiveResult(archived=True)
 
 
 @service(
     name="gmail_mark_thread_done",
-    description="Mark a Gmail thread as done by applying the MCP/Done label (hides from curated inbox)",
+    description="Mark a Gmail thread as done by applying the MCP/Done label (hides from curated inbox). Also marks the thread dismissed in the curation ledger. During a triage pass, continue on to the next uncurated or stale thread.",
     input_model=GmailThreadModifyInput,
     output_model=GmailMarkDoneResult,
 )
@@ -499,6 +504,8 @@ def gmail_mark_thread_done(input: GmailThreadModifyInput) -> GmailMarkDoneResult
         id=input.thread_id,
         body={"addLabelIds": [label_id]},
     ).execute()
+    # Marking done hides the thread from the curated inbox: dismiss its row.
+    mark_state_best_effort(input.user_id, input.thread_id, CurationState.dismissed)
     return GmailMarkDoneResult(marked_done=True, label_id=label_id)
 
 

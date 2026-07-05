@@ -9,6 +9,7 @@ from db.models.subscription_types import (
     SubscriptionStatus,
     SubscriptionTier,
 )
+from db.models.thread_curation import ThreadCuration
 from db.models.user_subscriptions import UserSubscription
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "Profile",
     "SubscriptionStatus",
     "SubscriptionTier",
+    "ThreadCuration",
     "UserSubscription",
 ]
