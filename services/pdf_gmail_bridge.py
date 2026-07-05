@@ -18,11 +18,17 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from models.gmail import GmailGetAttachmentInput
+from models.gmail import (
+    AttachmentInput,
+    GmailAddAttachmentInput,
+    GmailGetAttachmentInput,
+)
+from services.gmail_attachments_svc import gmail_add_attachment
 from services.gmail_messages_svc import gmail_get_attachment
 from services.gmail_svc import _get_gmail_client
 from services.pdf_ports import (
     ResolvedPdfSource,
+    register_destination_handler,
     register_source_resolver,
 )
 
@@ -75,4 +81,29 @@ def _resolve_gmail_attachment(user_id: str, source: Any) -> ResolvedPdfSource:
     )
 
 
+def _deliver_to_gmail_draft(
+    user_id: str, destination: Any, filename: str, data: bytes
+) -> dict[str, Any]:
+    """Attach the exported PDF to a Gmail draft via the existing service."""
+    result = gmail_add_attachment(
+        GmailAddAttachmentInput(
+            user_id=user_id,
+            draft_id=destination.draft_id,
+            attachment=AttachmentInput(
+                filename=filename,
+                mime_type="application/pdf",
+                data_base64=base64.b64encode(data).decode("ascii"),
+            ),
+        )
+    )
+    return {
+        "draft_id": result.draft_id,
+        "attachments": [
+            a.model_dump(include={"filename", "mime_type", "size", "attachment_id"})
+            for a in result.attachments
+        ],
+    }
+
+
 register_source_resolver("gmail_attachment", _resolve_gmail_attachment)
+register_destination_handler("gmail_draft", _deliver_to_gmail_draft)

@@ -11,7 +11,7 @@ units are points (1/72 inch). All tools share this convention.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -151,3 +151,195 @@ class PdfOpenResult(BaseModel):
         description="True if text_layout was cut at pdf_forms.text_layout_max_lines",
     )
     page_images: list[PdfPageImage] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# pdf_edit
+# ---------------------------------------------------------------------------
+
+
+class SetFieldOp(BaseModel):
+    """Set an AcroForm field's value (text, checkbox, radio, choice)."""
+
+    op: Literal["set_field"] = "set_field"
+    name: str = Field(description="Field name from pdf_open's fields[]")
+    value: str = Field(
+        description=(
+            "New value. Text fields: any string. Checkboxes/radios: one of the "
+            "field's options (e.g. '/Yes'; '/Off' clears). Choice fields: one "
+            "of the listed options."
+        )
+    )
+
+
+class AddTextOp(BaseModel):
+    """Stamp a text overlay onto a page (for flat PDFs without form fields)."""
+
+    op: Literal["add_text"] = "add_text"
+    page: int = Field(ge=1, description="1-based page number")
+    x: float = Field(description="Left edge of the text, PDF user space (points)")
+    y: float = Field(
+        description="Baseline of the text, PDF user space (origin bottom-left)"
+    )
+    text: str = Field(min_length=1)
+    font_size: float = Field(default=10.0, gt=0, le=72)
+
+
+PdfEditOp = Annotated[SetFieldOp | AddTextOp, Field(discriminator="op")]
+
+
+class PdfEditInput(BaseModel):
+    user_id: str = ""
+    doc_id: str = Field(min_length=1)
+    ops: list[PdfEditOp] = Field(
+        min_length=1,
+        description="Batch of edits, applied atomically: if any op is invalid "
+        "the whole batch is rejected and the document is unchanged",
+    )
+    render_pages: list[int] = Field(
+        default_factory=list,
+        description=(
+            "1-based page numbers to rasterize into the response as PNG images "
+            "to verify placement (capped by pdf_forms.render_max_pages)"
+        ),
+    )
+
+
+class PdfEditResult(BaseModel):
+    doc_id: str
+    status: Literal["open", "awaiting_signature", "signed"]
+    applied_ops: int
+    fields: list[PdfFormField] = Field(
+        default_factory=list, description="Field inventory after the edit"
+    )
+    page_images: list[PdfPageImage] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# pdf_request_signature
+# ---------------------------------------------------------------------------
+
+
+class SignaturePlacement(BaseModel):
+    """Where the visible signature stamp goes.
+
+    Either ``field_name`` (an AcroForm signature field from pdf_open's
+    fields[]) or an explicit ``page``/``x``/``y`` anchor for flat PDFs -
+    exactly one of the two forms.
+    """
+
+    field_name: str | None = Field(
+        default=None,
+        description="Name of a signature-type AcroForm field to sign into",
+    )
+    page: int | None = Field(
+        default=None, ge=1, description="1-based page for flat-PDF placement"
+    )
+    x: float | None = Field(
+        default=None, description="Left edge of the stamp, PDF user space"
+    )
+    y: float | None = Field(
+        default=None,
+        description="Baseline of the stamp, PDF user space (origin bottom-left)",
+    )
+
+    def is_field_based(self) -> bool:
+        return self.field_name is not None
+
+
+class PdfRequestSignatureInput(BaseModel):
+    user_id: str = ""
+    doc_id: str = Field(min_length=1)
+    placement: SignaturePlacement = Field(
+        description=(
+            "Where the signature stamp goes: a signature field's name, or "
+            "{page, x, y} in PDF user space for flat PDFs"
+        )
+    )
+
+
+class PdfRequestSignatureResult(BaseModel):
+    doc_id: str
+    status: Literal[
+        "awaiting_user_signature",
+        "signed",
+        "signing_declined",
+        "signing_unavailable",
+    ]
+    guidance: str = Field(
+        description="What happens next; relay this to the user verbatim"
+    )
+
+
+# ---------------------------------------------------------------------------
+# App-only tool payloads (pdf_signer.* - iframe only, never LLM-visible)
+# ---------------------------------------------------------------------------
+
+
+class PdfSignerDocument(BaseModel):
+    """Full document payload for the signing iframe's pdf.js viewer.
+
+    Contains the raw PDF bytes (base64) - returned ONLY by the app-only
+    ``pdf_signer.get_document`` tool, never by an LLM-visible one (FR-10).
+    """
+
+    doc_id: str
+    filename: str
+    status: Literal["open", "awaiting_signature", "signed"]
+    page_count: int
+    placement: SignaturePlacement | None = None
+    data_base64: str
+
+
+class PdfSignResult(BaseModel):
+    """Outcome of the signing ceremony, rendered by the signing app."""
+
+    doc_id: str
+    status: Literal["signed", "declined"]
+    signed_by: str | None = None
+    signed_at_utc: str | None = None
+    message: str
+
+
+class PdfSignerCancelResult(BaseModel):
+    """User cancelled from the signing UI; the document is editable again."""
+
+    doc_id: str
+    status: Literal["open"]
+
+
+# ---------------------------------------------------------------------------
+# pdf_export
+# ---------------------------------------------------------------------------
+
+
+class PdfExportInput(BaseModel):
+    user_id: str = ""
+    doc_id: str = Field(min_length=1)
+    destination: PdfDestination = Field(
+        description="Where to deliver the PDF (attached server-side; the "
+        "bytes never enter this conversation)"
+    )
+
+
+class PdfExportedAttachment(BaseModel):
+    """Metadata of one attachment on the destination after export (no bytes)."""
+
+    filename: str | None = None
+    mime_type: str | None = None
+    size: int | None = None
+    attachment_id: str | None = None
+
+
+class PdfExportResult(BaseModel):
+    doc_id: str
+    status: Literal["open", "signed"]
+    filename: str = Field(description="Filename the PDF was delivered under")
+    destination_type: str
+    draft_id: str | None = Field(
+        default=None, description="Gmail draft id (gmail_draft destinations)"
+    )
+    attachments: list[PdfExportedAttachment] = Field(
+        default_factory=list,
+        description="The destination draft's resulting attachment list",
+    )

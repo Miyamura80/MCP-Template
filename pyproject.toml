@@ -201,6 +201,8 @@ exclude = [
     "tests/test_pdf_documents_repo.py",
     "tests/test_pdf_gmail_bridge.py",
     "tests/test_pdf_forms_svc.py",
+    "tests/test_pdf_signing.py",
+    "tests/test_pdf_signer_flows.py",
     "tests/pdf_fixtures.py",
 ]
 

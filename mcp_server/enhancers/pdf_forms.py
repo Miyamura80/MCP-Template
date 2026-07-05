@@ -1,0 +1,154 @@
+"""PDF tools enhancers: page images as ``ImageContent`` + the signing handoff.
+
+``pdf_open`` / ``pdf_edit``: optional page rasterizations move from the
+structured result into ``ImageContent`` blocks (same pattern as
+``gmail_attachment.py``) so vision hosts render them; headless transports
+(CLI/API) keep the base64 in the structured result.
+
+``pdf_request_signature``: attaches the pdf_signer MCP App when the host can
+render iframes. On hosts without apps but with elicitation, falls back to a
+host-native typed-name prompt (US-008) - the elicitation dialog is rendered
+by the host outside any iframe, so the model cannot answer it; the accepted
+response runs the same server-side stamp+audit+seal path with
+``channel: "elicitation"`` recorded. With neither capability the request is
+rolled back and the model is told signing is unavailable here.
+
+Part of the PDF core (isolation seam): no Gmail imports.
+"""
+
+from pydantic import BaseModel, Field
+
+from mcp_server.enhancers import enhance
+from mcp_server.enhancers.base import EnhancedTool
+from models.pdf_forms import (
+    PdfEditInput,
+    PdfEditResult,
+    PdfOpenInput,
+    PdfOpenResult,
+    PdfRequestSignatureInput,
+    PdfRequestSignatureResult,
+)
+from services.pdf_documents_repo import load_document
+from services.pdf_signing import abort_signing, perform_signing
+
+SIGNER_APP_URI = "ui://mymcp/pdf_signer"
+
+
+def _move_page_images_to_content[T: PdfOpenResult | PdfEditResult](
+    tool: EnhancedTool, result: T
+) -> T:
+    """Attach page PNGs as ImageContent and drop them from the structured result."""
+    if not result.page_images:
+        return result
+    for image in result.page_images:
+        tool.send_image(data=image.data_base64, mime_type=image.mime_type)
+    return result.model_copy(update={"page_images": []})
+
+
+@enhance("pdf_open", fallback="headless")
+async def pdf_open_enhanced(
+    tool: EnhancedTool[PdfOpenInput, PdfOpenResult],
+) -> PdfOpenResult:
+    result = tool.call()
+    return _move_page_images_to_content(tool, result)
+
+
+@enhance("pdf_edit", fallback="headless")
+async def pdf_edit_enhanced(
+    tool: EnhancedTool[PdfEditInput, PdfEditResult],
+) -> PdfEditResult:
+    result = tool.call()
+    return _move_page_images_to_content(tool, result)
+
+
+class _ElicitedSignature(BaseModel):
+    """Flat schema for the no-app signing fallback (host-native dialog)."""
+
+    full_name: str = Field(
+        description="Your full legal name, typed by you - this is your signature"
+    )
+    consent: bool = Field(
+        description=("I agree that typing my name constitutes my electronic signature")
+    )
+
+
+@enhance("pdf_request_signature", fallback="headless", app_uri=SIGNER_APP_URI)
+async def pdf_request_signature_enhanced(
+    tool: EnhancedTool[PdfRequestSignatureInput, PdfRequestSignatureResult],
+) -> PdfRequestSignatureResult:
+    result = tool.call()
+    if result.status != "awaiting_user_signature":
+        return result
+    if tool.can_show_app:
+        tool.send_app(SIGNER_APP_URI)
+        return result
+    doc_id = tool.input.doc_id
+    user_id = tool.input.user_id
+    if tool.can_elicit:
+        doc = load_document(doc_id, user_id)
+        elicited = await tool.elicit(
+            message=(
+                f"'{doc.filename}' is ready to sign. Type your full legal "
+                "name to sign it - this applies your electronic signature "
+                "and seals the document."
+            ),
+            schema=_ElicitedSignature,
+        )
+        data = getattr(elicited, "data", None)
+        if (
+            elicited.action == "accept"
+            and data is not None
+            and data.consent
+            and data.full_name.strip()
+        ):
+            signed_doc, audit = perform_signing(
+                doc_id=doc_id,
+                user_id=user_id,
+                typed_name=data.full_name,
+                consent=data.consent,
+                channel="elicitation",
+                confirmed_via_elicitation=True,
+            )
+            return PdfRequestSignatureResult(
+                doc_id=signed_doc.doc_id,
+                status="signed",
+                guidance=(
+                    f"Signed by {audit['typed_name']} on "
+                    f"{audit['signed_at_utc']} and sealed. The document is "
+                    "now immutable; use pdf_export to deliver it."
+                ),
+            )
+        # Declined/cancelled (or consent withheld): back to editable.
+        abort_signing(
+            doc_id=doc_id,
+            user_id=user_id,
+            reason="elicitation_declined",
+            channel="elicitation",
+            back_to_open=True,
+        )
+        return PdfRequestSignatureResult(
+            doc_id=doc_id,
+            status="signing_declined",
+            guidance=(
+                "The user declined to sign. The document is editable again; "
+                "ask them what they'd like to change."
+            ),
+        )
+    # Neither apps nor elicitation: don't leave the document locked.
+    abort_signing(
+        doc_id=doc_id,
+        user_id=user_id,
+        reason="no_signing_channel_available",
+        channel="none",
+        back_to_open=True,
+    )
+    return PdfRequestSignatureResult(
+        doc_id=doc_id,
+        status="signing_unavailable",
+        guidance=(
+            "This client supports neither MCP Apps nor elicitation, so there "
+            "is no way for the user to sign here. Form filling still works: "
+            "the edits are saved and the filled PDF can be exported with "
+            "pdf_export, then signed in a client that supports signing."
+        ),
+    )

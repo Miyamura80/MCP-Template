@@ -16,10 +16,18 @@ from sqlalchemy.pool import StaticPool
 
 from common import global_config
 from db.base import Base
-from models.pdf_forms import GmailAttachmentSource, PdfOpenInput
+from models.pdf_forms import (
+    AddTextOp,
+    GmailAttachmentSource,
+    PdfEditInput,
+    PdfOpenInput,
+    SetFieldOp,
+)
 from services import pdf_documents_repo as repo
 from services import pdf_forms_svc
-from services.pdf_inspect import PdfNotAPdfError
+from services.pdf_edit_engine import PdfEditBatchError
+from services.pdf_forms_svc import PdfDocumentLockedError
+from services.pdf_inspect import PdfNotAPdfError, inspect_pdf
 from services.pdf_ports import ResolvedPdfSource
 from services.pdf_render import PdfRenderRequestError
 from tests.pdf_fixtures import make_acroform_pdf, make_flat_pdf
@@ -48,7 +56,7 @@ class PdfServiceTestBase(TestTemplate):
             finally:
                 session.close()
 
-        self._patchers = [patch.object(repo, "use_db_session", _ctx)]
+        self._patchers: list = [patch.object(repo, "use_db_session", _ctx)]
         for p in self._patchers:
             p.start()
 
@@ -145,3 +153,132 @@ class TestPdfOpen(PdfServiceTestBase):
             pytest.raises(PdfRenderRequestError),
         ):
             self._open(make_flat_pdf(page_count=4), render_pages=[1, 2, 3])
+
+
+class TestPdfEdit(PdfServiceTestBase):
+    def _edit(self, doc_id: str, ops, **kwargs):
+        return pdf_forms_svc.pdf_edit(
+            PdfEditInput(user_id="u1", doc_id=doc_id, ops=ops, **kwargs)
+        )
+
+    def test_fill_acroform_fields(self):
+        opened = self._open(make_acroform_pdf())
+        result = self._edit(
+            opened.doc_id,
+            [
+                SetFieldOp(name="full_name", value="Eito Miyamura"),
+                SetFieldOp(name="agree_terms", value="/Yes"),
+                SetFieldOp(name="state", value="CA"),
+            ],
+        )
+        assert result.applied_ops == 3
+        assert result.status == "open"
+        by_name = {f.name: f for f in result.fields}
+        assert by_name["full_name"].value == "Eito Miyamura"
+        assert by_name["agree_terms"].value == "/Yes"
+        assert by_name["state"].value == "CA"
+        # Values persisted in the stored bytes, not just the response.
+        doc = repo.load_document(opened.doc_id, "u1")
+        stored = {f.name: f for f in inspect_pdf(doc.current_bytes).fields}
+        assert stored["full_name"].value == "Eito Miyamura"
+
+    def test_checkbox_value_without_slash_is_normalized(self):
+        opened = self._open(make_acroform_pdf())
+        result = self._edit(
+            opened.doc_id, [SetFieldOp(name="agree_terms", value="Yes")]
+        )
+        by_name = {f.name: f for f in result.fields}
+        assert by_name["agree_terms"].value == "/Yes"
+
+    def test_overlay_flat_pdf(self):
+        opened = self._open(make_flat_pdf())
+        result = self._edit(
+            opened.doc_id,
+            [AddTextOp(page=1, x=110.0, y=650.0, text="Eito Miyamura")],
+        )
+        assert result.applied_ops == 1
+        doc = repo.load_document(opened.doc_id, "u1")
+        layout = inspect_pdf(doc.current_bytes, include_text_layout=True)
+        # Flat PDF stays flat; the overlay text is in the content stream.
+        assert layout.has_acroform is False
+
+    def test_mixed_batch(self):
+        opened = self._open(make_acroform_pdf())
+        result = self._edit(
+            opened.doc_id,
+            [
+                SetFieldOp(name="full_name", value="A. Person"),
+                AddTextOp(page=1, x=100.0, y=400.0, text="Initials: AP"),
+            ],
+        )
+        assert result.applied_ops == 2
+
+    def test_unknown_field_rejects_whole_batch(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(PdfEditBatchError) as exc:
+            self._edit(
+                opened.doc_id,
+                [
+                    SetFieldOp(name="full_name", value="Kept? No."),
+                    SetFieldOp(name="does_not_exist", value="x"),
+                ],
+            )
+        assert exc.value.errors[0]["index"] == 1
+        assert "does_not_exist" in exc.value.errors[0]["error"]
+        # Atomicity: the valid op must not have been applied.
+        doc = repo.load_document(opened.doc_id, "u1")
+        stored = {f.name: f for f in inspect_pdf(doc.current_bytes).fields}
+        assert stored["full_name"].value is None
+
+    def test_invalid_checkbox_state_rejected(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(PdfEditBatchError) as exc:
+            self._edit(opened.doc_id, [SetFieldOp(name="agree_terms", value="Maybe")])
+        assert "appearance states" in exc.value.errors[0]["error"]
+
+    def test_invalid_choice_option_rejected(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(PdfEditBatchError):
+            self._edit(opened.doc_id, [SetFieldOp(name="state", value="TX")])
+
+    def test_page_out_of_range_rejected(self):
+        opened = self._open(make_flat_pdf())
+        with pytest.raises(PdfEditBatchError) as exc:
+            self._edit(opened.doc_id, [AddTextOp(page=9, x=10.0, y=10.0, text="ghost")])
+        assert "out of range" in exc.value.errors[0]["error"]
+
+    def test_signature_field_cannot_be_set(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(PdfEditBatchError) as exc:
+            self._edit(opened.doc_id, [SetFieldOp(name="signature", value="Me")])
+        assert "signature" in exc.value.errors[0]["error"]
+
+    def test_edit_rejected_when_awaiting_signature(self):
+        opened = self._open(make_acroform_pdf())
+        repo.update_document(
+            opened.doc_id, "u1", new_status=repo.PDF_STATUS_AWAITING_SIGNATURE
+        )
+        with pytest.raises(PdfDocumentLockedError):
+            self._edit(opened.doc_id, [SetFieldOp(name="full_name", value="x")])
+
+    def test_edit_rejected_when_signed(self):
+        opened = self._open(make_acroform_pdf())
+        repo.update_document(
+            opened.doc_id, "u1", new_status=repo.PDF_STATUS_AWAITING_SIGNATURE
+        )
+        repo.update_document(opened.doc_id, "u1", new_status=repo.PDF_STATUS_SIGNED)
+        with pytest.raises(PdfDocumentLockedError) as exc:
+            self._edit(opened.doc_id, [SetFieldOp(name="full_name", value="x")])
+        assert "immutable" in str(exc.value)
+
+    def test_edit_returns_render(self):
+        opened = self._open(make_flat_pdf())
+        result = self._edit(
+            opened.doc_id,
+            [AddTextOp(page=1, x=110.0, y=650.0, text="Eito")],
+            render_pages=[1],
+        )
+        assert len(result.page_images) == 1
+        assert base64.b64decode(result.page_images[0].data_base64).startswith(
+            b"\x89PNG"
+        )

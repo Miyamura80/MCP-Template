@@ -5,10 +5,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from models.gmail import GmailAttachmentData
-from models.pdf_forms import GmailAttachmentSource
+from models.gmail import (
+    GmailAttachmentData,
+    GmailDraftAttachment,
+    GmailDraftAttachmentsResult,
+)
+from models.pdf_forms import GmailAttachmentSource, GmailDraftDestination
 from services import pdf_gmail_bridge as bridge
-from services.pdf_ports import resolve_source
+from services.pdf_ports import deliver_to_destination, resolve_source
 from tests.test_template import TestTemplate
 
 _PDF = b"%PDF-1.7 bridge-test"
@@ -74,3 +78,40 @@ class TestGmailAttachmentResolver(TestTemplate):
             pytest.raises(bridge.GmailAttachmentNotFoundError),
         ):
             resolve_source("u1", source)
+
+
+class TestGmailDraftDestination(TestTemplate):
+    def test_delivers_via_gmail_add_attachment(self):
+        added = GmailDraftAttachmentsResult(
+            draft_id="d1",
+            attachments=[
+                GmailDraftAttachment(
+                    filename="nda-signed.pdf",
+                    mime_type="application/pdf",
+                    size=len(_PDF),
+                    attachment_id="att-9",
+                    message_id="m-9",
+                )
+            ],
+        )
+        with patch.object(
+            bridge, "gmail_add_attachment", return_value=added
+        ) as add_mock:
+            result = deliver_to_destination(
+                "u1", GmailDraftDestination(draft_id="d1"), "nda-signed.pdf", _PDF
+            )
+        sent = add_mock.call_args.args[0]
+        assert sent.draft_id == "d1"
+        assert sent.attachment.filename == "nda-signed.pdf"
+        assert sent.attachment.mime_type == "application/pdf"
+        assert base64.b64decode(sent.attachment.data_base64) == _PDF
+        assert result["draft_id"] == "d1"
+        # message_id (an internal Gmail detail) is not forwarded; no bytes either.
+        assert result["attachments"] == [
+            {
+                "filename": "nda-signed.pdf",
+                "mime_type": "application/pdf",
+                "size": len(_PDF),
+                "attachment_id": "att-9",
+            }
+        ]

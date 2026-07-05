@@ -1,0 +1,236 @@
+"""Tests for the signing gate (US-005) and the signing engine (US-007).
+
+Covers the pdf_request_signature state machine, the stamp + audit + PAdES
+seal pipeline, seal validation against the dev certificate, and tamper
+detection - the PRD's success metrics for the ceremony.
+"""
+
+import io
+import tempfile
+from unittest.mock import patch
+
+import pytest
+
+from common import global_config
+from models.pdf_forms import (
+    PdfRequestSignatureInput,
+    SignaturePlacement,
+)
+from services import pdf_documents_repo as repo
+from services import pdf_signing
+from services.pdf_forms_svc import (
+    PdfSignatureRequestError,
+    pdf_request_signature,
+)
+from tests.pdf_fixtures import make_acroform_pdf, make_flat_pdf
+from tests.test_pdf_forms_svc import PdfServiceTestBase
+
+# One dev cert per test run: generated on first use, reused from disk after.
+_CERT_DIR = tempfile.mkdtemp(prefix="pdf-signing-certs-")
+
+
+def _validate_seal(data: bytes):
+    """Validate the newest embedded signature against the dev trust root."""
+    from pyhanko.keys import load_cert_from_pemder  # noqa: PLC0415 - test-local
+    from pyhanko.pdf_utils.reader import PdfFileReader  # noqa: PLC0415
+    from pyhanko.sign.validation import validate_pdf_signature  # noqa: PLC0415
+    from pyhanko_certvalidator import ValidationContext  # noqa: PLC0415
+
+    cert_path, _ = pdf_signing.sealing_cert_paths()
+    vc = ValidationContext(
+        trust_roots=[load_cert_from_pemder(str(cert_path))], allow_fetching=False
+    )
+    reader = PdfFileReader(io.BytesIO(data))
+    assert reader.embedded_signatures, "no embedded signature found"
+    return validate_pdf_signature(reader.embedded_signatures[0], vc)
+
+
+class PdfSigningTestBase(PdfServiceTestBase):
+    def setup_method(self):
+        super().setup_method()
+        cert_patch = patch.object(
+            global_config.pdf_forms.signing, "dev_cert_dir", _CERT_DIR
+        )
+        cert_patch.start()
+        self._patchers.append(cert_patch)
+
+    def _request(self, doc_id: str, placement: SignaturePlacement):
+        return pdf_request_signature(
+            PdfRequestSignatureInput(user_id="u1", doc_id=doc_id, placement=placement)
+        )
+
+    def _open_awaiting(self, data: bytes | None = None):
+        """Open a doc and drive it to awaiting_signature on the sig field."""
+        opened = self._open(data if data is not None else make_acroform_pdf())
+        self._request(opened.doc_id, SignaturePlacement(field_name="signature"))
+        return opened.doc_id
+
+    def _sign(self, doc_id: str, **overrides):
+        kwargs = {
+            "doc_id": doc_id,
+            "user_id": "u1",
+            "typed_name": "Eito Miyamura",
+            "consent": True,
+            "channel": "app",
+            "confirmed_via_elicitation": True,
+        }
+        kwargs.update(overrides)
+        return pdf_signing.perform_signing(**kwargs)
+
+
+class TestPdfRequestSignature(PdfSigningTestBase):
+    def test_field_placement_locks_document(self):
+        opened = self._open(make_acroform_pdf())
+        result = self._request(
+            opened.doc_id, SignaturePlacement(field_name="signature")
+        )
+        assert result.status == "awaiting_user_signature"
+        assert "cannot sign" in result.guidance.lower() or "user" in result.guidance
+        doc = repo.load_document(opened.doc_id, "u1")
+        assert doc.status == repo.PDF_STATUS_AWAITING_SIGNATURE
+        assert (doc.placement or {}).get("field_name") == "signature"
+        assert (doc.audit or [])[-1]["event"] == "signature_requested"
+
+    def test_coordinate_placement_for_flat_pdf(self):
+        opened = self._open(make_flat_pdf())
+        result = self._request(
+            opened.doc_id, SignaturePlacement(page=1, x=140.0, y=545.0)
+        )
+        assert result.status == "awaiting_user_signature"
+
+    def test_non_signature_field_rejected(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(PdfSignatureRequestError) as exc:
+            self._request(opened.doc_id, SignaturePlacement(field_name="full_name"))
+        assert "not a signature field" in str(exc.value)
+
+    def test_unknown_field_rejected(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(PdfSignatureRequestError):
+            self._request(opened.doc_id, SignaturePlacement(field_name="ghost"))
+
+    def test_both_placement_forms_rejected(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(PdfSignatureRequestError):
+            self._request(
+                opened.doc_id,
+                SignaturePlacement(field_name="signature", page=1, x=1.0, y=1.0),
+            )
+
+    def test_incomplete_coordinates_rejected(self):
+        opened = self._open(make_flat_pdf())
+        with pytest.raises(PdfSignatureRequestError):
+            self._request(opened.doc_id, SignaturePlacement(page=1, x=10.0))
+
+    def test_page_out_of_range_rejected(self):
+        opened = self._open(make_flat_pdf())
+        with pytest.raises(PdfSignatureRequestError):
+            self._request(opened.doc_id, SignaturePlacement(page=7, x=1.0, y=1.0))
+
+    def test_second_request_is_idempotent(self):
+        doc_id = self._open_awaiting()
+        result = self._request(doc_id, SignaturePlacement(field_name="signature"))
+        assert result.status == "awaiting_user_signature"
+
+    def test_already_signed_rejected(self):
+        doc_id = self._open_awaiting()
+        self._sign(doc_id)
+        with pytest.raises(PdfSignatureRequestError) as exc:
+            self._request(doc_id, SignaturePlacement(field_name="signature"))
+        assert "already signed" in str(exc.value)
+
+
+class TestPerformSigning(PdfSigningTestBase):
+    def test_full_ceremony_produces_valid_seal(self):
+        doc_id = self._open_awaiting()
+        doc, audit = self._sign(doc_id)
+        assert doc.status == repo.PDF_STATUS_SIGNED
+        # Visible stamp + printed metadata are in the (uncompressed) bytes.
+        assert b"Eito Miyamura" in doc.current_bytes
+        assert b"Signed by Eito Miyamura" in doc.current_bytes
+        # Audit trail embedded in the PDF and recorded on the session.
+        assert b"MyMCPSignatureAudit" in doc.current_bytes
+        last = (doc.audit or [])[-1]
+        assert last["event"] == "signed"
+        assert last["typed_name"] == "Eito Miyamura"
+        assert last["consent"] is True
+        assert last["channel"] == "app"
+        assert last["confirmed_via_elicitation"] is True
+        assert len(last["document_sha256"]) == 64
+        # The PAdES seal verifies against the server certificate.
+        status = _validate_seal(doc.current_bytes)
+        assert status.intact
+        assert status.valid
+        assert status.trusted
+
+    def test_coordinate_placement_stamp(self):
+        opened = self._open(make_flat_pdf())
+        self._request(opened.doc_id, SignaturePlacement(page=1, x=140.0, y=545.0))
+        doc, _ = self._sign(opened.doc_id)
+        assert b"Eito Miyamura" in doc.current_bytes
+        assert _validate_seal(doc.current_bytes).intact
+
+    def test_tampering_is_detected(self):
+        doc_id = self._open_awaiting()
+        doc, _ = self._sign(doc_id)
+        tampered = doc.current_bytes.replace(b"Signed by", b"S1gned by", 1)
+        assert tampered != doc.current_bytes
+        status = _validate_seal(tampered)
+        assert status.intact is False
+
+    def test_wrong_state_rejected(self):
+        opened = self._open(make_acroform_pdf())
+        with pytest.raises(pdf_signing.PdfSigningStateError):
+            self._sign(opened.doc_id)
+
+    def test_double_sign_rejected(self):
+        doc_id = self._open_awaiting()
+        self._sign(doc_id)
+        with pytest.raises(pdf_signing.PdfSigningStateError):
+            self._sign(doc_id)
+
+    def test_empty_name_rejected(self):
+        doc_id = self._open_awaiting()
+        with pytest.raises(pdf_signing.PdfSigningInputError):
+            self._sign(doc_id, typed_name="   ")
+        # Failed attempt must not consume the awaiting state.
+        assert (
+            repo.load_document(doc_id, "u1").status
+            == repo.PDF_STATUS_AWAITING_SIGNATURE
+        )
+
+    def test_missing_consent_rejected(self):
+        doc_id = self._open_awaiting()
+        with pytest.raises(pdf_signing.PdfSigningInputError):
+            self._sign(doc_id, consent=False)
+
+    def test_abort_back_to_open(self):
+        doc_id = self._open_awaiting()
+        doc = pdf_signing.abort_signing(
+            doc_id=doc_id,
+            user_id="u1",
+            reason="user_cancelled_in_app",
+            channel="app",
+            back_to_open=True,
+        )
+        assert doc.status == repo.PDF_STATUS_OPEN
+        assert (doc.audit or [])[-1]["event"] == "sign_aborted"
+
+    def test_abort_stays_awaiting(self):
+        doc_id = self._open_awaiting()
+        doc = pdf_signing.abort_signing(
+            doc_id=doc_id,
+            user_id="u1",
+            reason="host_confirmation_declined",
+            channel="app",
+            back_to_open=False,
+        )
+        assert doc.status == repo.PDF_STATUS_AWAITING_SIGNATURE
+        assert (doc.audit or [])[-1]["reason"] == "host_confirmation_declined"
+
+    def test_dev_cert_is_cached(self):
+        first = pdf_signing.sealing_cert_paths()
+        stat_before = first[0].stat().st_mtime_ns
+        second = pdf_signing.sealing_cert_paths()
+        assert first == second
+        assert second[0].stat().st_mtime_ns == stat_before

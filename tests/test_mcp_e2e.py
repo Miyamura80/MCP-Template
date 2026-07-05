@@ -242,3 +242,62 @@ class TestMCPWireE2E(TestTemplate):
             _registry[:] = [e for e in _registry if e.name != svc_name]
             _enhancers.pop(svc_name, None)
             mcp._tool_manager._tools.pop(svc_name, None)
+
+
+class TestPdfToolsWireE2E(TestTemplate):
+    """US-004/FR-10: page images cross the wire as ImageContent, and no PDF
+    bytes ever appear in an LLM-visible tool result."""
+
+    def test_pdf_open_renders_image_content_and_leaks_no_pdf_bytes(self):
+        from models.pdf_forms import PdfOpenResult  # noqa: PLC0415 - test-local
+        from services.pdf_ports import ResolvedPdfSource  # noqa: PLC0415 - test-local
+        from tests.pdf_fixtures import make_flat_pdf  # noqa: PLC0415 - test-local
+
+        pdf_bytes = make_flat_pdf()
+
+        def _stub_resolver(user_id, source):
+            return ResolvedPdfSource(filename="nda.pdf", data=pdf_bytes)
+
+        with (
+            patch("services.pdf_forms_svc.resolve_source", _stub_resolver),
+            _wire_session("u-e2e-pdf") as session,
+        ):
+            result = session.request(
+                "tools/call",
+                {
+                    "name": "pdf_open",
+                    "arguments": {
+                        "source": {
+                            "type": "gmail_attachment",
+                            "message_id": "m1",
+                            "attachment_id": "a1",
+                        },
+                        "render_pages": [1],
+                    },
+                },
+            )
+            assert result["isError"] is False
+            structured = result["structuredContent"]
+            assert structured["doc_id"]
+            assert structured["has_acroform"] is False
+            assert structured["page_count"] == 1
+            # Valid per outputSchema: the enhancer moved the PNGs out of the
+            # structured result into ImageContent blocks.
+            PdfOpenResult.model_validate(structured)
+            assert structured["page_images"] == []
+            images = [b for b in result["content"] if b["type"] == "image"]
+            assert len(images) == 1
+            assert images[0]["mimeType"] == "image/png"
+
+            # FR-10: no PDF bytes in any LLM-visible form - neither raw nor
+            # base64 ("%PDF" encodes to "JVBERi" at offset 0).
+            wire_payload = json.dumps(result)
+            assert "%PDF" not in wire_payload
+            assert "JVBERi" not in wire_payload
+
+    def test_pdf_tools_are_listed_with_output_schema(self):
+        with _wire_session("u-e2e-pdf-list") as session:
+            tools = {t["name"]: t for t in session.request("tools/list")["tools"]}
+            for name in ("pdf_open", "pdf_edit"):
+                assert name in tools, f"{name} missing from tools/list"
+                assert tools[name]["outputSchema"]["type"] == "object"
