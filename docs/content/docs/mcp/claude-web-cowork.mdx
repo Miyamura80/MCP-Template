@@ -22,8 +22,10 @@ here - the client runs in Anthropic's cloud and must reach a public URL.
 ## Prerequisites
 
 - A publicly reachable deployment serving `https://YOUR-DEPLOYMENT/mcp`.
-- Authentication configured - either [OAuth 2.1](/docs/mcp/oauth) (recommended;
-  zero-provisioning, the client handles consent) or an API key you can embed.
+- [OAuth 2.1](/docs/mcp/oauth) configured on that deployment. Claude's custom
+  connector authenticates over OAuth - its UI has no field for a custom
+  `X-API-KEY` header, so the header-based API-key path that
+  [local clients](/docs/mcp/setup) use doesn't apply here.
 
 <Steps>
 
@@ -31,27 +33,16 @@ here - the client runs in Anthropic's cloud and must reach a public URL.
 
 ### Get your connection URL
 
-The connection URL points at the streamable-HTTP endpoint:
+The connection URL is just the streamable-HTTP endpoint - no key, no query
+string:
 
 ```
 https://YOUR-DEPLOYMENT/mcp
 ```
 
-If your deployment has [OAuth 2.1](/docs/mcp/oauth) enabled, this bare URL is
-all you need - the client discovers the authorization server and walks you
-through consent on connect. No client IDs, no pasted keys.
-
-If you authenticate with an API key instead, embed it in the URL so the
-connector can call as you:
-
-```
-https://YOUR-DEPLOYMENT/mcp/<your-api-key>/?client=claude
-```
-
-<Callout type="warn" title="Treat this URL like a password">
-Anyone with the key-embedded URL can call your MCP tools as you. Don't paste it
-into shared docs or tickets.
-</Callout>
+With [OAuth 2.1](/docs/mcp/oauth) enabled, this bare URL is all you need: on
+connect, Claude discovers the authorization server, registers itself, and opens
+the consent screen. No client IDs, no pasted keys.
 
 </Step>
 
@@ -64,15 +55,14 @@ and choose **Add custom connector**. Then:
 
 1. Give it a descriptive **name** (e.g. `mymcp`).
 2. Paste your connection **URL** from Step 1.
-3. Leave OAuth client ID/secret **blank** - the server's OAuth discovery (or the
-   embedded API key) handles auth.
-4. Click **Add**. If OAuth is enabled you'll be redirected to sign in and grant
-   consent.
+3. Leave the OAuth client ID/secret **blank** - the server advertises its
+   authorization server via discovery, so Claude registers itself automatically.
+4. Click **Add**. You'll be redirected to sign in and grant consent.
 
 <Callout type="warn" title="Teams: one connector per person">
-Don't create a single shared connector. Each team member should add their own
-connector with their own OAuth login (or personal API key) so tool calls are
-attributed to the right user.
+Each team member adds their own connector and signs in with their own account,
+so tool calls are attributed to the right user. Don't share one pre-authorized
+connector across a team.
 </Callout>
 
 </Step>
