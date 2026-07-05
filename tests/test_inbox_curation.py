@@ -25,6 +25,7 @@ from db.base import Base
 from db.models.google_tokens import GoogleToken
 from db.models.thread_curation import ThreadCuration
 from models.curation import (
+    CoverageSummary,
     CurationBucket,
     CurationRecord,
     CurationState,
@@ -91,7 +92,7 @@ def _patch_fernet():
 
 
 def _judgment(thread_id: str, **kw) -> ThreadJudgment:
-    base = {
+    base: dict = {
         "thread_id": thread_id,
         "bucket": CurationBucket.needs_reply,
         "importance": 0.9,
@@ -100,7 +101,7 @@ def _judgment(thread_id: str, **kw) -> ThreadJudgment:
         "suggested_action": SuggestedAction.reply,
     }
     base.update(kw)
-    return ThreadJudgment(**base)
+    return ThreadJudgment.model_validate(base)
 
 
 def _stub(thread_id: str, history_id: str) -> dict:
@@ -120,7 +121,9 @@ class TestCurationContracts(TestTemplate):
         assert rec.provisional is False
 
     def test_get_result_coverage_shape(self):
-        res = GetCurationResult(records=[], coverage={"curated": 1, "stale": 2})  # type: ignore[arg-type]
+        res = GetCurationResult(
+            records=[], coverage=CoverageSummary(curated=1, stale=2)
+        )
         assert res.coverage.uncurated == 0
         assert res.coverage.stale == 2
 

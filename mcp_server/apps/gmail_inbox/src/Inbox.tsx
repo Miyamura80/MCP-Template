@@ -84,6 +84,59 @@ export type Thread = {
 
 export type CurateResult = { threads: CuratedThread[] };
 
+// Curation-ledger shapes (inbox_get_curation). The dashboard renders banked
+// host-LLM verdicts from the ledger, not a fresh deterministic recompute.
+export type Coverage = { curated: number; stale: number; uncurated: number };
+
+export type CurationRecord = {
+  thread_id: string;
+  bucket?: string | null;
+  importance?: number | null;
+  summary?: string | null;
+  suggested_action?: string;
+  draft_id?: string | null;
+  ledger_status?: string;
+  provisional?: boolean;
+};
+
+export type GetCurationResult = { records: CurationRecord[]; coverage?: Coverage };
+
+const BUCKET_CHIP: Record<string, LabelChip> = {
+  needs_reply: { name: "Needs reply", bg_color: "#fce8e6", text_color: "#c5221f" },
+  waiting_on: { name: "Waiting on", bg_color: "#fef7e0", text_color: "#b06000" },
+  fyi: { name: "FYI", bg_color: "#e8f0fe", text_color: "#1a73e8" },
+  noise: { name: "Noise", bg_color: "#f1f3f4", text_color: "#5f6368" },
+};
+
+// Map banked ledger records into the row shape the list already renders. The
+// ledger stores a summary + bucket rather than subject/sender, so the summary
+// becomes the primary line and the bucket + freshness become label chips.
+export function curationToThreads(records: CurationRecord[]): CuratedThread[] {
+  return records.map((r) => {
+    const labels: LabelChip[] = [];
+    const chip = r.bucket ? BUCKET_CHIP[r.bucket] : undefined;
+    if (chip) labels.push(chip);
+    if (r.ledger_status === "stale")
+      labels.push({ name: "Stale", bg_color: "#fef7e0", text_color: "#b06000" });
+    if (r.provisional)
+      labels.push({ name: "Prior", bg_color: "#f1f3f4", text_color: "#5f6368" });
+    const action =
+      r.suggested_action && r.suggested_action !== "none"
+        ? r.suggested_action.replace(/_/g, " ")
+        : undefined;
+    return {
+      thread_id: r.thread_id,
+      subject: r.summary ?? r.bucket ?? "(curated thread)",
+      from: action ? `Suggested: ${action}` : undefined,
+      importance_score: r.importance ?? 0,
+      reasons: [],
+      labels,
+      has_draft: !!r.draft_id,
+      draft_id: r.draft_id ?? undefined,
+    };
+  });
+}
+
 export type McpAppLike = {
   ontoolresult?: (result: unknown) => void;
   callServerTool: (args: {
@@ -155,6 +208,7 @@ export function Inbox({ mcpApp }: InboxProps) {
   const narrow = useIsNarrow();
   const [viewMode, setViewMode] = useState<"inbox" | "reader">("inbox");
   const [threads, setThreads] = useState<CuratedThread[] | null>(null);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [thread, setThread] = useState<Thread | null>(null);
   const [loadingThread, setLoadingThread] = useState(false);
@@ -212,10 +266,20 @@ export function Inbox({ mcpApp }: InboxProps) {
         setComposerDraft(draft);
         return;
       }
-      const data = extractStructuredContent<CurateResult & Thread>(raw);
+      const data = extractStructuredContent<
+        CurateResult & Thread & Partial<GetCurationResult>
+      >(raw);
       if (data && Array.isArray(data.threads)) {
         received = true;
         setThreads(data.threads);
+        setCoverage(null);
+        setViewMode("inbox");
+      } else if (data && Array.isArray(data.records)) {
+        // Banked ledger verdicts (inbox_get_curation): render from persistent
+        // curation + surface coverage instead of a fresh recompute.
+        received = true;
+        setThreads(curationToThreads(data.records));
+        setCoverage(data.coverage ?? null);
         setViewMode("inbox");
       } else if (data && typeof data.thread_id === "string" && Array.isArray(data.messages)) {
         received = true;
@@ -615,6 +679,29 @@ export function Inbox({ mcpApp }: InboxProps) {
             </button>
           </div>
         </header>
+        {coverage && (
+          <div
+            data-testid="coverage-banner"
+            style={{
+              padding: "6px 12px",
+              fontSize: 11,
+              color: "#5f6368",
+              background: "#f8f9fa",
+              borderBottom: "1px solid #ebebeb",
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ color: "#188038" }}>{coverage.curated} triaged</span>
+            {coverage.stale > 0 && (
+              <span style={{ color: "#b06000" }}>{coverage.stale} stale</span>
+            )}
+            {coverage.uncurated > 0 && (
+              <span>{coverage.uncurated} not yet triaged</span>
+            )}
+          </div>
+        )}
         {visibleThreads === null ? (
           <div style={mutedStyle}>Loading inbox…</div>
         ) : visibleThreads.length === 0 ? (
