@@ -298,6 +298,24 @@ class TestPdfToolsWireE2E(TestTemplate):
     def test_pdf_tools_are_listed_with_output_schema(self):
         with _wire_session("u-e2e-pdf-list") as session:
             tools = {t["name"]: t for t in session.request("tools/list")["tools"]}
-            for name in ("pdf_open", "pdf_edit"):
+            for name in ("pdf_open", "pdf_edit", "pdf_export"):
                 assert name in tools, f"{name} missing from tools/list"
                 assert tools[name]["outputSchema"]["type"] == "object"
+            # The signing gate declares the pdf_signer app in tools/list so
+            # hosts can pre-fetch the iframe HTML.
+            gate = tools["pdf_request_signature"]
+            assert gate["_meta"]["ui"]["resourceUri"] == "ui://mymcp/pdf_signer"
+            # App-only ceremony tools carry the visibility hint on the wire.
+            sign_tool = tools["pdf_signer.sign"]
+            assert sign_tool["_meta"]["ui"]["visibility"] == ["app"]
+
+    def test_pdf_signer_app_resource_serves_built_html(self):
+        with _wire_session("u-e2e-pdf-app") as session:
+            contents = session.request(
+                "resources/read", {"uri": "ui://mymcp/pdf_signer"}
+            )["contents"]
+            assert contents[0]["mimeType"] == "text/html;profile=mcp-app"
+            html = contents[0]["text"]
+            assert html.lstrip().lower().startswith("<!doctype html>")
+            # The committed bundle is the built app, not the placeholder.
+            assert "not built" not in html

@@ -40,6 +40,7 @@ from services.pdf_signing import (
     PdfSigningStateError,
     abort_signing,
     perform_signing,
+    resolve_stamp_anchor,
 )
 
 _APP_META = {"ui": {"visibility": ["app"]}}
@@ -58,12 +59,22 @@ def get_document(doc_id: str, user_id: str = "") -> PdfSignerDocument:
         if doc.placement is not None
         else None
     )
+    stamp_page = stamp_x = stamp_y = None
+    if placement is not None:
+        # Resolve field placements to concrete coordinates server-side so the
+        # iframe can draw the highlight box without re-parsing the AcroForm.
+        stamp_page, stamp_x, stamp_y = resolve_stamp_anchor(
+            doc.current_bytes, doc.placement
+        )
     return PdfSignerDocument(
         doc_id=doc.doc_id,
         filename=doc.filename,
         status=doc.status,  # ty: ignore[invalid-argument-type]
         page_count=doc.page_count,
         placement=placement,
+        stamp_page=stamp_page,
+        stamp_x=stamp_x,
+        stamp_y=stamp_y,
         data_base64=base64.b64encode(doc.current_bytes).decode("ascii"),
     )
 

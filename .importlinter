@@ -92,6 +92,36 @@ forbidden_modules =
     tests
     init
 
+[importlinter:contract:pdf_core_isolated_from_gmail]
+# The PDF form/signing domain is designed to be extractable as a standalone
+# add-on. All Gmail knowledge lives in services.pdf_gmail_bridge (the only
+# module importing both sides); the PDF core must never grow a direct
+# dependency on Gmail modules or the bridge itself.
+# See tasks/prd-pdf-forms-digital-signatures.md (isolation seam).
+name = PDF core does not import Gmail (add-on extraction seam)
+type = forbidden
+source_modules =
+    services.pdf_forms_svc
+    services.pdf_inspect
+    services.pdf_render
+    services.pdf_edit_engine
+    services.pdf_signing
+    services.pdf_documents_repo
+    services.pdf_ports
+    models.pdf_forms
+    db.models.pdf_documents
+    mcp_server.app_tools.pdf_signer
+    mcp_server.enhancers.pdf_forms
+forbidden_modules =
+    services.pdf_gmail_bridge
+    services.gmail_svc
+    services.gmail_messages_svc
+    services.gmail_drafts_svc
+    services.gmail_draft_helpers
+    services.gmail_attachments_svc
+    services.gmail_curate_svc
+    models.gmail
+
 [importlinter:contract:no_imports_from_tests]
 name = Tests are not imported by app code
 type = forbidden

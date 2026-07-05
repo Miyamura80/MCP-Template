@@ -99,7 +99,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "common", "utils", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html"}
+force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html", "mcp_server/apps/pdf_signer/dist/mcp-app.html" = "mcp_server/apps/pdf_signer/dist/mcp-app.html"}
 
 [tool.ruff]
 line-length = 88

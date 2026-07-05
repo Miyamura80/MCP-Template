@@ -46,6 +46,11 @@ class TestPdfSignerAppTools(PdfSigningTestBase):
         assert result.status == "awaiting_signature"
         assert result.placement is not None
         assert result.placement.field_name == "signature"
+        # Field placement resolved to concrete coordinates for the highlight
+        # box (the fixture's signature field rect is [100, 120, 300, 160]).
+        assert result.stamp_page == 1
+        assert result.stamp_x == pytest.approx(102.0)
+        assert result.stamp_y == pytest.approx(124.0)
         assert base64.b64decode(result.data_base64).startswith(b"%PDF-")
 
     def test_sign_with_host_confirmation_accepted(self):

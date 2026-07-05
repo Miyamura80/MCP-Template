@@ -37,7 +37,12 @@ _MCP_INSTRUCTIONS = (
     "NEVER write email draft text as plain chat text - the tools render an interactive "
     "composer UI where the user can review, edit, and send. "
     "Pass your composed text in the tool's 'body' parameter and keep your chat response "
-    "to one brief sentence."
+    "to one brief sentence. "
+    "For PDF attachments: fill forms with pdf_open + pdf_edit, then hand off with "
+    "pdf_request_signature - signing is done by the USER typing their own name in "
+    "the signing UI. Never type a signature value into a form field on the user's "
+    "behalf, and never treat a document as signed until the user completes the "
+    "ceremony. Deliver the result with pdf_export."
 )
 
 

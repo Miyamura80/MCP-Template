@@ -147,7 +147,7 @@ def _escape_pdf_text(text: str) -> bytes:
     return escaped.encode("latin-1", errors="replace")
 
 
-def _resolve_stamp_anchor(
+def resolve_stamp_anchor(
     data: bytes, placement: dict[str, Any] | None
 ) -> tuple[int, float, float]:
     """Turn the recorded placement into (1-based page, x, y baseline)."""
@@ -214,7 +214,7 @@ def _apply_stamp_and_audit(
     data: bytes, placement: dict[str, Any] | None, audit: dict[str, Any]
 ) -> bytes:
     """One pypdf pass: draw the visible stamp and embed the audit in Info."""
-    page_no, x, y = _resolve_stamp_anchor(data, placement)
+    page_no, x, y = resolve_stamp_anchor(data, placement)
     signed_at = audit["signed_at_utc"]
     meta_lines = [
         f"Signed by {audit['typed_name']} on {signed_at}",

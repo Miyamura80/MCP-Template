@@ -288,6 +288,11 @@ class PdfSignerDocument(BaseModel):
     status: Literal["open", "awaiting_signature", "signed"]
     page_count: int
     placement: SignaturePlacement | None = None
+    # Placement resolved to concrete coordinates (field placements are looked
+    # up server-side) so the iframe can draw the highlight box directly.
+    stamp_page: int | None = None
+    stamp_x: float | None = None
+    stamp_y: float | None = None
     data_base64: str
 
 

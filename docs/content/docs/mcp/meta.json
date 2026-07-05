@@ -5,6 +5,7 @@
     "setup",
     "oauth",
     "tools",
+    "pdf-forms",
     "debugging"
   ]
 }
