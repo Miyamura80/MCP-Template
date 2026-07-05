@@ -6,21 +6,14 @@ pypdf/pypdfium2 paths end-to-end without Gmail or Postgres.
 """
 
 import base64
-from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from common import global_config
-from db.base import Base
 from models.pdf_forms import (
     AddTextOp,
-    GmailAttachmentSource,
     PdfEditInput,
-    PdfOpenInput,
     SetFieldOp,
 )
 from services import pdf_documents_repo as repo
@@ -28,54 +21,9 @@ from services import pdf_forms_svc
 from services.pdf_edit_engine import PdfEditBatchError
 from services.pdf_forms_svc import PdfDocumentLockedError
 from services.pdf_inspect import PdfNotAPdfError, inspect_pdf
-from services.pdf_ports import ResolvedPdfSource
 from services.pdf_render import PdfRenderRequestError
 from tests.pdf_fixtures import make_acroform_pdf, make_flat_pdf
-from tests.test_template import TestTemplate
-
-_SOURCE = GmailAttachmentSource(message_id="m1", attachment_id="a1")
-
-
-class PdfServiceTestBase(TestTemplate):
-    """SQLite-backed harness with the source port stubbed to fixture bytes."""
-
-    def setup_method(self):
-        engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(engine)
-        self.SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-
-        @contextmanager
-        def _ctx():
-            session = self.SessionLocal()
-            try:
-                yield session
-            finally:
-                session.close()
-
-        self._patchers: list = [patch.object(repo, "use_db_session", _ctx)]
-        for p in self._patchers:
-            p.start()
-
-    def teardown_method(self):
-        for p in self._patchers:
-            p.stop()
-
-    def _stub_source(self, data: bytes, filename: str = "nda.pdf"):
-        return patch.object(
-            pdf_forms_svc,
-            "resolve_source",
-            lambda user_id, source: ResolvedPdfSource(filename=filename, data=data),
-        )
-
-    def _open(self, data: bytes, filename: str = "nda.pdf", **kwargs):
-        with self._stub_source(data, filename):
-            return pdf_forms_svc.pdf_open(
-                PdfOpenInput(user_id="u1", source=_SOURCE, **kwargs)
-            )
+from tests.pdf_harness import PdfServiceTestBase
 
 
 class TestPdfOpen(PdfServiceTestBase):

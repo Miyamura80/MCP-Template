@@ -17,9 +17,9 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 from models.pdf_forms import (
+    PdfDocStatus,
     PdfEditInput,
     PdfEditResult,
-    PdfExportedAttachment,
     PdfExportInput,
     PdfExportResult,
     PdfOpenInput,
@@ -30,11 +30,9 @@ from models.pdf_forms import (
 )
 from services import service
 from services.pdf_documents_repo import (
-    PDF_STATUS_AWAITING_SIGNATURE,
-    PDF_STATUS_OPEN,
-    PDF_STATUS_SIGNED,
     create_document,
     load_document,
+    sweep_expired_documents,
     update_document,
 )
 from services.pdf_edit_engine import apply_ops
@@ -49,7 +47,7 @@ class PdfDocumentLockedError(Exception):
     def __init__(self, *, doc_id: str, status: str) -> None:
         self.doc_id = doc_id
         self.status = status
-        if status == PDF_STATUS_AWAITING_SIGNATURE:
+        if status == PdfDocStatus.AWAITING_SIGNATURE:
             detail = (
                 "a signature has been requested; the user must sign (or cancel "
                 "in the signing UI) before further edits"
@@ -76,6 +74,9 @@ class PdfDocumentLockedError(Exception):
     output_model=PdfOpenResult,
 )
 def pdf_open(input: PdfOpenInput) -> PdfOpenResult:
+    # Session init doubles as the retention hook (long-running pattern:
+    # init -> continue(id) -> cleanup): sweep expired sessions up front.
+    sweep_expired_documents()
     resolved = resolve_source(input.user_id, input.source)
     inspection = inspect_pdf(resolved.data)
     doc = create_document(
@@ -89,7 +90,7 @@ def pdf_open(input: PdfOpenInput) -> PdfOpenResult:
     return PdfOpenResult(
         doc_id=doc.doc_id,
         filename=doc.filename,
-        status="open",
+        status=PdfDocStatus.OPEN,
         page_count=inspection.page_count,
         page_sizes=inspection.page_sizes,
         has_acroform=inspection.has_acroform,
@@ -119,7 +120,7 @@ def pdf_open(input: PdfOpenInput) -> PdfOpenResult:
 )
 def pdf_edit(input: PdfEditInput) -> PdfEditResult:
     doc = load_document(input.doc_id, input.user_id)
-    if doc.status != PDF_STATUS_OPEN:
+    if doc.status != PdfDocStatus.OPEN:
         raise PdfDocumentLockedError(doc_id=input.doc_id, status=doc.status)
     new_bytes = apply_ops(doc.current_bytes, input.ops)
     inspection = inspect_pdf(new_bytes, include_text_layout=False)
@@ -132,7 +133,7 @@ def pdf_edit(input: PdfEditInput) -> PdfEditResult:
     page_images = render_pages(new_bytes, input.render_pages, inspection.page_count)
     return PdfEditResult(
         doc_id=input.doc_id,
-        status="open",
+        status=PdfDocStatus.OPEN,
         applied_ops=len(input.ops),
         fields=inspection.fields,
         page_images=page_images,
@@ -153,14 +154,14 @@ _AWAITING_GUIDANCE = (
 
 
 def _validate_placement(placement: SignaturePlacement, data: bytes) -> None:
-    coords = (placement.page, placement.x, placement.y)
-    has_coords = all(v is not None for v in coords)
+    """Document-dependent placement checks.
+
+    The shape half (field_name XOR complete page/x/y) is enforced by
+    ``SignaturePlacement``'s own model validator; only the checks that need
+    the actual document live here.
+    """
+    inspection = inspect_pdf(data, include_text_layout=False)
     if placement.is_field_based():
-        if any(v is not None for v in coords):
-            raise PdfSignatureRequestError(
-                "placement takes either field_name or {page, x, y}, not both."
-            )
-        inspection = inspect_pdf(data, include_text_layout=False)
         field = next(
             (f for f in inspection.fields if f.name == placement.field_name), None
         )
@@ -173,14 +174,7 @@ def _validate_placement(placement: SignaturePlacement, data: bytes) -> None:
                 f"Field {placement.field_name!r} is a {field.field_type} field, "
                 "not a signature field. Use {page, x, y} placement instead."
             )
-        return
-    if not has_coords:
-        raise PdfSignatureRequestError(
-            "placement needs either field_name (an AcroForm signature field) "
-            "or all of page, x, y (flat-PDF anchor, PDF user space)."
-        )
-    inspection = inspect_pdf(data, include_text_layout=False)
-    if placement.page is not None and placement.page > inspection.page_count:
+    elif placement.page is not None and placement.page > inspection.page_count:
         raise PdfSignatureRequestError(
             f"placement page {placement.page} out of range "
             f"(document has {inspection.page_count} pages)."
@@ -207,11 +201,11 @@ def pdf_request_signature(
     input: PdfRequestSignatureInput,
 ) -> PdfRequestSignatureResult:
     doc = load_document(input.doc_id, input.user_id)
-    if doc.status == PDF_STATUS_SIGNED:
+    if doc.status == PdfDocStatus.SIGNED:
         raise PdfSignatureRequestError(
             f"Document {input.doc_id!r} is already signed; re-signing is not supported."
         )
-    if doc.status == PDF_STATUS_AWAITING_SIGNATURE:
+    if doc.status == PdfDocStatus.AWAITING_SIGNATURE:
         # Idempotent re-request: keep the recorded placement, re-emit guidance
         # (and, via the enhancer, re-open the signing app).
         return PdfRequestSignatureResult(
@@ -223,7 +217,7 @@ def pdf_request_signature(
     update_document(
         input.doc_id,
         input.user_id,
-        new_status=PDF_STATUS_AWAITING_SIGNATURE,
+        new_status=PdfDocStatus.AWAITING_SIGNATURE,
         placement=input.placement.model_dump(),
         audit_event={
             "event": "signature_requested",
@@ -269,9 +263,9 @@ def _default_export_filename(original: str, signed: bool) -> str:
 )
 def pdf_export(input: PdfExportInput) -> PdfExportResult:
     doc = load_document(input.doc_id, input.user_id)
-    if doc.status == PDF_STATUS_AWAITING_SIGNATURE:
+    if doc.status == PdfDocStatus.AWAITING_SIGNATURE:
         raise PdfExportStateError(input.doc_id)
-    signed = doc.status == PDF_STATUS_SIGNED
+    signed = doc.status == PdfDocStatus.SIGNED
     filename = input.destination.filename or _default_export_filename(
         doc.filename, signed
     )
@@ -292,9 +286,6 @@ def pdf_export(input: PdfExportInput) -> PdfExportResult:
         status="signed" if signed else "open",
         filename=filename,
         destination_type=input.destination.type,
-        draft_id=delivery.get("draft_id"),
-        attachments=[
-            PdfExportedAttachment.model_validate(a)
-            for a in delivery.get("attachments", [])
-        ],
+        draft_id=delivery.ref_id,
+        attachments=delivery.attachments,
     )

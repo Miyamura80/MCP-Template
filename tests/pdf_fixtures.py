@@ -22,6 +22,8 @@ from pypdf.generic import (
     TextStringObject,
 )
 
+from services.pdf_overlay import type1_font
+
 PAGE_WIDTH = 612.0
 PAGE_HEIGHT = 792.0
 
@@ -30,14 +32,7 @@ _FF_COMBO = 1 << 17
 
 
 def _helvetica(writer: PdfWriter):
-    font = DictionaryObject(
-        {
-            NameObject("/Type"): NameObject("/Font"),
-            NameObject("/Subtype"): NameObject("/Type1"),
-            NameObject("/BaseFont"): NameObject("/Helvetica"),
-        }
-    )
-    return writer._add_object(font)
+    return type1_font(writer, "/Helvetica")
 
 
 def _empty_form_xobject(writer: PdfWriter, width: float, height: float):

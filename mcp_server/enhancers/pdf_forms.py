@@ -16,6 +16,9 @@ rolled back and the model is told signing is unavailable here.
 Part of the PDF core (isolation seam): no Gmail imports.
 """
 
+import asyncio
+
+from mcp.server.elicitation import AcceptedElicitation
 from pydantic import BaseModel, Field
 
 from mcp_server.enhancers import enhance
@@ -94,18 +97,21 @@ async def pdf_request_signature_enhanced(
             ),
             schema=_ElicitedSignature,
         )
-        data = getattr(elicited, "data", None)
-        if (
-            elicited.action == "accept"
-            and data is not None
-            and data.consent
-            and data.full_name.strip()
-        ):
-            signed_doc, audit = perform_signing(
+        # The result union isn't parameterized by the schema, so re-validate
+        # the accepted payload into the schema model at this boundary.
+        signature = (
+            _ElicitedSignature.model_validate(elicited.data)
+            if isinstance(elicited, AcceptedElicitation)
+            else None
+        )
+        if signature is not None and signature.consent and signature.full_name.strip():
+            # Blocking work (pypdf clone + RSA seal) off the event loop.
+            signed_doc, audit = await asyncio.to_thread(
+                perform_signing,
                 doc_id=doc_id,
                 user_id=user_id,
-                typed_name=data.full_name,
-                consent=data.consent,
+                typed_name=signature.full_name,
+                consent=signature.consent,
                 channel="elicitation",
                 confirmed_via_elicitation=True,
             )

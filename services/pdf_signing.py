@@ -27,8 +27,6 @@ script font: zero licensing surface and it renders identically everywhere
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import datetime as dt
 import hashlib
 import io
@@ -37,24 +35,30 @@ from pathlib import Path
 from typing import Any
 
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from common import global_config
 from common.global_config import root_dir
 from db.models.pdf_documents import PdfDocument
-from services.pdf_documents_repo import (
-    PDF_STATUS_AWAITING_SIGNATURE,
-    PDF_STATUS_OPEN,
-    load_document,
-    update_document,
-)
+from models.pdf_forms import PdfDocStatus, SignaturePlacement
+from services.pdf_documents_repo import load_document, update_document
 from services.pdf_inspect import inspect_pdf
+from services.pdf_overlay import build_text_overlay_page, escape_pdf_text
 
 _SEAL_FIELD_NAME = "MyMCP-Seal"
 _AUDIT_INFO_KEY = "/MyMCPSignatureAudit"
 
+# Stamp geometry (PDF user space, points). The name baseline sits 18pt above
+# the anchor, metadata lines below it; the footprint rect derived from these
+# is what pdf_signer.get_document reports to the iframe, so the "Sign here"
+# highlight and the actual stamp can never drift apart.
 _NAME_FONT_SIZE = 14.0
 _META_FONT_SIZE = 6.5
+_NAME_BASELINE_OFFSET = 18.0
+_META_BASELINE_OFFSET = 10.0
+_META_LINE_SPACING = 8.0
+_STAMP_WIDTH = 200.0
+_STAMP_DESCENT = 4.0  # below the anchor, covering the last metadata line
+_STAMP_ASCENT = _NAME_BASELINE_OFFSET + _NAME_FONT_SIZE  # top of the typed name
 
 
 class PdfSigningStateError(Exception):
@@ -70,6 +74,34 @@ class PdfSigningStateError(Exception):
 
 class PdfSigningInputError(Exception):
     """Missing typed name or consent - the ceremony inputs are mandatory."""
+
+
+class PdfPlacementResolutionError(Exception):
+    """The recorded placement no longer resolves to a spot on the document.
+
+    Raised instead of silently stamping a default position - a signature at
+    the wrong place on a legal document is the worst possible fallback.
+    """
+
+
+def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
+    """The security-critical ceremony predicate - the single implementation.
+
+    Checks state, name, and consent, in that order; returns the stripped
+    name. Every signing surface (app-only tool, elicitation fallback, the
+    engine itself) must gate through this.
+    """
+    if doc.status != PdfDocStatus.AWAITING_SIGNATURE:
+        raise PdfSigningStateError(doc_id=doc.doc_id, status=doc.status)
+    name = typed_name.strip()
+    if not name:
+        raise PdfSigningInputError("typed_name must be the signer's full legal name.")
+    if not consent:
+        raise PdfSigningInputError(
+            "consent must be true: the signer has to explicitly agree that "
+            "typing their name constitutes their electronic signature."
+        )
+    return name
 
 
 def _dev_cert_paths() -> tuple[Path, Path]:
@@ -142,76 +174,73 @@ def sealing_cert_paths() -> tuple[Path, Path]:
     return cert_path, key_path
 
 
-def _escape_pdf_text(text: str) -> bytes:
-    escaped = text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-    return escaped.encode("latin-1", errors="replace")
-
-
 def resolve_stamp_anchor(
-    data: bytes, placement: dict[str, Any] | None
+    data: bytes, placement: SignaturePlacement
 ) -> tuple[int, float, float]:
-    """Turn the recorded placement into (1-based page, x, y baseline)."""
-    placement = placement or {}
-    field_name = placement.get("field_name")
-    if field_name is not None:
+    """Turn the recorded placement into (1-based page, x, y baseline).
+
+    Raises :class:`PdfPlacementResolutionError` rather than guessing: the
+    placement was validated by ``pdf_request_signature`` and the document is
+    locked while awaiting, so failure to resolve means something is genuinely
+    wrong and stamping a default spot would be worse than refusing.
+    """
+    if placement.field_name is not None:
         inspection = inspect_pdf(data, include_text_layout=False)
-        field = next((f for f in inspection.fields if f.name == field_name), None)
-        if field is not None and field.rect is not None:
-            return field.page or 1, field.rect[0] + 2.0, field.rect[1] + 4.0
-    page = int(placement.get("page") or 1)
-    x = float(placement.get("x") or 72.0)
-    y = float(placement.get("y") or 72.0)
-    return page, x, y
+        field = next(
+            (f for f in inspection.fields if f.name == placement.field_name), None
+        )
+        if field is None or field.rect is None:
+            raise PdfPlacementResolutionError(
+                f"Signature field {placement.field_name!r} no longer resolves "
+                "to a widget rectangle in this document. Cancel and re-request "
+                "the signature."
+            )
+        return field.page or 1, field.rect[0] + 2.0, field.rect[1] + 4.0
+    if placement.page is None or placement.x is None or placement.y is None:
+        raise PdfPlacementResolutionError(
+            "Recorded placement is missing page/x/y coordinates. Cancel and "
+            "re-request the signature."
+        )
+    return placement.page, placement.x, placement.y
+
+
+def resolve_stamp_rect(
+    data: bytes, placement: SignaturePlacement
+) -> tuple[int, list[float]]:
+    """The exact footprint the stamp will occupy: (page, [x0, y0, x1, y1]).
+
+    Derived from the same anchor + geometry constants the stamp drawing uses,
+    so the signing app's highlight box cannot drift from the real stamp.
+    """
+    page, x, y = resolve_stamp_anchor(data, placement)
+    return page, [x, y - _STAMP_DESCENT, x + _STAMP_WIDTH, y + _STAMP_ASCENT]
 
 
 def _stamp_content(x: float, y: float, typed_name: str, meta_lines: list[str]) -> bytes:
     chunks = [
         b"BT /MyMCPSigF1 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (_NAME_FONT_SIZE, x, y + 18.0, _escape_pdf_text(typed_name))
+        % (
+            _NAME_FONT_SIZE,
+            x,
+            y + _NAME_BASELINE_OFFSET,
+            escape_pdf_text(typed_name),
+        )
     ]
     chunks.extend(
         b"BT /MyMCPSigF2 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (_META_FONT_SIZE, x, y + 10.0 - i * 8.0, _escape_pdf_text(line))
+        % (
+            _META_FONT_SIZE,
+            x,
+            y + _META_BASELINE_OFFSET - i * _META_LINE_SPACING,
+            escape_pdf_text(line),
+        )
         for i, line in enumerate(meta_lines)
     )
     return b"".join(chunks)
 
 
-def _font(writer: PdfWriter, base_font: str):
-    return writer._add_object(
-        DictionaryObject(
-            {
-                NameObject("/Type"): NameObject("/Font"),
-                NameObject("/Subtype"): NameObject("/Type1"),
-                NameObject("/BaseFont"): NameObject(base_font),
-            }
-        )
-    )
-
-
-def _stamp_overlay_page(width: float, height: float, content: bytes):
-    writer = PdfWriter()
-    page = writer.add_blank_page(width=width, height=height)
-    page[NameObject("/Resources")] = DictionaryObject(
-        {
-            NameObject("/Font"): DictionaryObject(
-                {
-                    NameObject("/MyMCPSigF1"): _font(writer, "/Helvetica-Oblique"),
-                    NameObject("/MyMCPSigF2"): _font(writer, "/Helvetica"),
-                }
-            )
-        }
-    )
-    stream = DecodedStreamObject()
-    stream.set_data(content)
-    page[NameObject("/Contents")] = writer._add_object(stream)
-    buffer = io.BytesIO()
-    writer.write(buffer)
-    return PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
-
-
 def _apply_stamp_and_audit(
-    data: bytes, placement: dict[str, Any] | None, audit: dict[str, Any]
+    data: bytes, placement: SignaturePlacement, audit: dict[str, Any]
 ) -> bytes:
     """One pypdf pass: draw the visible stamp and embed the audit in Info."""
     page_no, x, y = resolve_stamp_anchor(data, placement)
@@ -223,9 +252,10 @@ def _apply_stamp_and_audit(
     reader = PdfReader(io.BytesIO(data))
     writer = PdfWriter(clone_from=reader)
     target = writer.pages[min(page_no, len(writer.pages)) - 1]
-    overlay = _stamp_overlay_page(
+    overlay = build_text_overlay_page(
         float(target.mediabox.width),
         float(target.mediabox.height),
+        {"/MyMCPSigF1": "/Helvetica-Oblique", "/MyMCPSigF2": "/Helvetica"},
         _stamp_content(x, y, audit["typed_name"], meta_lines),
     )
     target.merge_page(overlay)
@@ -236,46 +266,38 @@ def _apply_stamp_and_audit(
 
 
 def _apply_pades_seal(data: bytes) -> bytes:
-    """Append the PAdES B-B platform seal as an incremental update."""
+    """Append the PAdES B-B platform seal as an incremental update.
 
-    def _seal() -> bytes:
-        # Deliberate local imports: pyHanko pulls in a large dependency tree
-        # that only this seal step needs; keep pdf_open/pdf_edit lean.
-        from pyhanko.pdf_utils.incremental_writer import (  # noqa: PLC0415
-            IncrementalPdfFileWriter,
+    Synchronous and blocking (pyHanko's sync API owns its own event loop
+    internally) - async callers must run :func:`perform_signing` via
+    ``asyncio.to_thread``, never directly on the event loop.
+    """
+    # Deliberate local imports: pyHanko pulls in a large dependency tree
+    # that only this seal step needs; keep pdf_open/pdf_edit lean.
+    from pyhanko.pdf_utils.incremental_writer import (  # noqa: PLC0415
+        IncrementalPdfFileWriter,
+    )
+    from pyhanko.sign import fields, signers  # noqa: PLC0415
+
+    cert_path, key_path = sealing_cert_paths()
+    signer = signers.SimpleSigner.load(str(key_path), str(cert_path))
+    if signer is None:
+        raise RuntimeError(
+            f"Failed to load the PDF sealing key pair from {cert_path} / "
+            f"{key_path} (pdf_forms.signing config)."
         )
-        from pyhanko.sign import fields, signers  # noqa: PLC0415
-
-        cert_path, key_path = sealing_cert_paths()
-        signer = signers.SimpleSigner.load(str(key_path), str(cert_path))
-        if signer is None:
-            raise RuntimeError(
-                f"Failed to load the PDF sealing key pair from {cert_path} / "
-                f"{key_path} (pdf_forms.signing config)."
-            )
-        writer = IncrementalPdfFileWriter(io.BytesIO(data))
-        out = signers.sign_pdf(
-            writer,
-            signers.PdfSignatureMetadata(
-                field_name=_SEAL_FIELD_NAME,
-                subfilter=fields.SigSeedSubFilter.PADES,
-                md_algorithm="sha256",
-                reason="Electronic signature ceremony completed by the signer",
-            ),
-            signer=signer,
-        )
-        return out.getvalue()
-
-    # pyHanko's sync sign_pdf calls asyncio.run() internally, which raises if
-    # a loop is already running - and the signing tools ARE async (elicitation
-    # needs the MCP session loop). Detect that case and seal on a worker
-    # thread with its own fresh loop instead.
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return _seal()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        return executor.submit(_seal).result()
+    writer = IncrementalPdfFileWriter(io.BytesIO(data))
+    out = signers.sign_pdf(
+        writer,
+        signers.PdfSignatureMetadata(
+            field_name=_SEAL_FIELD_NAME,
+            subfilter=fields.SigSeedSubFilter.PADES,
+            md_algorithm="sha256",
+            reason="Electronic signature ceremony completed by the signer",
+        ),
+        signer=signer,
+    )
+    return out.getvalue()
 
 
 def perform_signing(
@@ -291,19 +313,24 @@ def perform_signing(
 
     The caller (app-only tool or elicitation fallback) is responsible for the
     human half: collecting the typed name + consent and, where the client
-    supports it, the host-native confirmation.
+    supports it, the host-native confirmation. Synchronous and CPU/IO-heavy
+    (pypdf clone + RSA seal): async callers must wrap it in
+    ``asyncio.to_thread``.
+
+    Reloads the document by id deliberately, even though callers already
+    hold a row: the host confirmation dialog can stay open indefinitely, and
+    this reload (plus the atomic awaiting->signed transition in
+    ``update_document``) guarantees the bytes that get sealed are the bytes
+    that exist *after* the human confirmed.
     """
     doc = load_document(doc_id, user_id)
-    if doc.status != PDF_STATUS_AWAITING_SIGNATURE:
-        raise PdfSigningStateError(doc_id=doc_id, status=doc.status)
-    name = typed_name.strip()
-    if not name:
-        raise PdfSigningInputError("typed_name must be the signer's full legal name.")
-    if not consent:
-        raise PdfSigningInputError(
-            "consent must be true: the signer has to explicitly agree that "
-            "typing their name constitutes their electronic signature."
+    name = validate_ceremony(doc, typed_name, consent)
+    if doc.placement is None:
+        raise PdfPlacementResolutionError(
+            "Document has no recorded signature placement. Re-run "
+            "pdf_request_signature."
         )
+    placement = SignaturePlacement.model_validate(doc.placement)
 
     audit: dict[str, Any] = {
         "typed_name": name,
@@ -314,13 +341,13 @@ def perform_signing(
         "confirmed_via_elicitation": confirmed_via_elicitation,
         "filename": doc.filename,
     }
-    stamped = _apply_stamp_and_audit(doc.current_bytes, doc.placement, audit)
+    stamped = _apply_stamp_and_audit(doc.current_bytes, placement, audit)
     sealed = _apply_pades_seal(stamped)
     updated = update_document(
         doc_id,
         user_id,
         data=sealed,
-        new_status="signed",
+        new_status=PdfDocStatus.SIGNED,
         audit_event={"event": "signed", **audit},
     )
     return updated, audit
@@ -338,6 +365,6 @@ def abort_signing(
     return update_document(
         doc_id,
         user_id,
-        new_status=PDF_STATUS_OPEN if back_to_open else None,
+        new_status=PdfDocStatus.OPEN if back_to_open else None,
         audit_event={"event": "sign_aborted", "reason": reason, "channel": channel},
     )

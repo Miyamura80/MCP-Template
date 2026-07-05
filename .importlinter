@@ -105,6 +105,7 @@ source_modules =
     services.pdf_inspect
     services.pdf_render
     services.pdf_edit_engine
+    services.pdf_overlay
     services.pdf_signing
     services.pdf_documents_repo
     services.pdf_ports
@@ -112,6 +113,10 @@ source_modules =
     db.models.pdf_documents
     mcp_server.app_tools.pdf_signer
     mcp_server.enhancers.pdf_forms
+# MAINTENANCE: import-linter wildcards can only replace a whole segment
+# (services.* would forbid far too much), so the Gmail modules are listed by
+# name. Any NEW services/gmail_*.py module MUST be added here or it silently
+# escapes the contract.
 forbidden_modules =
     services.pdf_gmail_bridge
     services.gmail_svc

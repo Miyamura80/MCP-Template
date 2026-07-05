@@ -16,6 +16,8 @@ from mcp_server.enhancers.pdf_forms import (
 )
 from models.pdf_forms import (
     GmailDraftDestination,
+    PdfDelivery,
+    PdfExportedAttachment,
     PdfExportInput,
     PdfRequestSignatureInput,
     SignaturePlacement,
@@ -28,7 +30,7 @@ from services.pdf_forms_svc import (
     pdf_request_signature,
 )
 from tests.pdf_fixtures import make_acroform_pdf
-from tests.test_pdf_signing import PdfSigningTestBase
+from tests.pdf_harness import PdfSigningTestBase
 
 
 def _mock_ctx(*, can_elicit: bool, elicit_result=None) -> MagicMock:
@@ -44,13 +46,15 @@ class TestPdfSignerAppTools(PdfSigningTestBase):
         result = app_tools.get_document(doc_id, user_id="u1")
         assert result.doc_id == doc_id
         assert result.status == "awaiting_signature"
-        assert result.placement is not None
-        assert result.placement.field_name == "signature"
-        # Field placement resolved to concrete coordinates for the highlight
-        # box (the fixture's signature field rect is [100, 120, 300, 160]).
+        # Field placement resolved server-side to the exact stamp footprint
+        # (the fixture's signature field rect is [100, 120, 300, 160]; the
+        # anchor is inset +2/+4 and the rect derives from stamp geometry).
         assert result.stamp_page == 1
-        assert result.stamp_x == pytest.approx(102.0)
-        assert result.stamp_y == pytest.approx(124.0)
+        assert result.stamp_rect is not None
+        x0, y0, x1, y1 = result.stamp_rect
+        assert x0 == pytest.approx(102.0)
+        assert x1 > x0
+        assert y0 < 124.0 < y1
         assert base64.b64decode(result.data_base64).startswith(b"%PDF-")
 
     def test_sign_with_host_confirmation_accepted(self):
@@ -248,17 +252,17 @@ class TestPdfExport(PdfSigningTestBase):
                 filename=filename,
                 data=data,
             )
-            return {
-                "draft_id": destination.draft_id,
-                "attachments": [
-                    {
-                        "filename": filename,
-                        "mime_type": "application/pdf",
-                        "size": len(data),
-                        "attachment_id": "att-1",
-                    }
+            return PdfDelivery(
+                ref_id=destination.draft_id,
+                attachments=[
+                    PdfExportedAttachment(
+                        filename=filename,
+                        mime_type="application/pdf",
+                        size=len(data),
+                        attachment_id="att-1",
+                    )
                 ],
-            }
+            )
 
         return delivered, patch.object(
             pdf_forms_svc, "deliver_to_destination", side_effect=_handler

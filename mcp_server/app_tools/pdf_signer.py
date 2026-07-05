@@ -20,8 +20,10 @@ Part of the PDF core (isolation seam): no Gmail imports.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 
+from mcp.server.elicitation import AcceptedElicitation
 from mcp.server.fastmcp.server import Context
 from mcp.types import ClientCapabilities, ElicitationCapability
 from pydantic import BaseModel, Field
@@ -29,6 +31,7 @@ from pydantic import BaseModel, Field
 from mcp_server.app_tools._auth_guard import guard_user_id
 from mcp_server.server import mcp
 from models.pdf_forms import (
+    PdfDocStatus,
     PdfSignerCancelResult,
     PdfSignerDocument,
     PdfSignResult,
@@ -36,11 +39,10 @@ from models.pdf_forms import (
 )
 from services.pdf_documents_repo import load_document
 from services.pdf_signing import (
-    PdfSigningInputError,
-    PdfSigningStateError,
     abort_signing,
     perform_signing,
-    resolve_stamp_anchor,
+    resolve_stamp_rect,
+    validate_ceremony,
 )
 
 _APP_META = {"ui": {"visibility": ["app"]}}
@@ -54,27 +56,22 @@ _APP_META = {"ui": {"visibility": ["app"]}}
 def get_document(doc_id: str, user_id: str = "") -> PdfSignerDocument:
     uid = guard_user_id(user_id)
     doc = load_document(doc_id, uid)
-    placement = (
-        SignaturePlacement.model_validate(doc.placement)
-        if doc.placement is not None
-        else None
-    )
-    stamp_page = stamp_x = stamp_y = None
-    if placement is not None:
-        # Resolve field placements to concrete coordinates server-side so the
-        # iframe can draw the highlight box without re-parsing the AcroForm.
-        stamp_page, stamp_x, stamp_y = resolve_stamp_anchor(
-            doc.current_bytes, doc.placement
+    stamp_page: int | None = None
+    stamp_rect: list[float] | None = None
+    if doc.placement is not None:
+        # Resolve the placement to the exact stamp footprint server-side so
+        # the iframe's "Sign here" highlight shares one geometry source with
+        # the stamp drawing itself.
+        stamp_page, stamp_rect = resolve_stamp_rect(
+            doc.current_bytes, SignaturePlacement.model_validate(doc.placement)
         )
     return PdfSignerDocument(
         doc_id=doc.doc_id,
         filename=doc.filename,
-        status=doc.status,  # ty: ignore[invalid-argument-type]
+        status=PdfDocStatus(doc.status),
         page_count=doc.page_count,
-        placement=placement,
         stamp_page=stamp_page,
-        stamp_x=stamp_x,
-        stamp_y=stamp_y,
+        stamp_rect=stamp_rect,
         data_base64=base64.b64encode(doc.current_bytes).decode("ascii"),
     )
 
@@ -103,15 +100,10 @@ async def sign(
     uid = guard_user_id(user_id)
     # Enforcement order per US-007: state first, ceremony inputs second,
     # host-native confirmation third, and only then the signature itself.
+    # validate_ceremony is the single shared predicate; perform_signing
+    # re-runs it on a fresh row after the (arbitrarily long) confirmation.
     doc = load_document(doc_id, uid)
-    if doc.status != "awaiting_signature":
-        raise PdfSigningStateError(doc_id=doc_id, status=doc.status)
-    name = typed_name.strip()
-    if not name or not consent:
-        raise PdfSigningInputError(
-            "Signing requires the full legal name typed by the user and the "
-            "consent checkbox ticked."
-        )
+    name = validate_ceremony(doc, typed_name, consent)
     confirmed = False
     if ctx.session.check_client_capability(
         ClientCapabilities(elicitation=ElicitationCapability())
@@ -124,11 +116,14 @@ async def sign(
             ),
             schema=_SignConfirmation,
         )
-        if (
-            result.action != "accept"
-            or not getattr(result, "data", None)
-            or not result.data.confirm
-        ):
+        # The result union isn't parameterized by the schema, so re-validate
+        # the accepted payload into the schema model at this boundary.
+        accepted = (
+            _SignConfirmation.model_validate(result.data)
+            if isinstance(result, AcceptedElicitation)
+            else None
+        )
+        if accepted is None or not accepted.confirm:
             # Stays awaiting_signature: the user may retry from the app.
             abort_signing(
                 doc_id=doc_id,
@@ -146,7 +141,9 @@ async def sign(
                 ),
             )
         confirmed = True
-    signed_doc, audit = perform_signing(
+    # Blocking work (pypdf clone + RSA seal) off the event loop.
+    signed_doc, audit = await asyncio.to_thread(
+        perform_signing,
         doc_id=doc_id,
         user_id=uid,
         typed_name=name,

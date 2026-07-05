@@ -18,10 +18,10 @@ from __future__ import annotations
 import io
 
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from models.pdf_forms import AddTextOp, PdfEditOp, PdfFormField, SetFieldOp
 from services.pdf_inspect import inspect_pdf
+from services.pdf_overlay import build_text_overlay_page, escape_pdf_text
 
 
 class PdfEditBatchError(Exception):
@@ -84,41 +84,16 @@ def _validate_ops(
     return errors
 
 
-def _escape_pdf_text(text: str) -> bytes:
-    escaped = text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-    # Standard-14 Helvetica covers Latin-1; anything outside degrades to '?'.
-    return escaped.encode("latin-1", errors="replace")
-
-
 def _overlay_page(width: float, height: float, items: list[AddTextOp]):
     """Build a single page whose content stream draws the given text items."""
-    writer = PdfWriter()
-    page = writer.add_blank_page(width=width, height=height)
-    font = DictionaryObject(
-        {
-            NameObject("/Type"): NameObject("/Font"),
-            NameObject("/Subtype"): NameObject("/Type1"),
-            NameObject("/BaseFont"): NameObject("/Helvetica"),
-        }
-    )
-    page[NameObject("/Resources")] = DictionaryObject(
-        {
-            NameObject("/Font"): DictionaryObject(
-                {NameObject("/PdfEditF1"): writer._add_object(font)}
-            )
-        }
-    )
     chunks = [
         b"BT /PdfEditF1 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (item.font_size, item.x, item.y, _escape_pdf_text(item.text))
+        % (item.font_size, item.x, item.y, escape_pdf_text(item.text))
         for item in items
     ]
-    content = DecodedStreamObject()
-    content.set_data(b"".join(chunks))
-    page[NameObject("/Contents")] = writer._add_object(content)
-    buffer = io.BytesIO()
-    writer.write(buffer)
-    return PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
+    return build_text_overlay_page(
+        width, height, {"/PdfEditF1": "/Helvetica"}, b"".join(chunks)
+    )
 
 
 def apply_ops(data: bytes, ops: list[PdfEditOp]) -> bytes:

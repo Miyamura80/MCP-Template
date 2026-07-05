@@ -24,8 +24,7 @@ const DOC = {
   status: "awaiting_signature",
   page_count: 1,
   stamp_page: 1,
-  stamp_x: 102,
-  stamp_y: 124,
+  stamp_rect: [102, 120, 302, 156],
   data_base64: btoa("%PDF-fake"),
 };
 

@@ -3,7 +3,10 @@
 Part of the PDF core (isolation seam): no imports from ``models.gmail``.
 Sources and destinations are discriminated unions on ``type`` - v1 ships the
 Gmail variants only, but new variants (upload, URL, filesystem) slot in
-without touching the tools' signatures.
+without touching the tools' signatures. Note for future extraction: the
+Gmail-shaped variants (``GmailAttachmentSource``, ``GmailDraftDestination``)
+live here as pure locator contracts, so pulling the PDF domain out as an
+add-on means excising those two models as well as swapping the bridge.
 
 Coordinates are PDF user space: origin at the page's bottom-left corner,
 units are points (1/72 inch). All tools share this convention.
@@ -11,9 +14,27 @@ units are points (1/72 inch). All tools share this convention.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class PdfDocStatus(StrEnum):
+    """The document-session state machine's states (single source of truth).
+
+    Transitions are owned by ``services/pdf_documents_repo.py``:
+    open -> awaiting_signature -> signed (terminal), with
+    awaiting_signature -> open as the user-cancel path.
+    """
+
+    OPEN = "open"
+    AWAITING_SIGNATURE = "awaiting_signature"
+    SIGNED = "signed"
+
+
+# AcroForm field kinds as surfaced to the LLM.
+PdfFieldType = Literal["text", "checkbox", "radio", "choice", "signature", "unknown"]
 
 # ---------------------------------------------------------------------------
 # Sources (pdf_open) and destinations (pdf_export)
@@ -70,7 +91,7 @@ class PdfFormField(BaseModel):
     """One AcroForm field, flattened for the LLM to reason about."""
 
     name: str = Field(description="Fully-qualified field name (use in set_field)")
-    field_type: Literal["text", "checkbox", "radio", "choice", "signature", "unknown"]
+    field_type: PdfFieldType
     value: str | None = Field(default=None, description="Current value, if any")
     page: int | None = Field(
         default=None, description="1-based page the field's widget sits on"
@@ -133,7 +154,7 @@ class PdfOpenInput(BaseModel):
 class PdfOpenResult(BaseModel):
     doc_id: str = Field(description="Session handle for all subsequent pdf_* calls")
     filename: str
-    status: Literal["open", "awaiting_signature", "signed"]
+    status: PdfDocStatus
     page_count: int
     page_sizes: list[PdfPageSize] = Field(default_factory=list)
     has_acroform: bool = Field(
@@ -207,7 +228,7 @@ class PdfEditInput(BaseModel):
 
 class PdfEditResult(BaseModel):
     doc_id: str
-    status: Literal["open", "awaiting_signature", "signed"]
+    status: PdfDocStatus
     applied_ops: int
     fields: list[PdfFormField] = Field(
         default_factory=list, description="Field inventory after the edit"
@@ -245,6 +266,21 @@ class SignaturePlacement(BaseModel):
 
     def is_field_based(self) -> bool:
         return self.field_name is not None
+
+    @model_validator(mode="after")
+    def _exactly_one_form(self) -> SignaturePlacement:
+        coords = (self.page, self.x, self.y)
+        if self.field_name is not None:
+            if any(c is not None for c in coords):
+                raise ValueError(
+                    "placement takes either field_name or {page, x, y}, not both"
+                )
+        elif not all(c is not None for c in coords):
+            raise ValueError(
+                "placement needs either field_name (an AcroForm signature "
+                "field) or all of page, x, y (flat-PDF anchor, PDF user space)"
+            )
+        return self
 
 
 class PdfRequestSignatureInput(BaseModel):
@@ -285,14 +321,16 @@ class PdfSignerDocument(BaseModel):
 
     doc_id: str
     filename: str
-    status: Literal["open", "awaiting_signature", "signed"]
+    status: PdfDocStatus
     page_count: int
-    placement: SignaturePlacement | None = None
-    # Placement resolved to concrete coordinates (field placements are looked
-    # up server-side) so the iframe can draw the highlight box directly.
+    # Placement resolved server-side to the exact rectangle the stamp will
+    # occupy, so the iframe just scales it - stamp geometry has one owner
+    # (services/pdf_signing.py).
     stamp_page: int | None = None
-    stamp_x: float | None = None
-    stamp_y: float | None = None
+    stamp_rect: list[float] | None = Field(
+        default=None,
+        description="Stamp footprint [x0, y0, x1, y1] in PDF user space",
+    )
     data_base64: str
 
 
@@ -334,6 +372,18 @@ class PdfExportedAttachment(BaseModel):
     mime_type: str | None = None
     size: int | None = None
     attachment_id: str | None = None
+
+
+class PdfDelivery(BaseModel):
+    """What a destination adapter reports back after delivering the PDF.
+
+    ``ref_id`` is the destination-native handle (the Gmail draft id for
+    ``gmail_draft`` destinations); destination-neutral by design so the port
+    contract stays Gmail-free.
+    """
+
+    ref_id: str | None = None
+    attachments: list[PdfExportedAttachment] = Field(default_factory=list)
 
 
 class PdfExportResult(BaseModel):

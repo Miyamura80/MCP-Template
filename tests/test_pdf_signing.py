@@ -6,27 +6,16 @@ detection - the PRD's success metrics for the ceremony.
 """
 
 import io
-import tempfile
-from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
-from common import global_config
-from models.pdf_forms import (
-    PdfRequestSignatureInput,
-    SignaturePlacement,
-)
+from models.pdf_forms import SignaturePlacement
 from services import pdf_documents_repo as repo
 from services import pdf_signing
-from services.pdf_forms_svc import (
-    PdfSignatureRequestError,
-    pdf_request_signature,
-)
+from services.pdf_forms_svc import PdfSignatureRequestError
 from tests.pdf_fixtures import make_acroform_pdf, make_flat_pdf
-from tests.test_pdf_forms_svc import PdfServiceTestBase
-
-# One dev cert per test run: generated on first use, reused from disk after.
-_CERT_DIR = tempfile.mkdtemp(prefix="pdf-signing-certs-")
+from tests.pdf_harness import PdfSigningTestBase
 
 
 def _validate_seal(data: bytes):
@@ -43,39 +32,6 @@ def _validate_seal(data: bytes):
     reader = PdfFileReader(io.BytesIO(data))
     assert reader.embedded_signatures, "no embedded signature found"
     return validate_pdf_signature(reader.embedded_signatures[0], vc)
-
-
-class PdfSigningTestBase(PdfServiceTestBase):
-    def setup_method(self):
-        super().setup_method()
-        cert_patch = patch.object(
-            global_config.pdf_forms.signing, "dev_cert_dir", _CERT_DIR
-        )
-        cert_patch.start()
-        self._patchers.append(cert_patch)
-
-    def _request(self, doc_id: str, placement: SignaturePlacement):
-        return pdf_request_signature(
-            PdfRequestSignatureInput(user_id="u1", doc_id=doc_id, placement=placement)
-        )
-
-    def _open_awaiting(self, data: bytes | None = None):
-        """Open a doc and drive it to awaiting_signature on the sig field."""
-        opened = self._open(data if data is not None else make_acroform_pdf())
-        self._request(opened.doc_id, SignaturePlacement(field_name="signature"))
-        return opened.doc_id
-
-    def _sign(self, doc_id: str, **overrides):
-        kwargs = {
-            "doc_id": doc_id,
-            "user_id": "u1",
-            "typed_name": "Eito Miyamura",
-            "consent": True,
-            "channel": "app",
-            "confirmed_via_elicitation": True,
-        }
-        kwargs.update(overrides)
-        return pdf_signing.perform_signing(**kwargs)
 
 
 class TestPdfRequestSignature(PdfSigningTestBase):
@@ -109,18 +65,15 @@ class TestPdfRequestSignature(PdfSigningTestBase):
         with pytest.raises(PdfSignatureRequestError):
             self._request(opened.doc_id, SignaturePlacement(field_name="ghost"))
 
-    def test_both_placement_forms_rejected(self):
-        opened = self._open(make_acroform_pdf())
-        with pytest.raises(PdfSignatureRequestError):
-            self._request(
-                opened.doc_id,
-                SignaturePlacement(field_name="signature", page=1, x=1.0, y=1.0),
-            )
+    def test_both_placement_forms_rejected_by_model(self):
+        # The shape rule (XOR) lives on the model itself, so an invalid
+        # placement never even reaches the service.
+        with pytest.raises(ValidationError, match="not both"):
+            SignaturePlacement(field_name="signature", page=1, x=1.0, y=1.0)
 
-    def test_incomplete_coordinates_rejected(self):
-        opened = self._open(make_flat_pdf())
-        with pytest.raises(PdfSignatureRequestError):
-            self._request(opened.doc_id, SignaturePlacement(page=1, x=10.0))
+    def test_incomplete_coordinates_rejected_by_model(self):
+        with pytest.raises(ValidationError, match="all of page, x, y"):
+            SignaturePlacement(page=1, x=10.0)
 
     def test_page_out_of_range_rejected(self):
         opened = self._open(make_flat_pdf())

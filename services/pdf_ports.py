@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from models.pdf_forms import PdfDelivery
+
 
 @dataclass(frozen=True)
 class ResolvedPdfSource:
@@ -28,9 +30,9 @@ class ResolvedPdfSource:
 
 # Adapters receive (user_id, source_model) and return the fetched bytes.
 SourceResolver = Callable[[str, Any], ResolvedPdfSource]
-# Adapters receive (user_id, destination_model, filename, data) and return an
-# adapter-specific result dict merged into PdfExportResult.
-DestinationHandler = Callable[[str, Any, str, bytes], dict[str, Any]]
+# Adapters receive (user_id, destination_model, filename, data) and report
+# back what was delivered where (destination-neutral shape).
+DestinationHandler = Callable[[str, Any, str, bytes], PdfDelivery]
 
 _source_resolvers: dict[str, SourceResolver] = {}
 _destination_handlers: dict[str, DestinationHandler] = {}
@@ -63,7 +65,7 @@ def resolve_source(user_id: str, source: Any) -> ResolvedPdfSource:
 
 def deliver_to_destination(
     user_id: str, destination: Any, filename: str, data: bytes
-) -> dict[str, Any]:
+) -> PdfDelivery:
     handler = _destination_handlers.get(destination.type)
     if handler is None:
         raise PdfPortNotRegisteredError(

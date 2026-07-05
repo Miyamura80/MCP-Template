@@ -20,17 +20,22 @@ from human_id import generate_id
 from common import global_config
 from db.engine import use_db_session
 from db.models.pdf_documents import PdfDocument
+from models.pdf_forms import PdfDocStatus
 
-PDF_STATUS_OPEN = "open"
-PDF_STATUS_AWAITING_SIGNATURE = "awaiting_signature"
-PDF_STATUS_SIGNED = "signed"
+# Short aliases: the status type itself lives in models/pdf_forms.py so every
+# layer (models, services, app tools) shares one definition.
+PDF_STATUS_OPEN = PdfDocStatus.OPEN
+PDF_STATUS_AWAITING_SIGNATURE = PdfDocStatus.AWAITING_SIGNATURE
+PDF_STATUS_SIGNED = PdfDocStatus.SIGNED
 
 # The full state machine. ``awaiting_signature -> open`` is the user-cancel
 # path; ``signed`` is terminal (no re-sign, no revocation in v1).
-_VALID_TRANSITIONS: dict[str, frozenset[str]] = {
-    PDF_STATUS_OPEN: frozenset({PDF_STATUS_AWAITING_SIGNATURE}),
-    PDF_STATUS_AWAITING_SIGNATURE: frozenset({PDF_STATUS_SIGNED, PDF_STATUS_OPEN}),
-    PDF_STATUS_SIGNED: frozenset(),
+_VALID_TRANSITIONS: dict[PdfDocStatus, frozenset[PdfDocStatus]] = {
+    PdfDocStatus.OPEN: frozenset({PdfDocStatus.AWAITING_SIGNATURE}),
+    PdfDocStatus.AWAITING_SIGNATURE: frozenset(
+        {PdfDocStatus.SIGNED, PdfDocStatus.OPEN}
+    ),
+    PdfDocStatus.SIGNED: frozenset(),
 }
 
 # Sentinel distinguishing "leave placement untouched" from "clear it".
@@ -92,11 +97,10 @@ def create_document(
 ) -> PdfDocument:
     """Mint a new document session and return the stored row.
 
-    Opportunistically sweeps expired sessions first (the repo's long-running
-    pattern makes ``pdf_open`` the natural init/cleanup hook).
+    Does exactly that and nothing else - the TTL sweep is orchestrated by
+    ``pdf_open`` (the session init hook), not hidden in here.
     """
     _check_size(data)
-    sweep_expired_documents()
     doc = PdfDocument(
         doc_id=generate_id(),
         user_id=user_id,
@@ -133,7 +137,7 @@ def update_document(
     *,
     data: bytes | None = None,
     page_count: int | None = None,
-    new_status: str | None = None,
+    new_status: PdfDocStatus | None = None,
     placement: dict[str, Any] | None = _UNSET,
     audit_event: dict[str, Any] | None = None,
 ) -> PdfDocument:
@@ -152,11 +156,12 @@ def update_document(
         if doc is None:
             raise PdfDocumentNotFoundError(doc_id)
         if new_status is not None and new_status != doc.status:
-            if new_status not in _VALID_TRANSITIONS.get(doc.status, frozenset()):
+            current = PdfDocStatus(doc.status)
+            if new_status not in _VALID_TRANSITIONS[current]:
                 raise PdfInvalidTransitionError(
                     doc_id=doc_id, current=doc.status, requested=new_status
                 )
-            doc.status = new_status
+            doc.status = new_status.value
         if data is not None:
             _check_size(data)
             doc.current_bytes = data

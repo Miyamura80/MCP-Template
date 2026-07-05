@@ -4,19 +4,15 @@ Runs against an in-memory SQLite engine by patching the repo module's
 ``use_db_session``, mirroring tests/test_idempotency.py.
 """
 
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from common import global_config
-from db.base import Base
 from db.models.pdf_documents import PdfDocument
 from services import pdf_documents_repo as repo
+from tests.pdf_harness import SqlitePdfRepoTestBase
 from tests.test_template import TestTemplate
 
 _PDF = b"%PDF-1.7 test-bytes"
@@ -51,30 +47,7 @@ class TestPdfDocumentModel(TestTemplate):
         assert not list(PdfDocument.__table__.foreign_keys)
 
 
-class TestPdfDocumentsRepo(TestTemplate):
-    def setup_method(self):
-        engine = create_engine(
-            "sqlite:///:memory:",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(engine)
-        self.SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-
-        @contextmanager
-        def _ctx():
-            session = self.SessionLocal()
-            try:
-                yield session
-            finally:
-                session.close()
-
-        self._patcher = patch.object(repo, "use_db_session", _ctx)
-        self._patcher.start()
-
-    def teardown_method(self):
-        self._patcher.stop()
-
+class TestPdfDocumentsRepo(SqlitePdfRepoTestBase):
     def _create(self, user_id="u1", **kwargs):
         defaults = {
             "user_id": user_id,

@@ -105,13 +105,11 @@ class TestGmailDraftDestination(TestTemplate):
         assert sent.attachment.filename == "nda-signed.pdf"
         assert sent.attachment.mime_type == "application/pdf"
         assert base64.b64decode(sent.attachment.data_base64) == _PDF
-        assert result["draft_id"] == "d1"
+        assert result.ref_id == "d1"
         # message_id (an internal Gmail detail) is not forwarded; no bytes either.
-        assert result["attachments"] == [
-            {
-                "filename": "nda-signed.pdf",
-                "mime_type": "application/pdf",
-                "size": len(_PDF),
-                "attachment_id": "att-9",
-            }
-        ]
+        assert len(result.attachments) == 1
+        attachment = result.attachments[0]
+        assert attachment.filename == "nda-signed.pdf"
+        assert attachment.mime_type == "application/pdf"
+        assert attachment.size == len(_PDF)
+        assert attachment.attachment_id == "att-9"

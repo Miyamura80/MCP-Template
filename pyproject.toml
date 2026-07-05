@@ -204,6 +204,7 @@ exclude = [
     "tests/test_pdf_signing.py",
     "tests/test_pdf_signer_flows.py",
     "tests/pdf_fixtures.py",
+    "tests/pdf_harness.py",
 ]
 
 [tool.file_length]

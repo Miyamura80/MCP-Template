@@ -121,9 +121,11 @@ destinations are discriminated unions resolved through adapter ports, and
 ```
 
 An import-linter contract (`pdf_core_isolated_from_gmail` in `.importlinter`,
-enforced by `make import_lint` in CI) makes the seam mechanical: extracting
-the PDF tools as a standalone add-on later means moving the core modules and
-replacing that one bridge file.
+enforced by `make import_lint` in CI) makes the seam mechanical. Extracting
+the PDF tools as a standalone add-on later means moving the core modules,
+replacing that one bridge file, and excising the Gmail-shaped locator
+variants (`GmailAttachmentSource` / `GmailDraftDestination`) that live in
+`models/pdf_forms.py` as pure data contracts.
 
 ## Configuration
 

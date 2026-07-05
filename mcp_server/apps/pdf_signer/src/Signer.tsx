@@ -33,8 +33,9 @@ export type SignerDocument = {
   status: "open" | "awaiting_signature" | "signed";
   page_count: number;
   stamp_page?: number | null;
-  stamp_x?: number | null;
-  stamp_y?: number | null;
+  // Exact stamp footprint [x0, y0, x1, y1] in PDF user space, resolved
+  // server-side so the highlight and the real stamp share one geometry.
+  stamp_rect?: number[] | null;
   data_base64: string;
 };
 
@@ -68,10 +69,6 @@ type RenderedPage = {
   pdfHeight: number;
 };
 
-// Rendered footprint of the stamp the server will draw (see pdf_signing.py:
-// name baseline at y+18pt, metadata lines below y+10pt).
-const STAMP_W = 200;
-const STAMP_H = 44;
 const PAGE_TARGET_WIDTH = 640;
 
 async function renderAllPages(dataBase64: string): Promise<RenderedPage[]> {
@@ -262,16 +259,16 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
             />
             {phase !== "signed" &&
               doc?.stamp_page === p.pageNo &&
-              doc.stamp_x != null &&
-              doc.stamp_y != null && (
+              doc.stamp_rect != null &&
+              doc.stamp_rect.length === 4 && (
                 <div
                   data-testid="stamp-highlight"
                   style={{
                     ...styles.highlight,
-                    left: doc.stamp_x * p.scale,
-                    top: (p.pdfHeight - doc.stamp_y - STAMP_H + 6) * p.scale,
-                    width: STAMP_W * p.scale,
-                    height: STAMP_H * p.scale,
+                    left: doc.stamp_rect[0] * p.scale,
+                    top: (p.pdfHeight - doc.stamp_rect[3]) * p.scale,
+                    width: (doc.stamp_rect[2] - doc.stamp_rect[0]) * p.scale,
+                    height: (doc.stamp_rect[3] - doc.stamp_rect[1]) * p.scale,
                   }}
                 >
                   <span style={styles.highlightLabel}>Sign here</span>
