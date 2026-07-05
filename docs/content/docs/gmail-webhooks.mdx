@@ -70,6 +70,27 @@ The Gmail `gmail.modify` scope already granted during OAuth covers
 configured, a watch is auto-started (fire-and-forget) as soon as a user
 connects Gmail, and renewed automatically before its ~7-day expiry.
 
+## Self-service: the Settings app
+
+Clients that support MCP Apps get a **Settings panel** (an iframe dashboard) so
+a user can manage everything themselves - no operator, no `curl`. Ask the
+assistant to *"open my settings"* and it calls the `webhook_settings` tool,
+which renders `ui://mymcp/settings`. From there the user can:
+
+- see their Gmail connection + watch status,
+- add an HTTPS endpoint and copy the **one-time signing secret**,
+- rotate a secret or remove an endpoint.
+
+The panel talks to guarded app-only tools (`settings.get` / `settings.subscribe`
+/ `settings.rotate_secret` / `settings.unsubscribe`); each ignores any
+`user_id` on the wire and acts only on the authenticated principal, so the
+iframe can never touch another user's settings. The signing secret is shown
+**once** at create/rotate time and is never retrievable again - lost secrets
+are replaced by rotating.
+
+Non-App clients fall back to the headless `webhook_settings` result and the
+plain subscription services below.
+
 ## Subscribing to events
 
 Subscriptions are managed through the shared service registry, so they work
