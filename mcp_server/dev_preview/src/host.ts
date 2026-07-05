@@ -41,6 +41,7 @@ async function appHtml(): Promise<string> {
 async function main(): Promise<void> {
   const iframe = document.getElementById("app") as HTMLIFrameElement;
   const win = iframe.contentWindow!;
+  const width = Math.round(iframe.getBoundingClientRect().width) || 760;
 
   const bridge = new AppBridge(
     null,
@@ -50,7 +51,7 @@ async function main(): Promise<void> {
       hostContext: {
         theme: "light",
         platform: "web",
-        containerDimensions: { width: 920, maxHeight: 6000 },
+        containerDimensions: { width, maxHeight: 6000 },
         displayMode: "inline",
         availableDisplayModes: ["inline", "fullscreen"],
       },
@@ -63,6 +64,13 @@ async function main(): Promise<void> {
   bridge.onmessage = async () => ({});
   bridge.onupdatemodelcontext = async () => ({});
   bridge.onrequestdisplaymode = async ({ mode }) => ({ mode });
+
+  // Fit the frame to the app's content the way a real host does: the app emits
+  // ui/notifications/size-changed (autoResize) with its measured height, and we
+  // size the iframe to it instead of leaving a fixed box with dead whitespace.
+  bridge.onsizechange = ({ height }) => {
+    if (height && height > 0) iframe.style.height = `${Math.ceil(height)}px`;
+  };
 
   bridge.oninitialized = async () => {
     // ext-apps contract: sendToolInput must precede sendToolResult.
