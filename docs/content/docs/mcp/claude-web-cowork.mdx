@@ -1,0 +1,95 @@
+---
+title: Claude Web & Cowork
+description: Connect cloud Claude clients (claude.ai, Desktop, Cowork) as a remote MCP connector
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Cloud Claude clients - **claude.ai**, **Claude Desktop**, and **Cowork** -
+connect to your server as a *custom remote MCP connector*. Unlike local agents
+such as Claude Code or Cursor (which spawn the [stdio](/docs/mcp/setup#local-stdio-legacy)
+subprocess), these clients run in Anthropic's cloud, so they reach your server
+over its public **streamable-HTTP** endpoint at `/mcp`.
+
+<Callout type="info">
+You need a deployed server. See [Deployment](/docs/deployment) for hosting the
+single `mymcp-serve` process that exposes `/mcp`. `localhost` will **not** work
+here - the client runs in Anthropic's cloud and must reach a public URL.
+</Callout>
+
+## Prerequisites
+
+- A publicly reachable deployment serving `https://YOUR-DEPLOYMENT/mcp`.
+- Authentication configured - either [OAuth 2.1](/docs/mcp/oauth) (recommended;
+  zero-provisioning, the client handles consent) or an API key you can embed.
+
+<Steps>
+
+<Step>
+
+### Get your connection URL
+
+The connection URL points at the streamable-HTTP endpoint:
+
+```
+https://YOUR-DEPLOYMENT/mcp
+```
+
+If your deployment has [OAuth 2.1](/docs/mcp/oauth) enabled, this bare URL is
+all you need - the client discovers the authorization server and walks you
+through consent on connect. No client IDs, no pasted keys.
+
+If you authenticate with an API key instead, embed it in the URL so the
+connector can call as you:
+
+```
+https://YOUR-DEPLOYMENT/mcp/<your-api-key>/?client=claude
+```
+
+<Callout type="warn" title="Treat this URL like a password">
+Anyone with the key-embedded URL can call your MCP tools as you. Don't paste it
+into shared docs or tickets.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Add a custom connector in Claude
+
+Open **Settings > Connectors** (in Cowork/Desktop: **Customize > Connectors**)
+and choose **Add custom connector**. Then:
+
+1. Give it a descriptive **name** (e.g. `mymcp`).
+2. Paste your connection **URL** from Step 1.
+3. Leave OAuth client ID/secret **blank** - the server's OAuth discovery (or the
+   embedded API key) handles auth.
+4. Click **Add**. If OAuth is enabled you'll be redirected to sign in and grant
+   consent.
+
+<Callout type="warn" title="Teams: one connector per person">
+Don't create a single shared connector. Each team member should add their own
+connector with their own OAuth login (or personal API key) so tool calls are
+attributed to the right user.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Enable it in a conversation
+
+In any chat, click the **+** button, open **Connectors**, and toggle `mymcp`
+on. Your tools are now available to the assistant. Browse what's exposed in
+[Tools](/docs/mcp/tools) and just ask Claude to use them.
+
+</Step>
+
+</Steps>
+
+## Related
+
+- [Anthropic: Build custom connectors via remote MCP servers](https://support.claude.com/en/articles/11503834-build-custom-connectors-via-remote-mcp-servers)
+- [ChatGPT](/docs/mcp/chatgpt) - the equivalent flow for OpenAI's clients
+- [OAuth 2.1](/docs/mcp/oauth) - zero-provisioning auth for cloud clients
