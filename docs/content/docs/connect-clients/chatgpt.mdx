@@ -1,0 +1,91 @@
+---
+title: ChatGPT
+description: Add the server as a custom connector in ChatGPT on the web
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+ChatGPT reaches your server from **OpenAI's cloud**, so it connects over the
+public `/mcp` endpoint as a **custom connector** in developer mode. `localhost`
+URLs will not work: the deployment must be reachable at a public HTTPS URL.
+
+<Steps>
+
+<Step>
+
+### Get your connection URL
+
+Your connector URL is the public `/mcp` endpoint of your deployment:
+
+```
+https://YOUR-DEPLOYMENT/mcp?client=chatgpt
+```
+
+Authenticate with OAuth (recommended) or, if your deployment accepts a key in
+the URL, embed it. A URL that embeds a key is a live credential, so treat it
+like a password.
+
+</Step>
+
+<Step>
+
+### Enable developer mode
+
+Custom connectors live behind developer mode:
+
+1. Open **Settings → Apps & Connectors**.
+2. Scroll to **Advanced settings**.
+3. Turn **Developer mode** on.
+
+<Callout type="warn">
+Developer mode gives ChatGPT direct access to whatever tools the connector
+exposes. Only connect servers you trust, and keep your connection URL private.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Add the custom connector
+
+Under **Settings → Apps & Connectors**, click **Create** and fill in:
+
+- **Name**: anything recognizable, e.g. `mymcp`. Icon and description are
+  optional.
+- **Server URL**: the connection URL from the first step, including any
+  `?client=chatgpt` tag.
+- **Authentication**:
+  - **OAuth** if your deployment uses it: leave the client fields blank and let
+    ChatGPT provision itself ([OAuth 2.1](/docs/mcp/oauth)); or
+  - **No authentication** if the API key is embedded in the URL.
+- Acknowledge the custom-connector risk checkbox, then **Create**.
+
+</Step>
+
+<Step>
+
+### Use it in a chat
+
+Open a conversation, add your connector from the tools / **+** menu, and ChatGPT
+can discover and call the server's [tools](/docs/mcp/tools).
+
+</Step>
+
+</Steps>
+
+## Team rollout
+
+Have each teammate add the connector under their **own** account with their own
+connection URL rather than sharing one. Per-user connections keep activity
+attributed to the right person and let auth/policy apply per identity.
+
+## Troubleshooting
+
+- **Connection fails / times out**: the endpoint must be reachable from OpenAI's
+  cloud over public HTTPS. Confirm `https://YOUR-DEPLOYMENT/mcp` responds
+  externally.
+- **No "Create" / custom connector option**: developer mode is off, or your
+  ChatGPT plan does not expose custom connectors.
+- **Auth loop or 401**: check the OAuth configuration on `/mcp`
+  ([OAuth 2.1](/docs/mcp/oauth)); if you embed a key in the URL, make sure the
+  deployment accepts a key as a query parameter.

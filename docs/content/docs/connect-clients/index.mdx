@@ -1,0 +1,43 @@
+---
+title: Connect Clients
+description: Add the server as a custom remote MCP connector in cloud AI clients
+---
+
+Cloud AI clients (Claude on the web / Cowork, and ChatGPT on the web) reach your
+server **from the vendor's cloud**, not from your machine. They connect over the
+[streamable-HTTP endpoint](/docs/mcp/setup) at `/mcp` as a **custom remote MCP
+connector**, so `localhost` URLs will not work: the deployment must be reachable
+at a public HTTPS URL.
+
+<Callout type="info">
+These guides cover the **cloud** clients that speak MCP over HTTP. For local
+desktop / CLI clients that spawn the server over stdio (Claude Desktop, Cursor,
+VS Code, Codex, …) see [Setup](/docs/mcp/setup).
+</Callout>
+
+## Before you start
+
+- A public deployment of the server. Replace `YOUR-DEPLOYMENT` in these guides
+  with your host (for example `mymcp.example.com`). See [Deployment](/docs/deployment).
+- Authentication configured on `/mcp`. The web connector UIs are **URL-only**
+  (they cannot set an `X-API-KEY` header), so cloud clients authenticate one of
+  two ways:
+  - **OAuth 2.1 (recommended).** The server advertises dynamic client
+    registration, so you paste the URL and leave the OAuth fields blank; the
+    client provisions itself on first connect. See [OAuth 2.1](/docs/mcp/oauth).
+  - **API key in the URL.** If your deployment accepts the key as a query
+    parameter, embed it in the connector URL. That URL then carries a live
+    credential, so treat it like a password.
+
+<Callout type="info" title="Tag the client (optional)">
+Append a `?client=<name>` query parameter to the URL you paste
+(`?client=claude`, `?client=chatgpt`). It has no effect on the connection and
+just lets the server attribute sessions to the client they came from in logs.
+</Callout>
+
+## Guides
+
+<Cards>
+  <Card title="Claude Web & Cowork" href="/docs/connect-clients/claude-web-cowork" />
+  <Card title="ChatGPT" href="/docs/connect-clients/chatgpt" />
+</Cards>

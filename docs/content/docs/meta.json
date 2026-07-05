@@ -5,6 +5,7 @@
     "quickstart",
     "cli",
     "mcp",
+    "connect-clients",
     "api",
     "deployment"
   ]

@@ -1,0 +1,82 @@
+---
+title: Claude Web & Cowork
+description: Add the server as a custom connector in claude.ai and Cowork
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+Claude's cloud clients (claude.ai and Cowork) can call your tools by adding the
+server as a **custom remote MCP connector**. Each person adds it once under
+their own account.
+
+<Callout type="info">
+Add a **personal** connector per user rather than one shared connector for the
+whole organization. Per-user connections keep activity attributed to the right
+person and let auth/policy apply per identity.
+</Callout>
+
+<Steps>
+
+<Step>
+
+### Get your connection URL
+
+Your connector URL is the public `/mcp` endpoint of your deployment:
+
+```
+https://YOUR-DEPLOYMENT/mcp?client=claude
+```
+
+Authenticate with OAuth (recommended, see below) or, if your deployment accepts
+a key in the URL, embed it. A URL that embeds a key is a live credential, so
+treat it like a password.
+
+</Step>
+
+<Step>
+
+### Add the custom connector
+
+In Claude, open **Settings → Connectors** (in Cowork: **Customize →
+Connectors**), then **Add custom connector**:
+
+- **Name**: anything recognizable, e.g. `mymcp`.
+- **URL**: the connection URL from the previous step, including any
+  `?client=claude` tag.
+- **OAuth Client ID / Client Secret**: leave **empty**. The server supports
+  dynamic client registration, so Claude provisions itself on first connect.
+  See [OAuth 2.1](/docs/mcp/oauth).
+
+Save the connector. Claude walks you through the OAuth sign-in the first time it
+connects. An "unverified" notice on a self-hosted connector is expected.
+
+<Callout type="info">
+On the free plan Claude allows a single custom connector. Paid plans allow
+several.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Enable it in a conversation
+
+Start a chat, open the **Connectors** menu (the **+** / tools control in the
+composer), and toggle your connector on. Claude can now discover and call the
+server's [tools](/docs/mcp/tools) for that conversation.
+
+</Step>
+
+</Steps>
+
+## Troubleshooting
+
+- **Connection fails / times out**: the endpoint must be reachable from
+  Anthropic's cloud over public HTTPS. `localhost` and private hosts will not
+  work. Confirm `https://YOUR-DEPLOYMENT/mcp` responds externally.
+- **Auth loop or 401**: check the OAuth configuration on `/mcp`
+  ([OAuth 2.1](/docs/mcp/oauth)); if you embed a key in the URL instead, make
+  sure the deployment accepts a key as a query parameter.
+- **No tools appear**: verify the connector is toggled on for the current
+  conversation and that the server exposes tools (see [Tools](/docs/mcp/tools)
+  and [Debugging](/docs/mcp/debugging)).

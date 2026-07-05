@@ -25,6 +25,12 @@ for zero-provisioning connections from Claude and other clients), a Bearer JWT
 (WorkOS), or an API key via `X-API-KEY`, same as the REST API. See
 [Deployment](/docs/deployment) for hosting.
 
+<Callout type="info">
+Connecting a **cloud** client that reaches the server from the vendor's cloud
+(Claude on the web / Cowork, ChatGPT on the web)? Those use a URL-only custom
+connector. See [Connect Clients](/docs/connect-clients).
+</Callout>
+
 ## Local (stdio, legacy)
 
 The stdio transport is supported for local Claude Desktop / dev use only.
