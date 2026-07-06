@@ -1,5 +1,7 @@
 """FastAPI application - CORS, session middleware, route registration."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
@@ -24,7 +26,9 @@ from api_server.routes import (
     stream,
     well_known,
 )
+from api_server.routes.google import webhooks as google_webhooks
 from api_server.routes.payments import checkout, metering, subscription, webhooks
+from api_server.runner import runner_lifespan
 from common import global_config
 from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
@@ -59,12 +63,20 @@ _API_DESCRIPTION = (
     "until `has_more` is false."
 )
 
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Compose the FastMCP session manager with the periodic webhook runner."""
+    async with mcp_lifespan(app), runner_lifespan(app):
+        yield
+
+
 app = FastAPI(
     title="mymcp-api",
     version=_APP_VERSION,
     description=_API_DESCRIPTION,
     servers=_openapi_servers,
-    lifespan=mcp_lifespan,
+    lifespan=_lifespan,
 )
 
 # --- Middleware (last-added = outermost in Starlette) ---------------------
@@ -107,6 +119,7 @@ app.include_router(checkout.router)
 app.include_router(metering.router)
 app.include_router(subscription.router)
 app.include_router(webhooks.router)
+app.include_router(google_webhooks.router)
 app.include_router(agentic_payments.router)
 
 # --- MCP server (streamable HTTP) -----------------------------------------

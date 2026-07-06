@@ -460,9 +460,7 @@ def _split_mime(mime_type: str) -> tuple[str, str]:
     return maintype, subtype
 
 
-def _set_message_body(
-    msg: EmailMessage, body: str, body_html: str | None
-) -> MIMEPart:
+def _set_message_body(msg: EmailMessage, body: str, body_html: str | None) -> MIMEPart:
     """Set the body and return the part inline images should relate to.
 
     For plain+HTML the host is the HTML alternative subpart (so inline images
