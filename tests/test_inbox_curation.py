@@ -14,7 +14,9 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from cryptography.fernet import Fernet
+from googleapiclient.errors import HttpError
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -42,6 +44,7 @@ from models.gmail import GmailDisconnectInput
 from services.curation_ledger import (
     list_records,
     mark_state,
+    mark_state_best_effort,
     purge_user,
     upsert_judgments,
 )
@@ -49,9 +52,14 @@ from services.gmail_drafts_svc import GmailReplyInput, gmail_reply_to_thread
 from services.gmail_messages_svc import (
     GmailThreadModifyInput,
     gmail_archive_thread,
+    gmail_mark_thread_done,
 )
 from services.gmail_svc import gmail_disconnect
 from services.inbox_curation_svc import (
+    _changed_thread_ids,
+    _list_thread_stubs,
+    _mailbox_history_id,
+    _search_thread_ids,
     inbox_get_curation,
     inbox_save_curation,
     inbox_search,
@@ -118,7 +126,6 @@ class TestCurationContracts(TestTemplate):
         rec = CurationRecord(thread_id="t1")
         assert rec.suggested_action == SuggestedAction.none
         assert rec.ledger_status == LedgerStatus.curated
-        assert rec.provisional is False
 
     def test_get_result_coverage_shape(self):
         res = GetCurationResult(
@@ -316,6 +323,38 @@ class TestGetCuration(TestTemplate):
             assert res.records[0].ledger_status == LedgerStatus.stale
             assert res.coverage.uncurated == 1  # only t2 counts against inbox
 
+    def test_check_freshness_false_treats_all_as_curated(self):
+        with _patch_db(), _patch_fernet():
+            upsert_judgments("alice", [_judgment("t1")], history_ids={"t1": "100"})
+            # historyId advanced, but the freshness check is disabled.
+            res = self._run_get(
+                [_stub("t1", "999")],
+                GetCurationInput(user_id="alice", check_freshness=False),
+            )
+            assert res.coverage.stale == 0
+            assert res.coverage.curated == 1
+            assert res.records[0].ledger_status == LedgerStatus.curated
+
+    def test_bucket_filter_scopes_records_not_coverage(self):
+        with _patch_db(), _patch_fernet():
+            upsert_judgments(
+                "alice",
+                [
+                    _judgment("t1", bucket=CurationBucket.needs_reply),
+                    _judgment("t2", bucket=CurationBucket.fyi),
+                ],
+                history_ids={"t1": "1", "t2": "2"},
+            )
+            res = self._run_get(
+                [_stub("t1", "1"), _stub("t2", "2")],
+                GetCurationInput(user_id="alice", bucket=CurationBucket.fyi),
+            )
+            # Records are filtered to the requested bucket...
+            assert [r.thread_id for r in res.records] == ["t2"]
+            # ...but coverage still reflects the whole inbox vs the whole ledger.
+            assert res.coverage.curated == 2
+            assert res.coverage.uncurated == 0
+
 
 # ---------------------------------------------------------------------------
 # US-005 + US-008: inbox_search annotation + provisional prior
@@ -444,11 +483,35 @@ class TestActionsUpdateLedger(TestTemplate):
             assert recs[0].state == CurationState.acted
             assert recs[0].draft_id == "draft-9"
 
+    def test_mark_done_marks_dismissed(self):
+        with _patch_db(), _patch_fernet():
+            upsert_judgments("alice", [_judgment("t1")], history_ids={"t1": "100"})
+            svc = MagicMock()
+            svc.users().labels().list().execute.return_value = {
+                "labels": [{"id": "L", "name": "MCP/Done"}]
+            }
+            with patch(
+                "services.gmail_messages_svc._get_gmail_client", return_value=svc
+            ):
+                gmail_mark_thread_done(
+                    GmailThreadModifyInput(user_id="alice", thread_id="t1")
+                )
+            assert list_records("alice")[0].state == CurationState.dismissed
+
     def test_mark_state_noop_for_uncurated(self):
         with _patch_db(), _patch_fernet():
             # No ledger row for t-missing -> mark_state returns False, no row made.
             assert mark_state("alice", "t-missing", CurationState.acted) is False
             assert list_records("alice") == []
+
+    def test_mark_state_best_effort_swallows_db_error(self):
+        # A DB failure during a ledger update must not propagate out of an action
+        # tool that already succeeded against Gmail.
+        with patch(
+            "services.curation_ledger.mark_state",
+            side_effect=SQLAlchemyError("db down"),
+        ):
+            mark_state_best_effort("alice", "t1", CurationState.acted)  # no raise
 
 
 # ---------------------------------------------------------------------------
@@ -486,3 +549,166 @@ class TestPurge(TestTemplate):
             with patch("services.gmail_svc.httpx.post"):
                 gmail_disconnect(GmailDisconnectInput(user_id="alice"))
             assert list_records("alice") == []
+
+
+# ---------------------------------------------------------------------------
+# Gmail-shape helpers: exercise the real response parsing (no helper mocking).
+# These feed canned Gmail API payloads through a mocked client, the same
+# pattern as tests/test_gmail_services.py, so a wrong field name / pagination
+# bug would actually fail.
+# ---------------------------------------------------------------------------
+
+
+class TestGmailShapeHelpers(TestTemplate):
+    def test_list_thread_stubs_paginates(self):
+        svc = MagicMock()
+        svc.users().threads().list().execute.side_effect = [
+            {
+                "threads": [
+                    {"id": "a", "historyId": "1"},
+                    {"id": "b", "historyId": "2"},
+                ],
+                "nextPageToken": "p2",
+            },
+            {"threads": [{"id": "c", "historyId": "3"}]},
+        ]
+        stubs = _list_thread_stubs(svc, "in:inbox", cap=100)
+        assert [s["id"] for s in stubs] == ["a", "b", "c"]
+
+    def test_list_thread_stubs_respects_cap(self):
+        svc = MagicMock()
+        svc.users().threads().list().execute.side_effect = [
+            {
+                "threads": [
+                    {"id": "a", "historyId": "1"},
+                    {"id": "b", "historyId": "2"},
+                ],
+                "nextPageToken": "p2",
+            },
+            {"threads": [{"id": "c", "historyId": "3"}]},  # must NOT be fetched
+        ]
+        stubs = _list_thread_stubs(svc, "in:inbox", cap=2)
+        assert [s["id"] for s in stubs] == ["a", "b"]
+
+    def test_search_thread_ids_parses_and_scopes_query(self):
+        svc = MagicMock()
+        svc.users().threads().list().execute.return_value = {
+            "threads": [{"id": "x"}, {"id": "y"}, {"no_id": True}]
+        }
+        ids = _search_thread_ids(svc, "from:vip@x.com", 10)
+        assert ids == ["x", "y"]
+        # Query is scoped to the triageable-inbox base AND the caller filter.
+        q = svc.users().threads().list.call_args.kwargs["q"]
+        assert "in:inbox" in q
+        assert "from:vip@x.com" in q
+
+    def test_mailbox_history_id_success_and_failure(self):
+        svc = MagicMock()
+        svc.users().getProfile().execute.return_value = {"historyId": 500}
+        assert _mailbox_history_id(svc) == "500"
+
+        broken = MagicMock()
+        broken.users().getProfile().execute.side_effect = RuntimeError("boom")
+        assert _mailbox_history_id(broken) is None  # best-effort, never raises
+
+    def test_changed_thread_ids_dedupes_across_pages(self):
+        svc = MagicMock()
+        svc.users().history().list().execute.side_effect = [
+            {
+                "historyId": "900",
+                "history": [
+                    {
+                        "messagesAdded": [
+                            {"message": {"threadId": "t1"}},
+                            {"message": {"threadId": "t2"}},
+                        ]
+                    }
+                ],
+                "nextPageToken": "pg2",
+            },
+            {
+                "historyId": "950",
+                "history": [
+                    {
+                        "messagesAdded": [
+                            {"message": {"threadId": "t2"}},  # dup across pages
+                            {"message": {"threadId": "t3"}},
+                        ]
+                    }
+                ],
+            },
+        ]
+        ids, latest = _changed_thread_ids(svc, "800", 10)
+        assert ids == ["t1", "t2", "t3"]  # order preserved, deduped
+        assert latest == "950"
+
+    def test_changed_thread_ids_404_falls_back(self):
+        svc = MagicMock()
+        svc.users().history().list().execute.side_effect = HttpError(
+            resp=MagicMock(status=404, reason="Not Found"), content=b""
+        )
+        # historyId too old -> (None, None) so the caller runs a normal query.
+        assert _changed_thread_ids(svc, "1", 10) == (None, None)
+
+
+class TestInboxSearchIncremental(TestTemplate):
+    """Drive inbox_search's since_history_id path with the REAL
+    _changed_thread_ids (only the client + batch fetch are mocked)."""
+
+    def _fetched(self, tid: str, hist: str) -> dict:
+        return {
+            "id": tid,
+            "historyId": hist,
+            "messages": [
+                {
+                    "id": f"m-{tid}",
+                    "labelIds": ["INBOX"],
+                    "internalDate": "1700000000000",
+                    "snippet": f"snippet {tid}",
+                    "payload": {
+                        "headers": [
+                            {"name": "From", "value": "a@x.com"},
+                            {"name": "Subject", "value": f"subj {tid}"},
+                        ]
+                    },
+                }
+            ],
+        }
+
+    def test_since_history_id_uses_history_delta(self):
+        with _patch_db(), _patch_fernet():
+            svc = MagicMock()
+            svc.users().history().list().execute.return_value = {
+                "historyId": "999",
+                "history": [
+                    {
+                        "messagesAdded": [
+                            {"message": {"threadId": "t1"}},
+                            {"message": {"threadId": "t2"}},
+                        ]
+                    }
+                ],
+            }
+            fetched = {
+                "t1": self._fetched("t1", "999"),
+                "t2": self._fetched("t2", "999"),
+            }
+            with (
+                patch(
+                    "services.inbox_curation_svc._get_gmail_client", return_value=svc
+                ),
+                patch(
+                    "services.inbox_curation_svc._build_label_lookups",
+                    return_value=({}, {}),
+                ),
+                patch(
+                    "services.inbox_curation_svc._batch_get_threads",
+                    return_value=fetched,
+                ),
+            ):
+                res = inbox_search(
+                    InboxSearchInput(user_id="alice", since_history_id="800")
+                )
+            assert {i.thread_id for i in res.items} == {"t1", "t2"}
+            # Watermark comes from history.list, not a getProfile fallback.
+            assert res.current_history_id == "999"

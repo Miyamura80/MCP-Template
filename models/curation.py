@@ -83,10 +83,6 @@ class CurationRecord(BaseModel):
     updated_at: datetime | None = None
     # Computed on read, not persisted:
     ledger_status: LedgerStatus = LedgerStatus.curated
-    provisional: bool = Field(
-        default=False,
-        description="True when importance is a heuristic prior, not an LLM judgment.",
-    )
 
 
 class CoverageSummary(BaseModel):

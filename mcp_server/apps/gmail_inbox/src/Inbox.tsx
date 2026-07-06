@@ -96,7 +96,6 @@ export type CurationRecord = {
   suggested_action?: string;
   draft_id?: string | null;
   ledger_status?: string;
-  provisional?: boolean;
 };
 
 export type GetCurationResult = { records: CurationRecord[]; coverage?: Coverage };
@@ -118,8 +117,6 @@ export function curationToThreads(records: CurationRecord[]): CuratedThread[] {
     if (chip) labels.push(chip);
     if (r.ledger_status === "stale")
       labels.push({ name: "Stale", bg_color: "#fef7e0", text_color: "#b06000" });
-    if (r.provisional)
-      labels.push({ name: "Prior", bg_color: "#f1f3f4", text_color: "#5f6368" });
     const action =
       r.suggested_action && r.suggested_action !== "none"
         ? r.suggested_action.replace(/_/g, " ")
