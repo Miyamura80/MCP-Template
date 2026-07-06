@@ -6,8 +6,8 @@ state) plus a Gmail ``historyId`` freshness watermark. Summaries and reasoning
 are encrypted at rest with a ``key_id`` mirroring ``google_tokens`` so keys can
 rotate. See ``db/models/thread_curation.py``.
 
-Revision ID: 009
-Revises: 008
+Revision ID: 010
+Revises: 009
 Create Date: 2026-07-05
 """
 
@@ -16,8 +16,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "009"
-down_revision: str | None = "008"
+revision: str = "010"
+down_revision: str | None = "009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
