@@ -69,7 +69,7 @@ dependencies = [
     "google-auth>=2.53.0",
     "psycopg2-binary>=2.9.12",
     "rank-bm25>=0.2.2",
-    "sse-starlette>=3.3.3",
+    "sse-starlette>=3.4.5",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
