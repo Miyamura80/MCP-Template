@@ -280,6 +280,21 @@ class AskConfig(BaseModel):
     rate_limit_per_minute: int = 20
 
 
+class DemoConfig(BaseModel):
+    """No-auth ``/mcp-demo`` mount configuration.
+
+    A public, unauthenticated MCP endpoint serving the curated Gmail tool
+    surface against canned fixture data, so a visitor can paste one URL into
+    any MCP client and get a working tool call without OAuth. Ships inert:
+    when disabled the mount answers 404.
+    """
+
+    enabled: bool = False
+    # Per-client-IP sliding-window request budget. The demo mount bypasses the
+    # authenticated-quota system entirely, so this is its only throttle.
+    rate_limit_per_minute: int = 60
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 

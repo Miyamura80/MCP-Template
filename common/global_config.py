@@ -21,6 +21,7 @@ from .config_models import (
     BrandingConfig,
     CliConfig,
     DefaultLlm,
+    DemoConfig,
     ExampleParent,
     FeaturesConfig,
     GmailConfig,
@@ -197,6 +198,7 @@ class Config(BaseSettings):
         default_factory=lambda: AgenticPaymentsConfig()
     )
     ask: AskConfig = Field(default_factory=lambda: AskConfig())
+    demo: DemoConfig = Field(default_factory=lambda: DemoConfig())
     web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
     gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
 

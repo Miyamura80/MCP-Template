@@ -21,6 +21,12 @@ export const site = {
   // TODO: the deployed streamable-HTTP MCP endpoint users add to their client.
   // This is the URL you paste / one-click-install into Claude, Cursor, etc.
   mcpUrl: "https://mcp.gmailmcp.com/mcp",
+  // The no-auth demo endpoint: same tools against a canned inbox, sends
+  // simulated, zero signup. Served by the same deployment when the server's
+  // `demo.enabled` config is on (see mcp_server/demo/). The fastest possible
+  // first tool call - the ConnectWidget offers it as the default "Try the
+  // demo" mode.
+  mcpDemoUrl: "https://mcp.gmailmcp.com/mcp-demo",
   // TODO: the deployed HTTP API base URL (same backend, vanity host for REST).
   apiUrl: "https://api.gmailmcp.com",
   // Server name used in client configs / deep links (no spaces).

@@ -200,13 +200,20 @@ export const compatibility: { heading: string; clients: Client[] } = {
  * Client picker for the "Add it to your client" step (see ConnectWidget.astro).
  *
  * method "deeplink" → a real one-click install URL is built at build time from
- *   site.mcpUrl + site.serverName (Cursor/VS Code/Goose support this).
+ *   the endpoint URL + site.serverName (Cursor/VS Code/Goose support this).
  * method "manual" → no deep link exists (Claude, ChatGPT), so we show the
  *   server URL to copy plus the click-path to paste it. `steps` are those.
  *
+ * The widget has two endpoint modes, toggled above the URL box:
+ *   demo → site.mcpDemoUrl - no signup, canned inbox, simulated sends. The
+ *          default, because it minimizes time-to-first-tool-call.
+ *   live → site.mcpUrl - the real server (OAuth + your Gmail).
+ * Deep links are built for both at build time; the toggle swaps them.
+ *
  * Deep-link formats verified against official docs (cursor.com, code.visualstudio.com,
  * goose docs). Claude/ChatGPT have no install URL scheme - paste-the-URL is the
- * only supported flow.
+ * only supported flow. Claude/ChatGPT are listed first: they are the highest-
+ * traffic clients, and the paste-a-URL flow is identical for both modes.
  */
 export interface InstallTarget {
   id: "claude" | "chatgpt" | "cursor" | "vscode" | "goose";
@@ -219,38 +226,36 @@ export interface InstallTarget {
   note?: string;
 }
 
+export type ConnectMode = "demo" | "live";
+
 export const connect: {
   mcpUrl: string;
+  demoUrl: string;
   serverName: string;
+  /** Endpoint mode preselected in the widget. */
+  defaultMode: ConnectMode;
+  /** Copy for the mode toggle + the one-line explainer under the URL. */
+  modes: Record<ConnectMode, { label: string; note: string }>;
   /** id of the target selected by default in the dropdown. */
   defaultId: InstallTarget["id"];
   targets: InstallTarget[];
 } = {
   mcpUrl: site.mcpUrl,
+  demoUrl: site.mcpDemoUrl,
   serverName: site.serverName,
-  defaultId: "cursor",
+  defaultMode: "demo",
+  modes: {
+    demo: {
+      label: "Try the demo",
+      note: "No signup. A fictional inbox with the full interactive UI - sends are simulated, nothing real is touched. Switch to Live to connect your own Gmail.",
+    },
+    live: {
+      label: "Live",
+      note: "The production server: sign-in via OAuth, then connect your own Gmail.",
+    },
+  },
+  defaultId: "claude",
   targets: [
-    {
-      id: "cursor",
-      name: "Cursor",
-      logo: "/logos/cursor.svg",
-      method: "deeplink",
-      note: "Opens Cursor and adds the server. Not working? Copy the URL above and add it under Settings → MCP.",
-    },
-    {
-      id: "vscode",
-      name: "VS Code",
-      logo: "/logos/vscode.svg",
-      method: "deeplink",
-      note: "Opens VS Code and adds the server. Requires the GitHub Copilot / MCP support.",
-    },
-    {
-      id: "goose",
-      name: "Goose",
-      logo: "/logos/goose.svg",
-      method: "deeplink",
-      note: "Opens Goose and adds the extension over streamable HTTP.",
-    },
     {
       id: "claude",
       name: "Claude",
@@ -272,6 +277,27 @@ export const connect: {
         "Click Create",
         "Paste the URL above, then click Create",
       ],
+    },
+    {
+      id: "cursor",
+      name: "Cursor",
+      logo: "/logos/cursor.svg",
+      method: "deeplink",
+      note: "Opens Cursor and adds the server. Not working? Copy the URL above and add it under Settings → MCP.",
+    },
+    {
+      id: "vscode",
+      name: "VS Code",
+      logo: "/logos/vscode.svg",
+      method: "deeplink",
+      note: "Opens VS Code and adds the server. Requires the GitHub Copilot / MCP support.",
+    },
+    {
+      id: "goose",
+      name: "Goose",
+      logo: "/logos/goose.svg",
+      method: "deeplink",
+      note: "Opens Goose and adds the extension over streamable HTTP.",
     },
   ],
 };

@@ -1,41 +1,92 @@
 ---
 /*
  * Interactive client picker for the "Add it to your client" step.
+ *
+ * Two endpoint modes toggled at the top - "Try the demo" (no-auth fixture
+ * inbox, the default: fastest first tool call) and "Live" (the OAuth
+ * production server). The toggle swaps the copyable URL, the explainer note,
+ * and every deep link; both variants are built here at build time so no
+ * client JS has to know the encoding rules.
+ *
  * A dropdown selects the target app; the panel below shows either a one-click
  * install deep link (Cursor / VS Code / Goose) or the copy-the-URL + paste
- * steps (Claude / ChatGPT). Deep links are built here at build time so no
- * client JS has to know the encoding rules.
+ * steps (Claude / ChatGPT).
  */
 import { connect } from "../config/landing";
 import { deepLink } from "../utils/deeplink";
 
-const { mcpUrl, serverName, defaultId, targets } = connect;
+const { mcpUrl, demoUrl, serverName, defaultMode, modes, defaultId, targets } = connect;
 
-const enriched = targets.map((t) => ({ ...t, href: deepLink(t.id, mcpUrl, serverName) }));
+const enriched = targets.map((t) => ({
+  ...t,
+  hrefLive: deepLink(t.id, mcpUrl, serverName),
+  // Distinct server name so installing both never collides in client config.
+  hrefDemo: deepLink(t.id, demoUrl, `${serverName}-demo`),
+}));
 const selected = enriched.find((t) => t.id === defaultId) ?? enriched[0];
+const urls = { demo: demoUrl, live: mcpUrl } as const;
+const modeIds = ["demo", "live"] as const;
 ---
 
 <div
   class="w-full border-2 border-accent bg-surface-1 p-4 text-left shadow-2xl shadow-black/40"
   data-connect
+  data-mode={defaultMode}
 >
+  <!-- Endpoint mode: demo (no signup) vs live (OAuth) -->
+  <div class="flex items-center gap-2" role="group" aria-label="Endpoint">
+    {
+      modeIds.map((m) => (
+        <button
+          type="button"
+          class:list={[
+            "border px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest transition",
+            m === defaultMode
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-border text-fg-muted hover:border-accent/60 hover:text-fg",
+          ]}
+          data-mode-btn={m}
+          aria-pressed={m === defaultMode ? "true" : "false"}
+        >
+          {modes[m].label}
+        </button>
+      ))
+    }
+  </div>
+
   <!-- Shared: the MCP server URL, copyable -->
-  <label class="font-mono text-[11px] uppercase tracking-widest text-fg-subtle">
+  <label class="mt-4 block font-mono text-[11px] uppercase tracking-widest text-fg-subtle">
     MCP server URL
   </label>
   <div class="mt-1.5 flex items-stretch border border-border bg-bg">
-    <code class="flex-1 truncate px-3 py-2.5 font-mono text-sm text-accent" title={mcpUrl}>
-      {mcpUrl}
+    <code
+      class="flex-1 truncate px-3 py-2.5 font-mono text-sm text-accent"
+      title={urls[defaultMode]}
+      data-url-display
+    >
+      {urls[defaultMode]}
     </code>
     <button
       type="button"
       class="copy-btn grid shrink-0 place-items-center border-l border-border px-3 text-fg-muted transition hover:bg-surface-2 hover:text-accent"
-      data-code={mcpUrl}
+      data-code={urls[defaultMode]}
+      data-url-copy
       aria-label="Copy"
     >
       <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
     </button>
   </div>
+  {
+    modeIds.map((m) => (
+      <p
+        class="mt-2 text-xs leading-relaxed text-fg-subtle"
+        data-mode-note={m}
+        hidden={m !== defaultMode}
+      >
+        {modes[m].note}
+      </p>
+    ))
+  }
 
   <!-- App picker (custom dropdown so we can show logos) -->
   <div class="relative mt-4" data-dropdown>
@@ -90,10 +141,13 @@ const selected = enriched.find((t) => t.id === defaultId) ?? enriched[0];
     {
       enriched.map((t) => (
         <div data-panel={t.id} hidden={t.id !== selected.id}>
-          {t.method === "deeplink" && t.href ? (
+          {t.method === "deeplink" && t.hrefLive && t.hrefDemo ? (
             <>
               <a
-                href={t.href}
+                href={defaultMode === "demo" ? t.hrefDemo : t.hrefLive}
+                data-deeplink
+                data-href-live={t.hrefLive}
+                data-href-demo={t.hrefDemo}
                 class="flex w-full items-center justify-center gap-2.5 bg-accent px-4 py-3 font-semibold text-accent-fg transition hover:bg-accent-strong"
               >
                 <span
@@ -124,6 +178,8 @@ const selected = enriched.find((t) => t.id === defaultId) ?? enriched[0];
 </div>
 
 <script>
+  import { connectUrls } from "../utils/connect-urls";
+
   function initConnect() {
     document.querySelectorAll<HTMLElement>("[data-connect]").forEach((root) => {
       // Idempotent: skip roots already wired so a repeat call (e.g.
@@ -138,6 +194,40 @@ const selected = enriched.find((t) => t.id === defaultId) ?? enriched[0];
       const selName = root.querySelector<HTMLElement>("[data-selected-name]");
       if (!dd || !toggle || !menu || !selLogo || !selName) return;
 
+      // --- endpoint mode toggle (demo / live) ---------------------------
+      const urlDisplay = root.querySelector<HTMLElement>("[data-url-display]");
+      const urlCopy = root.querySelector<HTMLButtonElement>("[data-url-copy]");
+      const modeButtons = root.querySelectorAll<HTMLButtonElement>("[data-mode-btn]");
+      const activeCls = ["border-accent", "bg-accent/10", "text-accent"];
+      const idleCls = ["border-border", "text-fg-muted", "hover:border-accent/60", "hover:text-fg"];
+
+      const setMode = (mode: "demo" | "live") => {
+        root.dataset.mode = mode;
+        const url = connectUrls[mode];
+        if (urlDisplay) {
+          urlDisplay.textContent = url;
+          urlDisplay.setAttribute("title", url);
+        }
+        if (urlCopy) urlCopy.dataset.code = url;
+        modeButtons.forEach((b) => {
+          const on = b.dataset.modeBtn === mode;
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+          b.classList.remove(...(on ? idleCls : activeCls));
+          b.classList.add(...(on ? activeCls : idleCls));
+        });
+        root.querySelectorAll<HTMLElement>("[data-mode-note]").forEach((n) => {
+          n.hidden = n.dataset.modeNote !== mode;
+        });
+        root.querySelectorAll<HTMLAnchorElement>("[data-deeplink]").forEach((a) => {
+          const href = mode === "demo" ? a.dataset.hrefDemo : a.dataset.hrefLive;
+          if (href) a.setAttribute("href", href);
+        });
+      };
+      modeButtons.forEach((b) => {
+        b.addEventListener("click", () => setMode(b.dataset.modeBtn as "demo" | "live"));
+      });
+
+      // --- client dropdown ----------------------------------------------
       const close = () => {
         menu.classList.add("hidden");
         toggle.setAttribute("aria-expanded", "false");

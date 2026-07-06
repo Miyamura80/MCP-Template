@@ -31,6 +31,7 @@ from api_server.routes.google import webhooks as google_webhooks
 from api_server.routes.payments import checkout, metering, subscription, webhooks
 from api_server.runner import runner_lifespan
 from common import global_config
+from mcp_server.demo.server import DemoMountMiddleware, demo_lifespan
 from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
 from services.gmail_svc import GmailAttachmentTooLargeError
@@ -67,8 +68,8 @@ _API_DESCRIPTION = (
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Compose the FastMCP session manager with the periodic webhook runner."""
-    async with mcp_lifespan(app), runner_lifespan(app):
+    """Compose the FastMCP session managers with the periodic webhook runner."""
+    async with mcp_lifespan(app), demo_lifespan(app), runner_lifespan(app):
         yield
 
 
@@ -89,6 +90,11 @@ app.add_middleware(RequestIdMiddleware)  # type: ignore[arg-type]
 # Pure ASGI middleware that only acts on /mcp; sits outside RequestId/RateLimit
 # so authenticated SSE streams are not buffered through BaseHTTPMiddleware.
 app.add_middleware(MCPAuthMiddleware)  # type: ignore[arg-type]
+
+# Outermost: serves the no-auth /mcp-demo mount (gated by demo.enabled, per-IP
+# rate limited) and keeps its SSE streams clear of the buffering middleware
+# stack. See mcp_server/demo/server.py.
+app.add_middleware(DemoMountMiddleware)  # type: ignore[arg-type]
 
 app.add_middleware(
     SessionMiddleware,  # type: ignore[arg-type]
@@ -126,6 +132,7 @@ app.include_router(ask.router)
 
 # --- MCP server (streamable HTTP) -----------------------------------------
 # Mounts FastMCP at /mcp so CLI/API/MCP share one process, port, and middleware.
+# (The no-auth /mcp-demo surface is served by DemoMountMiddleware above.)
 mount_mcp_server(app)
 
 

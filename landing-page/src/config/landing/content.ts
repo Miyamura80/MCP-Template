@@ -179,6 +179,10 @@ export const faq: { heading: string; items: FaqItem[] } = {
       a: "The MCP mount supports OAuth 2.1 as a resource server, sharing auth and CORS with the HTTP API. You can also run it unauthenticated for local development.",
     },
     {
+      q: "Can I try it without connecting my Gmail?",
+      a: `Yes. Paste the demo URL (${site.mcpDemoUrl}) into any MCP client - no signup, no OAuth. You get the same tools and the same interactive inbox/composer UI against a small fictional inbox; sends are simulated so nothing real is ever touched. Switch to the live URL when you want to connect your own account.`,
+    },
+    {
       q: "Do I need to install anything to use it?",
       a: "No. Because the server runs over streamable HTTP, connecting is just pasting its URL into your agent client. No local install, runtime, or download required. (Self-hosting the server is a separate, optional step.)",
     },

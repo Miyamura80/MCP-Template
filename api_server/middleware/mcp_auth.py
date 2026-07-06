@@ -28,7 +28,15 @@ from common import global_config
 from db.engine import use_db_session
 from src.utils.current_user import reset_current_user, set_current_user
 
-_MCP_PATH_PREFIX = "/mcp"
+
+def _is_mcp_path(path: str) -> bool:
+    """Match /mcp and /mcp/* only.
+
+    Deliberately NOT a bare ``startswith("/mcp")``: that would also capture
+    ``/mcp-demo``, the unauthenticated demo mount, whose whole point is to
+    skip this middleware (it has its own gate - see mcp_server/demo/server.py).
+    """
+    return path == "/mcp" or path.startswith("/mcp/")
 
 
 class MCPAuthMiddleware:
@@ -38,7 +46,7 @@ class MCPAuthMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not scope["path"].startswith(_MCP_PATH_PREFIX):
+        if scope["type"] != "http" or not _is_mcp_path(scope["path"]):
             await self.app(scope, receive, send)
             return
 

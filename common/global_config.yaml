@@ -30,6 +30,15 @@ ask:
   top_k: 5
   rate_limit_per_minute: 20
 
+# No-auth /mcp-demo mount: the curated Gmail tool surface served against
+# canned fixture data, so anyone can paste one URL into an MCP client and get
+# a working tool call with zero signup. Ships inert: when disabled the mount
+# answers 404. Enable in production via production_config.yaml or
+# DEMO__ENABLED=true.
+demo:
+  enabled: false
+  rate_limit_per_minute: 60
+
 ########################################################
 # Debugging
 ########################################################
