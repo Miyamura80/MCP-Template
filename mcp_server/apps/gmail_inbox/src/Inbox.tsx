@@ -361,7 +361,12 @@ export function Inbox({ mcpApp }: InboxProps) {
         arguments: {},
       });
       const data = extractStructuredContent<CurateResult>(raw);
-      if (data && Array.isArray(data.threads)) setThreads(data.threads);
+      if (data && Array.isArray(data.threads)) {
+        setThreads(data.threads);
+        // Deterministic refresh returns no ledger coverage; clear any stale
+        // banner left over from a prior inbox_get_curation render.
+        setCoverage(null);
+      }
     } catch (err) {
       setError(errMsg(err));
     }

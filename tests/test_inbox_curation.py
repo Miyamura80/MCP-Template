@@ -41,6 +41,7 @@ from models.curation import (
     ThreadJudgment,
 )
 from models.gmail import GmailDisconnectInput
+from services import discover_services, get_registry
 from services.curation_ledger import (
     list_records,
     mark_state,
@@ -119,6 +120,23 @@ def _stub(thread_id: str, history_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # US-003: contracts validate
 # ---------------------------------------------------------------------------
+
+
+class TestServiceRegistration(TestTemplate):
+    """Guard against the @service decorator landing on the wrong function - e.g.
+    a refactor inserting a helper between the decorator and the service it was
+    meant to decorate. The registered ``func`` must BE the service (callable
+    with the input model), not a helper with a different signature."""
+
+    def test_registered_funcs_match_their_services(self):
+        discover_services()
+        by_name = {e.name: e for e in get_registry()}
+        assert by_name["inbox_get_curation"].func is inbox_get_curation
+        assert by_name["inbox_search"].func is inbox_search
+        assert by_name["inbox_save_curation"].func is inbox_save_curation
+        # Input models are wired to the matching service, too.
+        assert by_name["inbox_search"].input_model is InboxSearchInput
+        assert by_name["inbox_get_curation"].input_model is GetCurationInput
 
 
 class TestCurationContracts(TestTemplate):
@@ -262,6 +280,40 @@ class TestSaveCuration(TestTemplate):
                 )
             assert res.saved == 0
             get_client.assert_not_called()  # no Gmail call for an empty batch
+
+    def test_recurate_preserves_watermark_when_history_missing(self):
+        with _patch_db(), _patch_fernet():
+            svc = MagicMock()
+            with (
+                patch(
+                    "services.inbox_curation_svc._get_gmail_client", return_value=svc
+                ),
+                patch(
+                    "services.inbox_curation_svc._batch_get_threads",
+                    return_value={"t1": {"id": "t1", "historyId": "100"}},
+                ),
+            ):
+                inbox_save_curation(
+                    SaveCurationInput(user_id="alice", judgments=[_judgment("t1")])
+                )
+            # Re-curate, but this time the batch fetch misses t1 (empty map).
+            with (
+                patch(
+                    "services.inbox_curation_svc._get_gmail_client", return_value=svc
+                ),
+                patch(
+                    "services.inbox_curation_svc._batch_get_threads", return_value={}
+                ),
+            ):
+                inbox_save_curation(
+                    SaveCurationInput(
+                        user_id="alice",
+                        judgments=[_judgment("t1", summary="updated")],
+                    )
+                )
+            rec = list_records("alice")[0]
+            assert rec.summary == "updated"  # the re-curation applied...
+            assert rec.curated_history_id == "100"  # ...but the watermark held
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +602,30 @@ class TestPurge(TestTemplate):
                 gmail_disconnect(GmailDisconnectInput(user_id="alice"))
             assert list_records("alice") == []
 
+    def test_disconnect_survives_purge_failure(self):
+        # The token is already revoked+committed before the purge runs, so a
+        # purge DB error must not turn a successful disconnect into an error.
+        with _patch_db() as factory, _patch_fernet():
+            s = factory()
+            s.add(
+                GoogleToken(
+                    user_id="alice",
+                    email="alice@x.com",
+                    refresh_token_enc=b"RT",
+                    key_id="plaintext",
+                )
+            )
+            s.commit()
+            with (
+                patch("services.gmail_svc.httpx.post"),
+                patch(
+                    "services.curation_ledger.purge_user",
+                    side_effect=SQLAlchemyError("db down"),
+                ),
+            ):
+                result = gmail_disconnect(GmailDisconnectInput(user_id="alice"))
+            assert result.revoked is True  # disconnect still reported success
+
 
 # ---------------------------------------------------------------------------
 # Gmail-shape helpers: exercise the real response parsing (no helper mocking).
@@ -611,17 +687,18 @@ class TestGmailShapeHelpers(TestTemplate):
         broken.users().getProfile().execute.side_effect = RuntimeError("boom")
         assert _mailbox_history_id(broken) is None  # best-effort, never raises
 
-    def test_changed_thread_ids_dedupes_across_pages(self):
+    def test_changed_thread_ids_dedupes_and_captures_all_change_types(self):
+        # Each history record's ``messages`` lists every touched message,
+        # including label-only changes (t3 here has no new message) - so the
+        # delta stays aligned with historyId freshness.
         svc = MagicMock()
         svc.users().history().list().execute.side_effect = [
             {
                 "historyId": "900",
                 "history": [
                     {
-                        "messagesAdded": [
-                            {"message": {"threadId": "t1"}},
-                            {"message": {"threadId": "t2"}},
-                        ]
+                        "messages": [{"threadId": "t1"}, {"threadId": "t2"}],
+                        "messagesAdded": [{"message": {"threadId": "t1"}}],
                     }
                 ],
                 "nextPageToken": "pg2",
@@ -630,10 +707,11 @@ class TestGmailShapeHelpers(TestTemplate):
                 "historyId": "950",
                 "history": [
                     {
-                        "messagesAdded": [
-                            {"message": {"threadId": "t2"}},  # dup across pages
-                            {"message": {"threadId": "t3"}},
-                        ]
+                        # Label-only change: present in `messages`, no messagesAdded.
+                        "messages": [{"threadId": "t2"}, {"threadId": "t3"}],
+                        "labelsAdded": [
+                            {"message": {"threadId": "t3"}, "labelIds": ["UNREAD"]}
+                        ],
                     }
                 ],
             },
@@ -641,6 +719,8 @@ class TestGmailShapeHelpers(TestTemplate):
         ids, latest = _changed_thread_ids(svc, "800", 10)
         assert ids == ["t1", "t2", "t3"]  # order preserved, deduped
         assert latest == "950"
+        # No historyTypes filter is sent (all change types are returned).
+        assert "historyTypes" not in svc.users().history().list.call_args.kwargs
 
     def test_changed_thread_ids_404_falls_back(self):
         svc = MagicMock()
@@ -680,14 +760,7 @@ class TestInboxSearchIncremental(TestTemplate):
             svc = MagicMock()
             svc.users().history().list().execute.return_value = {
                 "historyId": "999",
-                "history": [
-                    {
-                        "messagesAdded": [
-                            {"message": {"threadId": "t1"}},
-                            {"message": {"threadId": "t2"}},
-                        ]
-                    }
-                ],
+                "history": [{"messages": [{"threadId": "t1"}, {"threadId": "t2"}]}],
             }
             fetched = {
                 "t1": self._fetched("t1", "999"),

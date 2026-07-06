@@ -55,12 +55,28 @@ def test_migration_009_creates_thread_curation_matching_orm(tmp_path):
     engine = create_engine(db_uri)
     inspector = inspect(engine)
 
-    # 1. The migrated table exposes exactly the ORM's columns (no drift).
-    migrated_cols = {c["name"] for c in inspector.get_columns("thread_curation")}
-    orm_cols = {c.name for c in ThreadCuration.__table__.columns}
-    assert migrated_cols == orm_cols, (
-        f"migration/ORM column drift: only in migration={migrated_cols - orm_cols}, "
-        f"only in ORM={orm_cols - migrated_cols}"
+    # 1. The migrated table matches the ORM per column - name, type, and
+    #    nullability - so a type/length/nullable drift (not just a missing
+    #    column) fails here too. Types are compared by their compiled SQL string
+    #    (e.g. "VARCHAR(32)", "FLOAT") under the same dialect.
+    def _profile_migrated() -> dict[str, tuple[str, bool]]:
+        return {
+            c["name"]: (str(c["type"]), bool(c["nullable"]))
+            for c in inspector.get_columns("thread_curation")
+        }
+
+    def _profile_orm() -> dict[str, tuple[str, bool]]:
+        dialect = engine.dialect
+        return {
+            c.name: (str(c.type.compile(dialect=dialect)), bool(c.nullable))
+            for c in ThreadCuration.__table__.columns
+        }
+
+    migrated_profile = _profile_migrated()
+    orm_profile = _profile_orm()
+    assert migrated_profile == orm_profile, (
+        "migration/ORM column drift (name -> (type, nullable)): "
+        f"migration={migrated_profile}, orm={orm_profile}"
     )
 
     # 2. The declared indexes exist.

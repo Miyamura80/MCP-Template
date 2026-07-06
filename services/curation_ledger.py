@@ -195,7 +195,14 @@ def upsert_judgments(
             row.draft_id = j.draft_id
             row.confidence = j.confidence
             row.state = CurationState.curated.value
-            row.curated_history_id = history_ids.get(j.thread_id)
+            # Only advance the freshness watermark when we actually fetched a
+            # current historyId for this thread. If the lookup missed it (e.g.
+            # deleted between search and save), keep the prior watermark rather
+            # than clearing it to None, which would silently disable staleness
+            # detection for an already-curated thread.
+            new_history_id = history_ids.get(j.thread_id)
+            if new_history_id is not None:
+                row.curated_history_id = new_history_id
             row.curator_version = curator_version
             row.curated_at = datetime.now(UTC)
             saved.append(j.thread_id)

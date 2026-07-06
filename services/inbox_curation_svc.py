@@ -136,6 +136,13 @@ def _changed_thread_ids(
 
     Returns ``(None, None)`` when Gmail rejects the start id as too old (HTTP
     404) so the caller can fall back to a normal query.
+
+    No ``historyTypes`` filter is applied: a thread's ``historyId`` advances on
+    *any* change (new message, label add/remove, read/unread), and the ledger's
+    freshness check treats any such advance as stale - so the incremental delta
+    must surface every changed thread, not just ones with a new message.
+    Each history record's ``messages`` field lists every message it touched, so
+    it captures label-only changes that ``messagesAdded`` would miss.
     """
     from googleapiclient.errors import HttpError  # noqa: PLC0415
 
@@ -151,7 +158,6 @@ def _changed_thread_ids(
                 .list(
                     userId="me",
                     startHistoryId=since_history_id,
-                    historyTypes=["messageAdded"],
                     pageToken=page_token,
                     maxResults=_HISTORY_PAGE_SIZE,
                 )
@@ -159,8 +165,8 @@ def _changed_thread_ids(
             )
             latest = _history_str(resp.get("historyId")) or latest
             for record in resp.get("history", []) or []:
-                for added in record.get("messagesAdded", []) or []:
-                    tid = (added.get("message") or {}).get("threadId")
+                for msg in record.get("messages", []) or []:
+                    tid = msg.get("threadId")
                     if tid and tid not in seen:
                         seen.add(tid)
                         thread_ids.append(tid)
@@ -247,22 +253,6 @@ def inbox_get_curation(input: GetCurationInput) -> GetCurationResult:
     return GetCurationResult(records=kept, coverage=coverage)
 
 
-@service(
-    name="inbox_search",
-    description=(
-        "Search recent inbox threads headlessly (no UI) when doing a thorough "
-        "triage pass - use this to actually look at many emails. Returns thread "
-        "summaries (subject, sender, snippet, recency) each annotated with its "
-        "ledger status: 'uncurated' / 'stale' threads are the delta worth "
-        "reasoning about; 'curated' threads are already banked and can be "
-        "skipped. Uncurated threads also carry a provisional heuristic "
-        "importance_prior. Pass since_history_id (from a prior result's "
-        "current_history_id) to fetch only changed threads. After reasoning over "
-        "the results, bank your verdicts with inbox_save_curation."
-    ),
-    input_model=InboxSearchInput,
-    output_model=InboxSearchResult,
-)
 def _ledger_status_for(row: dict | None, current_hist: str | None) -> LedgerStatus:
     """Map a ledger status-row + the thread's current historyId to a status."""
     if row is None or row["state"] == CurationState.pending.value:
@@ -317,6 +307,22 @@ def _search_item(
     )
 
 
+@service(
+    name="inbox_search",
+    description=(
+        "Search recent inbox threads headlessly (no UI) when doing a thorough "
+        "triage pass - use this to actually look at many emails. Returns thread "
+        "summaries (subject, sender, snippet, recency) each annotated with its "
+        "ledger status: 'uncurated' / 'stale' threads are the delta worth "
+        "reasoning about; 'curated' threads are already banked and can be "
+        "skipped. Uncurated threads also carry a provisional heuristic "
+        "importance_prior. Pass since_history_id (from a prior result's "
+        "current_history_id) to fetch only changed threads. After reasoning over "
+        "the results, bank your verdicts with inbox_save_curation."
+    ),
+    input_model=InboxSearchInput,
+    output_model=InboxSearchResult,
+)
 def inbox_search(input: InboxSearchInput) -> InboxSearchResult:
     svc = _get_gmail_client(input.user_id)
     label_id_to_name, label_colors = _build_label_lookups(svc)
