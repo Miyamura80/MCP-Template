@@ -137,6 +137,7 @@ dev_host: ## Run upstream @modelcontextprotocol/ext-apps basic-host for manual s
 	@if [ ! -d /tmp/ext-apps ]; then git clone --depth 1 https://github.com/modelcontextprotocol/ext-apps.git /tmp/ext-apps; fi
 	@cd /tmp/ext-apps/examples/basic-host && bun install --silent && bun start
 
+.PHONY: preview_app preview_smoke
 APP ?= gmail_inbox
 preview_app: ## Build a standalone fixture-driven preview of an MCP App (APP=gmail_inbox)
 	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }

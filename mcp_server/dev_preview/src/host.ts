@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     // the window closes before the user could have edited anything.
     await bridge.sendToolResult(result);
     for (const delay of [200, 600]) {
-      setTimeout(() => void bridge.sendToolResult(result), delay);
+      setTimeout(() => bridge.sendToolResult(result).catch(() => {}), delay);
     }
     (window as unknown as Globals).__READY__ = true;
   };
