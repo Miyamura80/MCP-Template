@@ -18,11 +18,15 @@ from loguru import logger as log
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
 from mcp.server.session import ServerSession
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult
 from pydantic import BaseModel
 
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
-from mcp_server.enhancers.base import EnhancedTool, build_app_meta
+from mcp_server.enhancers.base import (
+    EnhancedTool,
+    build_app_meta,
+    build_call_tool_result,
+)
 from mcp_server.url_elicitation import reraise_with_elicitation
 from services import ConnectRequiredError, ServiceEntry
 from src.utils.current_user import current_user
@@ -170,6 +174,16 @@ def _make_enhanced_tool(
     _patch_output_schema(mcp, entry.name, output_model)
 
 
+def publish_output_schema(mcp: FastMCP, tool_name: str, output_model: type) -> None:
+    """Public seam over :func:`_patch_output_schema`.
+
+    Any FastMCP instance whose tools return ``CallToolResult`` (the enhanced
+    production tools, the no-auth demo mount) needs its outputSchema published
+    the same way. Exposed so the demo mount doesn't reach into a private name.
+    """
+    _patch_output_schema(mcp, tool_name, output_model)
+
+
 def _patch_output_schema(mcp: FastMCP, tool_name: str, output_model: type) -> None:
     """Publish outputSchema for tools that return CallToolResult.
 
@@ -278,12 +292,11 @@ def _build_call_tool_result(result: BaseModel, tool: EnhancedTool) -> CallToolRe
             f"{type(result).__name__}. Enhancers must return their service's "
             "output_model instance."
         )
-    content: list = [
-        TextContent(type="text", text=result.model_dump_json()),
-        *tool.extra_content,
-    ]
-    kwargs: dict = {"content": content, "structuredContent": result.model_dump()}
+    # app_meta() already returns the build_app_meta() dict (or None); pass the
+    # resource URI back through the canonical assembler so demo + enhanced
+    # paths share one CallToolResult shape.
     app_meta = tool.app_meta()
-    if app_meta is not None:
-        kwargs["_meta"] = app_meta
-    return CallToolResult(**kwargs)
+    app_uri = app_meta["ui"]["resourceUri"] if app_meta is not None else None
+    return build_call_tool_result(
+        result, app_uri=app_uri, extra_content=tool.extra_content
+    )

@@ -26,7 +26,7 @@ from common import global_config
 from mcp_server._tool_factory import make_tool
 from services import ServiceEntry, discover_services, get_registry
 
-_APPS_DIR = Path(__file__).parent / "apps"
+APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"
 
 # Module-level singleton: app_tools / enhancers may import this at module-load
@@ -41,7 +41,7 @@ _MCP_INSTRUCTIONS = (
 )
 
 
-def _transport_security() -> TransportSecuritySettings:
+def transport_security() -> TransportSecuritySettings:
     """DNS-rebinding allowlist for the streamable-HTTP transport.
 
     FastMCP enables DNS-rebinding protection and, when constructed with the
@@ -111,7 +111,7 @@ def _transport_security() -> TransportSecuritySettings:
 mcp: FastMCP = FastMCP(
     "mymcp",
     instructions=_MCP_INSTRUCTIONS,
-    transport_security=_transport_security(),
+    transport_security=transport_security(),
     stateless_http=True,
 )
 
@@ -174,17 +174,17 @@ def llm_tool_surface() -> list[ServiceEntry]:
 
 def _register_app_resources(mcp: FastMCP) -> None:
     """Register ui:// resources for each MCP App with a built dist/mcp-app.html."""
-    if not _APPS_DIR.is_dir():
+    if not APPS_DIR.is_dir():
         return
-    for app_dir in sorted(_APPS_DIR.iterdir()):
+    for app_dir in sorted(APPS_DIR.iterdir()):
         if not app_dir.is_dir():
             continue
         html_path = app_dir / "dist" / "mcp-app.html"
         uri = f"ui://mymcp/{app_dir.name}"
-        _register_app_resource(mcp, uri, html_path, app_dir.name)
+        register_app_resource(mcp, uri, html_path, app_dir.name)
 
 
-def _register_app_resource(
+def register_app_resource(
     mcp: FastMCP, uri: str, html_path: Path, app_name: str
 ) -> None:
     @mcp.resource(uri, mime_type=_APP_MIME_TYPE, name=f"{app_name} app")
@@ -211,18 +211,28 @@ def mount_on(app, path: str = "/mcp") -> None:
 
 
 @asynccontextmanager
-async def lifespan(_app):
-    """Async context manager that runs FastMCP's streamable-HTTP session manager.
+async def session_manager_lifespan(server: FastMCP):
+    """Run a FastMCP instance's streamable-HTTP session manager.
 
-    The parent FastAPI app must include this in its ``lifespan=`` argument or
-    incoming /mcp requests will fail with "Task group is not initialized".
+    Shared by every mounted FastMCP (the main ``/mcp`` server and the no-auth
+    ``/mcp-demo`` mount) so the one SDK-fragility workaround lives in a single
+    place: ``StreamableHTTPSessionManager.run()`` refuses re-entry once
+    ``_has_started`` is set, so we reset it to allow the same instance to be
+    restarted (tests with --count, hot-reload). The parent app must include
+    this in its ``lifespan=`` or incoming requests fail with "Task group is
+    not initialized".
     """
-    mcp = build_mcp_server()
-    sm = mcp.session_manager
-    # StreamableHTTPSessionManager.run() refuses re-entry once _has_started is set.
-    # Reset it so the same instance can be restarted (tests with --count, hot-reload).
+    sm = server.session_manager
     sm._has_started = False
     async with sm.run():
+        yield
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    """Run the main ``/mcp`` server's session manager (see
+    :func:`session_manager_lifespan`)."""
+    async with session_manager_lifespan(build_mcp_server()):
         yield
 
 

@@ -31,7 +31,8 @@ from api_server.routes.google import webhooks as google_webhooks
 from api_server.routes.payments import checkout, metering, subscription, webhooks
 from api_server.runner import runner_lifespan
 from common import global_config
-from mcp_server.demo.server import DemoMountMiddleware, demo_lifespan
+from mcp_server.demo.gate import DemoMountMiddleware
+from mcp_server.demo.server import demo_lifespan
 from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
 from services.gmail_svc import GmailAttachmentTooLargeError

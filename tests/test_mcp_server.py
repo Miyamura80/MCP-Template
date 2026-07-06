@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
 
-from mcp_server.server import _register_app_resource, mcp
+from mcp_server.server import mcp, register_app_resource
 from services import get_registry
 from tests.test_template import TestTemplate
 
@@ -181,7 +181,7 @@ class TestMCPServerIntegration(TestTemplate):
         # built dist/mcp-app.html must serve an HTML comment stub, not crash.
         test_mcp = FastMCP("test_stub")
         missing = Path("/nonexistent/test_app/dist/mcp-app.html")
-        _register_app_resource(
+        register_app_resource(
             test_mcp, "ui://mymcp/test_stub_app", missing, "test_stub_app"
         )
 

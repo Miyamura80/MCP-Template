@@ -12,6 +12,7 @@ from mcp.server.fastmcp.server import Context
 from mcp.types import (
     Annotations,
     AudioContent,
+    CallToolResult,
     ClientCapabilities,
     ElicitationCapability,
     ImageContent,
@@ -31,6 +32,29 @@ def build_app_meta(resource_uri: str) -> dict:
         "ui": {"resourceUri": resource_uri},
         "ui/resourceUri": resource_uri,
     }
+
+
+def build_call_tool_result(
+    model: BaseModel,
+    *,
+    app_uri: str | None = None,
+    extra_content: list | None = None,
+) -> CallToolResult:
+    """Canonical CallToolResult assembly: text + structuredContent + app _meta.
+
+    The single source of truth for how a service output model becomes the
+    wire result the MCP spec expects. Both the enhanced-tool path
+    (``_tool_factory._build_call_tool_result``) and the no-auth demo mount
+    build results through here so their wire format cannot drift.
+    """
+    content: list = [
+        TextContent(type="text", text=model.model_dump_json()),
+        *(extra_content or []),
+    ]
+    kwargs: dict = {"content": content, "structuredContent": model.model_dump()}
+    if app_uri is not None:
+        kwargs["_meta"] = build_app_meta(app_uri)
+    return CallToolResult(**kwargs)
 
 
 class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:

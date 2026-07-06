@@ -1,51 +1,32 @@
-"""In-process state for the demo mount: draft cache + focus bridge.
+"""Stateless helpers for the demo mount - deliberately no mutable state.
 
-The demo's mutations are simulated and stateless by design, with one
-UX concession: a small bounded draft cache so the composer app's
-save/refresh loop feels real within a browsing session. Best-effort only -
-it evaporates on restart and is single-replica, matching the demo's
-non-durability promise.
+``/mcp-demo`` is public and unauthenticated, and the transport runs in
+``stateless_http`` mode, so there is NO per-visitor key available server-side
+(no auth principal, no session id). Any server-side mutable store would
+therefore be shared across every anonymous visitor - a cross-visitor prompt-
+injection channel (via the focus bridge) and shared draft edits. So the demo
+keeps nothing: mutations echo their inputs, drafts are reconstructed
+deterministically, and the focus bridge is a no-op. Everything here is a pure
+function.
 """
 
-from collections import OrderedDict
-from typing import Any
+from uuid import uuid4
 
 from mcp_server.demo import fixtures
 from models.gmail import GmailDraft, _UnsetType
 
-_MAX_DRAFTS = 256
-_drafts: OrderedDict[str, GmailDraft] = OrderedDict()
 
-# Focus bridge (iframe UI <-> LLM), single demo persona - mirrors the
-# in-memory dict the production gmail_inbox app tools use.
-focused: dict[str, Any] | None = None
+def new_draft_id() -> str:
+    """A fresh demo draft id (prefixed so it's obviously not a real Gmail id)."""
+    return f"demo-d-{uuid4().hex[:8]}"
 
 
-def remember_draft(draft: GmailDraft) -> GmailDraft:
-    """Cache a draft (bounded LRU) and return it."""
-    _drafts[draft.draft_id] = draft
-    _drafts.move_to_end(draft.draft_id)
-    while len(_drafts) > _MAX_DRAFTS:
-        _drafts.popitem(last=False)
-    return draft
-
-
-def get_draft(draft_id: str) -> GmailDraft:
-    """Fetch a cached draft; the seed draft self-heals after eviction/restart."""
-    cached = _drafts.get(draft_id)
-    if cached is not None:
-        return cached
-    if draft_id == fixtures.SEED_DRAFT.draft_id:
-        return remember_draft(fixtures.SEED_DRAFT.model_copy(deep=True))
-    raise ValueError(
-        f"Unknown demo draft {draft_id!r}. Create one with gmail_compose or "
-        "gmail_reply_to_thread first (demo drafts do not survive a server "
-        "restart)."
-    )
-
-
-def drop_draft(draft_id: str) -> None:
-    _drafts.pop(draft_id, None)
+def reply_subject(explicit: str | None, original: str | None) -> str:
+    """Derive a reply subject: an explicit value wins; else ``Re:``-prefix the
+    original unless it already carries one. Single source of truth for the rule
+    (the inbox-app reply and the LLM reply tool both call it)."""
+    subject = explicit or original or ""
+    return subject if subject.lower().startswith("re:") else f"Re: {subject}"
 
 
 def patch_field(current: str | None, value: str | None | _UnsetType) -> str | None:
@@ -55,6 +36,20 @@ def patch_field(current: str | None, value: str | None | _UnsetType) -> str | No
     return value
 
 
-def set_focused(data: dict[str, Any] | None) -> None:
-    global focused
-    focused = data
+def echo_saved_draft(draft_id: str, **fields: str | None | _UnsetType) -> GmailDraft:
+    """Reconstruct a "saved" draft statelessly.
+
+    With no per-visitor store the base is deterministic: the seed draft for its
+    known id, otherwise an empty draft carrying that id. Provided fields are
+    merged with patch semantics (UNSET preserves, None clears). This is a
+    demo - it never has to reflect another call's edits, only echo this one's.
+    """
+    if draft_id == fixtures.SEED_DRAFT.draft_id:
+        base = fixtures.SEED_DRAFT.model_copy(deep=True)
+    else:
+        base = GmailDraft(draft_id=draft_id)
+    return base.model_copy(
+        update={
+            key: patch_field(getattr(base, key), value) for key, value in fields.items()
+        }
+    )

@@ -1,9 +1,10 @@
 """App-only demo tools - called by the inbox/composer iframes, fixture-backed.
 
-Mirrors ``mcp_server/app_tools/`` (same names, same shapes) so the committed
-MCP App bundles work unchanged against the demo mount. Mutations are
-simulated; drafts go through the bounded cache in :mod:`mcp_server.demo.state`
-so the composer's save/refresh loop feels real.
+Signatures (names, defaults, ``_meta``) match ``mcp_server/app_tools/`` exactly
+so the committed MCP App bundles work unchanged and the schema-parity test
+(``tests/test_mcp_demo.py::TestSchemaParity``) passes. Behavior differs by
+design: mutations are simulated and stateless (see
+:mod:`mcp_server.demo.state` for why no server-side state can exist here).
 
 Imported for its registration side effects at the bottom of
 ``mcp_server/demo/server.py`` (the same deferred-import pattern the main
@@ -12,7 +13,6 @@ server uses for its app_tools package).
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -96,19 +96,12 @@ def inbox_reply(
 ) -> GmailDraft:
     thread = fixtures.get_thread(thread_id)
     last = thread.messages[-1]
-    orig_subject = subject or last.subject or ""
-    return state.remember_draft(
-        GmailDraft(
-            draft_id=f"demo-d-{uuid4().hex[:8]}",
-            to=last.from_,
-            subject=(
-                orig_subject
-                if orig_subject.lower().startswith("re:")
-                else f"Re: {orig_subject}"
-            ),
-            body=body or "",
-            thread_id=thread_id,
-        )
+    return GmailDraft(
+        draft_id=state.new_draft_id(),
+        to=last.from_,
+        subject=state.reply_subject(subject, last.subject),
+        body=body or "",
+        thread_id=thread_id,
     )
 
 
@@ -122,14 +115,12 @@ def inbox_forward(
 ) -> GmailDraft:
     fixtures.get_thread(thread_id)
     fwd_subject = subject if subject.lower().startswith("fwd:") else f"Fwd: {subject}"
-    return state.remember_draft(
-        GmailDraft(
-            draft_id=f"demo-d-{uuid4().hex[:8]}",
-            to="",
-            subject=fwd_subject,
-            body=body,
-            thread_id=thread_id,
-        )
+    return GmailDraft(
+        draft_id=state.new_draft_id(),
+        to="",
+        subject=fwd_subject,
+        body=body,
+        thread_id=thread_id,
     )
 
 
@@ -179,18 +170,10 @@ def inbox_set_focus(
     messages: list[dict[str, Any]] | None = None,
     user_id: str = "",
 ) -> _SetFocusResult:
-    if thread_id is None:
-        state.set_focused(None)
-    else:
-        state.set_focused(
-            {
-                "thread_id": thread_id,
-                "subject": subject,
-                "from": from_,
-                "message_count": message_count,
-                "messages": messages,
-            }
-        )
+    # Deliberate no-op: persisting the caller-supplied `messages` payload on a
+    # public, unauthenticated, stateless endpoint would make it a stored
+    # prompt-injection channel between anonymous visitors (see
+    # mcp_server/demo/state.py). The demo just acknowledges.
     return _SetFocusResult()
 
 
@@ -202,17 +185,9 @@ def inbox_set_focus(
     ),
 )
 def get_focused_email(user_id: str = "") -> _FocusedEmailResult:
-    data = state.focused
-    if not data:
-        return _FocusedEmailResult(focused=False)
-    return _FocusedEmailResult(
-        focused=True,
-        thread_id=data.get("thread_id"),
-        subject=data.get("subject"),
-        from_=data.get("from"),
-        message_count=data.get("message_count", 0),
-        messages=data.get("messages"),
-    )
+    # No stored focus state in the demo (see set_focus); tell the model there
+    # is nothing focused so it falls back to gmail_get_thread.
+    return _FocusedEmailResult(focused=False)
 
 
 # ---------------------------------------------------------------------------
@@ -233,19 +208,12 @@ def composer_save_draft(
     body: str | None | _UnsetType = UNSET,
     cc: str | None | _UnsetType = UNSET,
     bcc: str | None | _UnsetType = UNSET,
+    # `attachments` is accepted for schema parity with production; demo drafts
+    # carry no attachment bytes, so it is not reflected back.
     attachments: list[dict] | None | _UnsetType = UNSET,
 ) -> GmailDraft:
-    current = state.get_draft(draft_id)
-    return state.remember_draft(
-        current.model_copy(
-            update={
-                "to": state.patch_field(current.to, to),
-                "subject": state.patch_field(current.subject, subject),
-                "body": state.patch_field(current.body, body),
-                "cc": state.patch_field(current.cc, cc),
-                "bcc": state.patch_field(current.bcc, bcc),
-            }
-        )
+    return state.echo_saved_draft(
+        draft_id, to=to, subject=subject, body=body, cc=cc, bcc=bcc
     )
 
 
@@ -264,10 +232,11 @@ def composer_send(
     bcc: str | None | _UnsetType = UNSET,
     attachments: list[dict] | None | _UnsetType = UNSET,
 ) -> GmailSendResult:
-    draft = state.get_draft(draft_id)
-    state.drop_draft(draft_id)
+    # Save-then-send mirrors production; both are simulated here. The saved
+    # draft is reconstructed statelessly so `thread_id` flows to the result.
+    draft = state.echo_saved_draft(draft_id, to=to, subject=subject, body=body)
     return GmailSendResult(
-        message_id=f"demo-sent-{uuid4().hex[:8]}",
+        message_id=f"demo-sent-{state.new_draft_id().split('-')[-1]}",
         thread_id=draft.thread_id,
         sent_at=datetime.now(UTC),
     )
@@ -279,7 +248,6 @@ def composer_send(
     meta=_APP_ONLY_META,
 )
 def composer_discard(draft_id: str, user_id: str = "") -> GmailDiscardDraftResult:
-    state.drop_draft(draft_id)
     return GmailDiscardDraftResult(discarded=True)
 
 
@@ -289,7 +257,9 @@ def composer_discard(draft_id: str, user_id: str = "") -> GmailDiscardDraftResul
     meta=_APP_ONLY_META,
 )
 def composer_refresh(draft_id: str, user_id: str = "") -> GmailDraft:
-    return state.get_draft(draft_id)
+    # Stateless: return the seed draft for its known id, else an empty draft
+    # carrying the id. The demo never has to surface another call's edits.
+    return state.echo_saved_draft(draft_id)
 
 
 @demo_mcp.tool(
