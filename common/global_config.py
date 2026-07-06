@@ -22,12 +22,14 @@ from .config_models import (
     DefaultLlm,
     ExampleParent,
     FeaturesConfig,
+    GmailConfig,
     LlmConfig,
     LoggingConfig,
     RateLimitConfig,
     ServerConfig,
     SubscriptionConfig,
     TelemetryConfig,
+    WebBotAuthConfig,
 )
 
 # Get the path to the root directory (one level up from common)
@@ -193,6 +195,8 @@ class Config(BaseSettings):
     payments: AgenticPaymentsConfig = Field(
         default_factory=lambda: AgenticPaymentsConfig()
     )
+    web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
+    gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
 
     # Environment variables
     DEV_ENV: str
@@ -222,6 +226,10 @@ class Config(BaseSettings):
     # entry in the published OpenAPI spec so codegen / Swagger "Try it out" and
     # the landing-page API reference target the right host. Unset -> relative.
     API_PUBLIC_URL: str | None = None
+    # Web Bot Auth signing identity: base64url-encoded 32-byte Ed25519 private
+    # key seed. When set, /.well-known/http-message-signatures-directory
+    # publishes the matching public key as a JWK Set; unset -> the route 404s.
+    WEB_BOT_AUTH_PRIVATE_KEY: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Stripe & billing
@@ -241,6 +249,29 @@ class Config(BaseSettings):
     GOOGLE_REDIRECT_URI: str | None = None
     # Base64-url Fernet key used to encrypt stored refresh tokens
     GOOGLE_TOKEN_ENC_KEY: str | None = None
+
+    # Gmail push notifications (Pub/Sub) + outbound webhook fan-out.
+    # All optional; if GMAIL_PUBSUB_TOPIC is unset the push pipeline stays
+    # dormant (no watch auto-start, no runner loop).
+    # Fully-qualified Pub/Sub topic, e.g. "projects/<proj>/topics/<topic>".
+    GMAIL_PUBSUB_TOPIC: str | None = None
+    # OIDC "aud" claim the push receiver requires on the Pub/Sub JWT.
+    GMAIL_PUSH_AUDIENCE: str | None = None
+    # OIDC "email" claim the push receiver requires (the push subscription's
+    # service account). Empty disables the identity check (dev only).
+    GMAIL_PUSH_SA_EMAIL: str | None = None
+    # How the periodic runner (watch renewal + outbox drain) is driven:
+    #   "off"      - no runner (default)
+    #   "loop"     - in-process asyncio loop started in the FastAPI lifespan
+    #   "endpoint" - driven externally by POSTing the internal /renew route
+    WEBHOOK_RUNNER_MODE: str = "off"
+    # Seconds between in-process runner ticks when WEBHOOK_RUNNER_MODE="loop".
+    WEBHOOK_RUNNER_INTERVAL_S: int = 30
+    # Max delivery attempts before an outbox row is marked "failed".
+    WEBHOOK_MAX_ATTEMPTS: int = 6
+    # Shared bearer required by the internal POST /api/v1/google/internal/renew
+    # endpoint (WEBHOOK_RUNNER_MODE="endpoint"). Unset -> endpoint disabled.
+    WEBHOOK_RUNNER_TOKEN: str | None = None
 
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(

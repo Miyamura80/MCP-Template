@@ -5,11 +5,24 @@
  * surface: llms.txt, llms-full.txt, agents.md and the in-page agent view.
  * Rebranding the site (editing landing.ts) keeps all of these in sync.
  */
-import { site, hero, features, getStarted, faq, compatibility, connect, comparison } from "../config/landing";
+import { site, hero, features, getStarted, faq, compatibility, connect, comparison, pricing, agentGuide } from "../config/landing";
 
 /** Strip a trailing slash so we can safely append paths. */
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+/** Full "When to use" section shared by the long-form surfaces (llms-full.txt, agents.md). */
+function whenToUseSection(): string {
+  return `## When to use
+
+${agentGuide.summary}
+
+Use ${site.name} when:
+${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
+
+Do not use ${site.name} when:
+${agentGuide.whenNotToUse.map((s) => `- ${s}`).join("\n")}`;
 }
 
 /** Concise llms.txt index (see https://llmstxt.org). */
@@ -21,6 +34,11 @@ export function buildLlmsTxt(origin: string): string {
 
 ${hero.subhead}
 
+## When to use
+
+${agentGuide.summary}
+${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
+
 ## Connect over MCP
 - [MCP endpoint](${site.mcpUrl}): Streamable-HTTP MCP server URL to add to your client. Server name: \`${site.serverName}\`.
 
@@ -28,6 +46,9 @@ ${hero.subhead}
 - [llms-full.txt](${o}/llms-full.txt): Full, expanded description of what ${site.name} is and how to use every transport.
 - [agents.md](${o}/agents.md): Agent-oriented capability and skills summary.
 - [How it compares](${o}/compare): ${site.name} vs other Gmail MCP servers (GongRzhe, Composio, Zapier/Pipedream, Google Workspace MCP).
+
+## Pricing & licensing
+- [pricing.md](${o}/pricing.md): Machine-readable pricing & tiers. ${site.name} is open source (MIT license) and free to self-host with no setup cost; paid tiers cover managed hosting, support, and teams.
 
 ## Resources
 - [Documentation](${site.docsUrl})
@@ -89,6 +110,8 @@ shared service registry over three interfaces - a CLI, an MCP server
 identically no matter how they are called. Any agent that speaks MCP can
 discover and call its tools.
 
+${whenToUseSection()}
+
 ## ${getStarted.heading}
 
 ${getStarted.subhead}
@@ -137,6 +160,7 @@ ${faqBlock}
 - llms-full.txt: ${o}/llms-full.txt
 - agents.md: ${o}/agents.md
 - auth.md (agent auth manifest): ${o}/auth.md
+- pricing.md (machine-readable pricing): ${o}/pricing.md
 - Agent skills (JSON): ${o}/.well-known/agent-skills/index.json
 - Agent skills (shell pointer): ${o}/skills.sh
 - MCP discovery (JSON): ${o}/.well-known/mcp.json
@@ -183,6 +207,8 @@ ${site.description}
 This site documents an MCP server. Agents should connect over MCP to use its
 tools rather than scraping this page.
 
+${whenToUseSection()}
+
 ## MCP server
 
 - Endpoint (streamable HTTP): \`${site.mcpUrl}\`
@@ -213,6 +239,7 @@ Full matrix: ${o}/compare
 ## More
 
 - Agent auth (auth.md): ${o}/auth.md
+- Pricing (pricing.md): ${o}/pricing.md
 - Full description for LLMs: ${o}/llms-full.txt
 - Skills (JSON): ${o}/.well-known/agent-skills/index.json
 - Skills (shell pointer): ${o}/skills.sh
@@ -290,5 +317,65 @@ support lands in the upstream authorization server.
 - Agent guide: ${o}/agents.md
 - Full description for LLMs: ${o}/llms-full.txt
 - Source: ${site.githubUrl}
+`;
+}
+
+/**
+ * pricing.md - machine-readable pricing manifest served at the canonical
+ * `/pricing.md` path.
+ *
+ * AI agents comparing products and making purchase recommendations need
+ * pricing as plain markdown, not scraped from an HTML pricing page. This is
+ * generated from the `pricing` block in landing.ts regardless of
+ * `pricing.enabled` (that flag only controls the on-page section), so the
+ * machine-readable manifest exists even when the human pricing section is
+ * deferred to a separate page.
+ */
+export function buildPricingMd(origin: string): string {
+  const o = trimSlash(origin);
+  const tierBlock = pricing.tiers
+    .map((t) => {
+      // Glue slash cadences ("$20/mo") but space-separate word cadences ("$0 forever").
+      const cadence = t.cadence ?? "";
+      const price = cadence && !cadence.startsWith("/") ? `${t.price} ${cadence}` : `${t.price}${cadence}`;
+      const featureLines = t.features.map((f) => `- ${f}`).join("\n");
+      return (
+        `## ${t.name}${t.featured ? " (recommended)" : ""}\n\n` +
+        `- Price: ${price}\n` +
+        `- Summary: ${t.description}\n\n` +
+        `Includes:\n${featureLines}`
+      );
+    })
+    .join("\n\n");
+
+  return `# ${site.name} - pricing
+
+> Machine-readable pricing for ${site.name}, for AI agents comparing products
+> and making purchase recommendations. ${pricing.subhead}
+
+- Service: ${site.name}
+- Website: ${site.url}
+- Source code (open source, self-hostable): ${site.githubUrl}
+
+${tierBlock}
+
+## Notes
+
+- Licensing model: ${site.name} is open source under the **MIT license** - free
+  to use, modify, and self-host. Commercial / OEM licensing is available on the
+  Team tier.
+- Setup cost: **none.** Self-hosting has no license or setup fee; the hosted
+  tiers are paste-a-URL onboarding with no setup charge.
+- What paid tiers cover: managed hosting, monitoring, priority/dedicated
+  support, and team features (SSO, audit logs, SLA).
+
+Prices are denominated as shown above. For current, authoritative pricing
+always check ${site.url}.
+
+## More
+
+- Full description for LLMs: ${o}/llms-full.txt
+- Agent guide: ${o}/agents.md
+- Agent auth (auth.md): ${o}/auth.md
 `;
 }

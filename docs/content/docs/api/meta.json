@@ -5,6 +5,9 @@
     "tools",
     "authentication",
     "billing",
-    "errors"
+    "rate-limits",
+    "idempotency",
+    "errors",
+    "deprecation"
   ]
 }
