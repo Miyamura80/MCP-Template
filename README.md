@@ -84,7 +84,6 @@ The skill's source of truth lives in [`skills/gmail-mcp/SKILL.md`](skills/gmail-
 | Testing | pytest + `TestTemplate` |
 | Lint / type / dead-code | Ruff + Vulture + ty + import-linter |
 | Pre-commit (folder size, ai-writing, agent-config sync) | prek |
-| Agent loop | Ralph Wiggum |
 | Telemetry | Anonymous, opt-out |
 
 ## Architecture

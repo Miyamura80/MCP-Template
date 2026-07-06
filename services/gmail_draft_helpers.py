@@ -32,9 +32,7 @@ from services.gmail_svc import _build_raw_message, _parse_message_resource
 
 def _attachment_not_found(attachment_id: str, draft_id: str) -> ValueError:
     """Uniform error for an attachment_id that is not on a draft."""
-    return ValueError(
-        f"attachment_id {attachment_id!r} is not on draft {draft_id!r}"
-    )
+    return ValueError(f"attachment_id {attachment_id!r} is not on draft {draft_id!r}")
 
 
 def _draft_resource_to_model(draft: dict[str, Any]) -> GmailDraft:
@@ -75,9 +73,7 @@ def _fetch_draft_model(svc: Any, draft_id: str) -> GmailDraft:
     recipients, subject, body, and current attachment ids that every draft
     mutation's response contract promises.
     """
-    full = (
-        svc.users().drafts().get(userId="me", id=draft_id, format="full").execute()
-    )
+    full = svc.users().drafts().get(userId="me", id=draft_id, format="full").execute()
     return _draft_resource_to_model(full)
 
 

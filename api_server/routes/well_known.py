@@ -1,6 +1,6 @@
 """Well-known discovery documents for the /mcp endpoint.
 
-Four documents live here:
+The discovery documents that live here:
 
 * **OAuth 2.0 Protected Resource Metadata** (RFC 9728) - tells MCP clients
   where the authorization server is. Required of resource servers by the MCP
@@ -27,6 +27,12 @@ Four documents live here:
   ``remotes``) and tool surface (``tools[]``) a registry or agent previews
   before opening a transport. Always available (no auth dependency) and served
   with ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
+
+* **A2A Agent Card** (Agent2Agent spec v0.3.0) - the agent-protocol analogue of
+  the Server Card. Served at ``/.well-known/agent-card.json`` so A2A clients and
+  orchestrators can discover this agent's identity, endpoint, and skills. Built
+  from the same branding config plus the shared service registry (each service
+  becomes an A2A skill). Public and cross-origin readable, like the Server Card.
 
 * **API Catalog** (RFC 9727) - a single discovery URL that points agents and
   crawlers at this server's OpenAPI description via an RFC 9264 linkset. Always
@@ -57,7 +63,14 @@ from fastapi.responses import JSONResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
 from common import global_config
-from common.config_models import IconConfig
+from common.config_models import BrandingConfig, IconConfig
+from models.a2a import (
+    A2AAgentCapabilities,
+    A2AAgentCard,
+    A2AAgentProvider,
+    A2AAgentSkill,
+)
+from services import discover_services, get_registry
 
 router = APIRouter(tags=["well-known"])
 
@@ -133,6 +146,68 @@ def mcp_server_card() -> JSONResponse:
         card["remotes"] = [{"type": "streamable-http", "url": url}]
     # Public branding: any registry crawler (cross-origin) must be able to read it.
     return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
+
+
+def _agent_endpoint_url(b: BrandingConfig) -> str:
+    """Resolve the public host to advertise as the agent's ``url``.
+
+    A2A requires ``url``. This template ships a *discovery* card only - it does
+    not implement an A2A wire transport (no JSON-RPC ``message/send``, no
+    HTTP+JSON REST binding), so we deliberately omit ``preferredTransport`` and
+    point ``url`` at the MCP endpoint, the agent's real machine-facing surface.
+    A2A clients use the card to discover that this agent exists and what it can
+    do; the MCP host is the honest place to send them today. Prefer a configured
+    public host over the branding website, and never the localhost dev default
+    (which would point clients at a dead endpoint).
+    """
+    return (
+        global_config.MCP_PUBLIC_URL or global_config.API_PUBLIC_URL or b.website_url
+    ).rstrip("/")
+
+
+def _service_skills() -> list[A2AAgentSkill]:
+    """Map each registered service onto an A2A skill (id == service name)."""
+    discover_services()
+    return [
+        A2AAgentSkill(
+            id=entry.name,
+            name=entry.name,
+            description=entry.description,
+            tags=["mcp"],
+            input_modes=["application/json"],
+            output_modes=["application/json"],
+        )
+        for entry in get_registry()
+    ]
+
+
+@router.get("/.well-known/agent-card.json")
+def a2a_agent_card() -> JSONResponse:
+    """A2A Agent Card (spec v0.3.0) - pre-connect agent discovery document.
+
+    Discovery/branding only: it advertises this agent's identity and skills so
+    A2A registries/clients can find it. We intentionally do not declare a
+    ``preferredTransport`` because the template implements no A2A wire transport;
+    advertising one would point clients at an endpoint that can't speak it.
+    """
+    b = global_config.branding
+    card = A2AAgentCard(
+        name=b.title,
+        description=b.description,
+        url=_agent_endpoint_url(b),
+        version=_server_version(),
+        capabilities=A2AAgentCapabilities(),
+        default_input_modes=["application/json", "text/plain"],
+        default_output_modes=["application/json", "text/plain"],
+        skills=_service_skills(),
+        # preferred_transport intentionally omitted: see docstring - no A2A wire
+        # transport is implemented, so we advertise presence, not a binding.
+        provider=A2AAgentProvider(organization=b.title, url=b.website_url),
+        icon_url=b.icons[0].src if b.icons else None,
+        documentation_url=b.website_url,
+    )
+    # Public discovery document: any A2A crawler (cross-origin) must read it.
+    return JSONResponse(card.to_wire(), headers={"Access-Control-Allow-Origin": "*"})
 
 
 @router.get("/.well-known/api-catalog")
