@@ -41,6 +41,7 @@ Sitemap: ${origin}/sitemap.xml
 
 # NLWeb / Schema Map feed of structured (schema.org) data
 Schemamap: ${origin}/schemamap.xml
+# NLWeb ask endpoint: ${origin}/ask
 
 # LLM-friendly documentation
 # llms.txt: ${origin}/llms.txt
