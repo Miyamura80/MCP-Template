@@ -24,7 +24,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from common import global_config
 from mcp_server._tool_factory import make_tool
-from services import discover_services, get_registry
+from services import ServiceEntry, discover_services, get_registry
 
 _APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -87,10 +87,32 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
+# ``stateless_http=True`` makes every /mcp request self-contained: the server
+# does not persist per-session state keyed by ``Mcp-Session-Id`` in memory.
+# Stateful mode (the FastMCP default) breaks in exactly the deployments this
+# template targets - Render free-tier spins down when idle, redeploys restart
+# the process, and horizontal scaling routes requests across replicas - each of
+# which wipes/splits the in-memory session store, so a client's next POST fails
+# with "MCP session has been terminated or no longer exists on the server"
+# (mcp_session_terminated). Some clients (OpenAI, and connectors that DELETE the
+# session after each call) trigger the same error even single-replica. Stateless
+# mode sidesteps all of it. Safe here because our enhancers only elicit input and
+# render Apps - both happen *within* a single tool-call request's SSE stream - and
+# we use no server-initiated sampling (the one feature that hangs stateless; see
+# modelcontextprotocol/python-sdk issue 678).
+#
+# This is also where the spec is going: the MCP core is dropping session state at
+# the protocol layer (SEP-2567 removes Mcp-Session-Id, SEP-2575 removes the
+# initialize handshake; 2026-07-28 RC), so "any request can land on any instance."
+# stateless_http=True is the SDK option the transport roadmap points implementers
+# to today. It still runs the initialize handshake (the SDK keeps that until it
+# implements those SEPs) but stops persisting/validating per-session state, which
+# is what actually fixes the error - and it's forward-compatible with the RC.
 mcp: FastMCP = FastMCP(
     "mymcp",
     instructions=_MCP_INSTRUCTIONS,
     transport_security=_transport_security(),
+    stateless_http=True,
 )
 
 _populated: bool = False
@@ -130,6 +152,24 @@ def build_mcp_server() -> FastMCP:
 
     _populated = True
     return mcp
+
+
+def llm_tool_surface() -> list[ServiceEntry]:
+    """Service entries this server exposes to the LLM as MCP tools.
+
+    The registry minus the CLI-only defaults that ``build_mcp_server`` skips.
+    App-only tools (registered directly via ``@mcp.tool`` and hidden from the
+    LLM) are not in the service registry, so they are excluded automatically.
+
+    This is the LLM-facing tool surface advertised pre-connection in the
+    SEP-2127 server card (``/.well-known/mcp/server-card.json``). Sorted by name
+    so the committed landing-page snapshot is stable across environments.
+    """
+    build_mcp_server()
+    surface = (
+        e for e in get_registry() if e.name not in _EXCLUDED_DEFAULT_MCP_SERVICES
+    )
+    return sorted(surface, key=lambda e: e.name)
 
 
 def _register_app_resources(mcp: FastMCP) -> None:

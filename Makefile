@@ -113,7 +113,7 @@ docs: ## Run docs with bun
 
 api: check_uv ## Run authenticated API server
 	@echo "$(GREEN)🌐 Starting API server...$(RESET)"
-	@$(PYTHON) mycli-api
+	@$(PYTHON) mymcp-serve
 
 mcp: check_uv ## Run MCP server locally (stdio)
 	@$(PYTHON) mymcp-mcp
@@ -143,15 +143,10 @@ mcp_conformance: check_uv ## Run MCPJam apps + protocol conformance against the 
 	@uv run python scripts/mcp_conformance.py
 	@echo "$(GREEN)✅ MCP conformance passed.$(RESET)"
 
-ralph: check_jq ## Run Ralph agent loop
-	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
-	@echo "$(RED)⚠️  It is HIGHLY RECOMMENDED to run Ralph in a sandboxed environment.$(RESET)"
-	@printf "$(YELLOW)Are you sure you want to continue? [y/N] $(RESET)" && read ans && [ "$$ans" = "y" ] || (echo "$(RED)Aborted.$(RESET)"; exit 1)
-	@echo "$(GREEN)🤖 Starting Ralph Agent...$(RESET)"
-	@chmod +x scripts/ralph.sh
-	@./scripts/ralph.sh $(ARGS)
-	@echo "$(GREEN)✅ Ralph Agent finished.$(RESET)"
-
+gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page tool-surface JSON
+	@echo "$(YELLOW)🛠  Exporting tool surface...$(RESET)"
+	@uv run python scripts/export_tool_surface.py
+	@echo "$(GREEN)✅ Tool surface exported.$(RESET)"
 
 ########################################################
 # Run Tests
@@ -300,6 +295,10 @@ ci: ruff vulture import_lint ty docs_lint check_deps file_len_check blind_except
 .PHONY: sync-agent-config
 sync-agent-config: check_uv ## Sync Claude <-> Codex skills & subagents (regenerates symlinks and .codex/agents/*.toml)
 	@uv run scripts/sync_agent_config.py
+
+.PHONY: sync-skills
+sync-skills: check_uv ## Mirror skills/ into landing-page/.well-known and refresh index.json digests
+	@uv run scripts/sync_skills.py
 
 ########################################################
 # Database

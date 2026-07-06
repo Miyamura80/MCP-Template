@@ -30,6 +30,7 @@
   <img alt="Python Version" src="https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FMiyamura80%2FMCP-Template%2Fmain%2Fpyproject.toml&query=%24.project['requires-python']&label=python&logo=python&color=blue">
   <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/Miyamura80/MCP-Template">
   <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/Miyamura80/MCP-Template/a_test_target_tests.yml?branch=main">
+  <a href="https://skills.sh/Miyamura80/MCP-Template"><img alt="skills.sh" src="https://skills.sh/b/Miyamura80/MCP-Template"></a>
 
 </p>
 
@@ -40,13 +41,24 @@
 > Copy and paste this into your AI coding agent (Claude Code, Cursor, Copilot, etc.) to install:
 
 ```text
-Install the CLI and download the usage skill:
+Install the CLI and download the gmail-mcp skill:
 
 pip install mcp-template
 
 curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh -o install-skills.sh
 bash install-skills.sh && rm install-skills.sh
 ```
+
+The official **gmail-mcp** agent skill is self-published on
+[skills.sh](https://skills.sh/Miyamura80/MCP-Template). Install it directly with:
+
+```bash
+npx skills add Miyamura80/MCP-Template
+```
+
+The skill's source of truth lives in [`skills/gmail-mcp/SKILL.md`](skills/gmail-mcp/SKILL.md);
+`make sync-skills` mirrors it to the landing page's
+`/.well-known/agent-skills/` discovery tree (digest-pinned in `index.json`).
 
 ## App Distribution
 
@@ -72,7 +84,6 @@ bash install-skills.sh && rm install-skills.sh
 | Testing | pytest + `TestTemplate` |
 | Lint / type / dead-code | Ruff + Vulture + ty + import-linter |
 | Pre-commit (folder size, ai-writing, agent-config sync) | prek |
-| Agent loop | Ralph Wiggum |
 | Telemetry | Anonymous, opt-out |
 
 ## Architecture

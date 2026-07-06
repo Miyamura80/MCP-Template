@@ -33,6 +33,19 @@ if [ -z "$current_uv" ] || [ "$(printf '%s\n%s\n' "$REQUIRED_UV" "$current_uv" |
   hash -r
 fi
 
+# Keep the lint/format toolchain on the latest stable release. Unlike uv above
+# (pinned to a floor for a specific feature), ruff and ty ship fixes frequently
+# and we always want the newest stable build. `uv tool install` pulls the latest
+# from PyPI on first use; `uv tool upgrade` refreshes an existing install.
+for tool in ruff ty; do
+  if uv tool list 2>/dev/null | grep -q "^${tool} "; then
+    uv tool upgrade "$tool"
+  else
+    uv tool install "$tool"
+  fi
+done
+hash -r
+
 # Sync Python dependencies (idempotent; no-op when already in sync).
 uv sync
 

@@ -6,8 +6,8 @@ receiver's user lookup. Adds ``processed_pubsub_messages`` (at-least-once
 dedup), plus the outbound webhook triplet: ``webhook_subscriptions``,
 ``webhook_events``, and the ``webhook_deliveries`` outbox.
 
-Revision ID: 008
-Revises: 007
+Revision ID: 009
+Revises: 008
 Create Date: 2026-07-04
 """
 
@@ -16,8 +16,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "008"
-down_revision: str | None = "007"
+revision: str = "009"
+down_revision: str | None = "008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

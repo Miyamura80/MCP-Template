@@ -22,12 +22,14 @@ from .config_models import (
     DefaultLlm,
     ExampleParent,
     FeaturesConfig,
+    GmailConfig,
     LlmConfig,
     LoggingConfig,
     RateLimitConfig,
     ServerConfig,
     SubscriptionConfig,
     TelemetryConfig,
+    WebBotAuthConfig,
 )
 
 # Get the path to the root directory (one level up from common)
@@ -193,6 +195,8 @@ class Config(BaseSettings):
     payments: AgenticPaymentsConfig = Field(
         default_factory=lambda: AgenticPaymentsConfig()
     )
+    web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
+    gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
 
     # Environment variables
     DEV_ENV: str
@@ -222,6 +226,10 @@ class Config(BaseSettings):
     # entry in the published OpenAPI spec so codegen / Swagger "Try it out" and
     # the landing-page API reference target the right host. Unset -> relative.
     API_PUBLIC_URL: str | None = None
+    # Web Bot Auth signing identity: base64url-encoded 32-byte Ed25519 private
+    # key seed. When set, /.well-known/http-message-signatures-directory
+    # publishes the matching public key as a JWK Set; unset -> the route 404s.
+    WEB_BOT_AUTH_PRIVATE_KEY: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Stripe & billing
