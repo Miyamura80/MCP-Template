@@ -51,8 +51,6 @@ WATCH_EVENT_TYPE = "gmail.message.new"
 # Renew watches expiring within this window (Gmail expiry is ~7 days; renewing
 # daily with a generous buffer means a missed run never drops coverage).
 _RENEW_BUFFER = timedelta(days=2)
-# On an expired-baseline full resync, cap how many recent messages we replay.
-_FULL_SYNC_LIMIT = 25
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +221,11 @@ def _message_payload(client: Any, message_id: str) -> dict[str, Any]:
 
 
 def _added_message_ids(client: Any, start_history_id: str) -> list[str]:
-    """Page users.history.list for messageAdded ids since ``start_history_id``."""
+    """Page users.history.list for INBOX messageAdded ids since ``start_history_id``.
+
+    ``labelId="INBOX"`` scopes the incremental walk identically to the watch
+    (which registers ``labelIds=["INBOX"]``) so non-inbox mail never fans out.
+    """
     seen: list[str] = []
     page_token: str | None = None
     while True:
@@ -234,6 +236,7 @@ def _added_message_ids(client: Any, start_history_id: str) -> list[str]:
                 userId="me",
                 startHistoryId=start_history_id,
                 historyTypes=["messageAdded"],
+                labelId="INBOX",
                 pageToken=page_token,
             )
             .execute()
@@ -248,75 +251,107 @@ def _added_message_ids(client: Any, start_history_id: str) -> list[str]:
             return seen
 
 
-def _recent_message_ids(client: Any) -> list[str]:
-    """Newest message ids for a bounded full resync when the baseline expired."""
-    resp = (
-        client.users()
-        .messages()
-        .list(userId="me", labelIds=["INBOX"], maxResults=_FULL_SYNC_LIMIT)
-        .execute()
-    )
-    return [m["id"] for m in resp.get("messages", []) if m.get("id")]
+def _fetch_message_payload(client: Any, message_id: str) -> dict[str, Any] | None:
+    """Metadata + snippet, or None if the message vanished (404/410) before fetch.
 
-
-def _sync_history_for_row(
-    session: Session, client: Any, row: GoogleToken, notified_history_id: str
-) -> int:
-    """Enqueue webhook events for messages added since the stored baseline.
-
-    Returns the number of messages enqueued. Advances the forward-only baseline
-    to ``notified_history_id``. On an expired baseline (HTTP 404) performs a
-    bounded full resync instead.
+    Gmail's history log is append-only, so a message that was added and then
+    deleted still appears in ``messageAdded`` records but ``messages.get`` 404s.
+    Skipping it stops one vanished message from poisoning the whole notification.
     """
     from googleapiclient.errors import HttpError  # noqa: PLC0415
 
-    baseline = row.watch_history_id
-    if not baseline:
-        # No baseline yet: adopt the notified id and wait for the next event.
-        row.watch_history_id = str(notified_history_id)
-        return 0
+    try:
+        return _message_payload(client, message_id)
+    except HttpError as exc:
+        if exc.resp.status in (404, 410):
+            log.debug("Gmail message {} vanished before fetch; skipping", message_id)
+            return None
+        raise
 
+
+def _forward(current: str | None, candidate: str) -> str:
+    """Monotonic historyId advance - never let the baseline regress."""
+    try:
+        cur = int(current) if current else 0
+        cand = int(candidate)
+    except (TypeError, ValueError):
+        return str(candidate)
+    return str(max(cur, cand))
+
+
+def _fetch_new_messages(
+    client: Any, baseline: str | None, notified_history_id: str
+) -> tuple[list[dict[str, Any]], str]:
+    """Collect payloads for messages added since ``baseline``. Holds no DB session.
+
+    Returns ``(payloads, new_baseline)``. Payloads are empty when there is no
+    baseline yet, or when the baseline has expired (HTTP 404): we reset the
+    baseline forward without replaying the backlog, because replaying recent
+    INBOX messages as brand-new events would spam subscribers with duplicates.
+    """
+    from googleapiclient.errors import HttpError  # noqa: PLC0415
+
+    if not baseline:
+        return [], str(notified_history_id)
     try:
         message_ids = _added_message_ids(client, baseline)
     except HttpError as exc:
         if exc.resp.status != 404:
             raise
         log.warning(
-            "Gmail history baseline {} expired for {}; full resync",
+            "Gmail history baseline {} expired; resetting without backlog replay",
             baseline,
-            row.user_id,
         )
-        message_ids = _recent_message_ids(client)
+        return [], _forward(baseline, notified_history_id)
 
+    payloads: list[dict[str, Any]] = []
     for mid in message_ids:
-        enqueue_event(
-            session,
-            user_id=row.user_id,
-            event_type=WATCH_EVENT_TYPE,
-            payload=_message_payload(client, mid),
-        )
-    # Forward-only: never move the baseline backwards.
-    row.watch_history_id = str(notified_history_id)
-    return len(message_ids)
+        payload = _fetch_message_payload(client, mid)
+        if payload is not None:
+            payloads.append(payload)
+    return payloads, _forward(baseline, notified_history_id)
 
 
 def process_notification(
     email: str, history_id: str, message_id: str
 ) -> dict[str, Any]:
-    """Entrypoint for the Pub/Sub receiver. Dedups then syncs history.
+    """Entrypoint for the Pub/Sub receiver: resolve mailbox, sync history, dedup.
 
-    The dedup insert and the history sync share one transaction, so a failure
-    rolls back the dedup marker and Pub/Sub re-delivers (at-least-once).
+    Gmail network I/O runs with no DB connection held. The dedup insert, the
+    event fan-out, and the monotonic baseline advance share one short
+    transaction, so a failure before commit rolls back the dedup marker and
+    Pub/Sub re-delivers (at-least-once).
     """
+    # 1. Resolve the target mailbox in a short read (no connection held for I/O).
     with _get_db_session() as session:
-        if not _mark_pubsub_processed(session, message_id):
-            return {"status": "duplicate"}
         row = _load_token_row_by_email(session, email)
         if row is None:
+            _mark_pubsub_processed(session, message_id)
             session.commit()  # dedup the unknown-user notification anyway
             log.debug("Gmail push for unknown/disconnected address {}", email)
             return {"status": "unknown_user"}
-        client = _get_gmail_client(row.user_id)
-        enqueued = _sync_history_for_row(session, client, row, history_id)
+        user_id = row.user_id
+        baseline = row.watch_history_id
+
+    # 2. Gmail network I/O - no DB session open.
+    client = _get_gmail_client(user_id)
+    payloads, new_baseline = _fetch_new_messages(client, baseline, history_id)
+
+    # 3. Short transaction: dedup + enqueue + monotonic baseline advance.
+    with _get_db_session() as session:
+        if not _mark_pubsub_processed(session, message_id):
+            return {"status": "duplicate"}
+        row = _load_token_row(session, user_id)
+        if row is None:
+            session.commit()
+            return {"status": "unknown_user"}
+        for payload in payloads:
+            enqueue_event(
+                session,
+                user_id=user_id,
+                event_type=WATCH_EVENT_TYPE,
+                payload=payload,
+            )
+        row.watch_history_id = _forward(row.watch_history_id, new_baseline)
         session.commit()
-        return {"status": "ok", "enqueued": enqueued}
+    return {"status": "ok", "enqueued": len(payloads)}

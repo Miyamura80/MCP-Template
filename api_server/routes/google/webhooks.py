@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hmac
 import json
 
 from fastapi import APIRouter, HTTPException, Request
@@ -28,6 +29,10 @@ from services.gmail_watch_svc import process_notification, renew_due_watches
 from services.webhook_delivery_svc import drain_due_deliveries
 
 router = APIRouter(prefix="/api/v1/google", tags=["google-webhooks"])
+
+
+def _is_dev() -> bool:
+    return (getattr(global_config, "DEV_ENV", "") or "").lower() in {"local", "dev"}
 
 
 def _verify_oidc(authorization: str | None) -> None:
@@ -58,9 +63,16 @@ def _verify_oidc(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid OIDC token") from exc
 
     expected_sa = global_config.GMAIL_PUSH_SA_EMAIL
-    if expected_sa and (
-        claims.get("email") != expected_sa or not claims.get("email_verified")
-    ):
+    if not expected_sa:
+        # Fail closed outside dev: without the SA-email check, ANY Google-signed
+        # OIDC token with the right audience would be accepted, letting a third
+        # party spoof push notifications for arbitrary mailboxes.
+        if not _is_dev():
+            raise HTTPException(
+                status_code=503,
+                detail="Gmail push identity (GMAIL_PUSH_SA_EMAIL) not configured",
+            )
+    elif claims.get("email") != expected_sa or not claims.get("email_verified"):
         raise HTTPException(status_code=403, detail="Untrusted push identity")
 
 
@@ -114,7 +126,8 @@ async def internal_renew(request: Request):
     token = global_config.WEBHOOK_RUNNER_TOKEN
     if not token:
         raise HTTPException(status_code=503, detail="Runner endpoint not enabled")
-    if request.headers.get("x-runner-token") != token:
+    provided = request.headers.get("x-runner-token") or ""
+    if not hmac.compare_digest(provided, token):
         raise HTTPException(status_code=401, detail="Invalid runner token")
     renewed = await asyncio.to_thread(renew_due_watches)
     drained = await asyncio.to_thread(drain_due_deliveries)

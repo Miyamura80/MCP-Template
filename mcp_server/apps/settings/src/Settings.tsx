@@ -142,7 +142,20 @@ export function Settings({ mcpApp }: Props) {
     <div className="wrap">
       <style>{CSS}</style>
       <h1>Settings</h1>
-      {error && <div className="banner err">{error}</div>}
+      {error && (
+        <div className="banner err" role="alert">
+          <span>{error}</span>
+          <button
+            className="ghost"
+            onClick={() => {
+              setError(null);
+              void refresh();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <section className="card">
         <h2>Gmail</h2>
@@ -263,7 +276,7 @@ const CSS = `
 .pill.on { color: var(--on); border-color: var(--on); }
 .pill.off { color: var(--muted); }
 .banner { border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
-.banner.err { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.banner.err { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .banner.secret { background: var(--secretbg); border: 1px solid var(--secretline); }
 .secret-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
 .secret-val { display: block; word-break: break-all; font-size: 13px; padding: 6px 8px; background: rgba(0,0,0,.06); border-radius: 6px; }

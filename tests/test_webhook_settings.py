@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -15,6 +16,7 @@ from common.token_encryption import PlaintextEncryption
 from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
+from mcp_server.app_tools import _auth_guard
 from mcp_server.server import build_mcp_server
 from models.webhook_settings import WebhookSettingsInput
 from models.webhooks import WebhookSubscribeInput
@@ -122,3 +124,26 @@ class TestSettingsAppWiring(TestTemplate):
 
         # The app resource is registered.
         assert "ui://mymcp/settings" in {str(r.uri) for r in resources}
+
+
+class TestAppToolUserGuard(TestTemplate):
+    """guard_user_id must ignore a wire-supplied user_id when a principal is bound."""
+
+    def test_bound_principal_overrides_wire_user_id(self):
+        principal = SimpleNamespace(user_id="real-user")
+        with (
+            patch.object(_auth_guard, "current_user", return_value=principal),
+            patch("mcp_server._tool_factory._check_scopes"),
+            patch("mcp_server._tool_factory._check_quota"),
+        ):
+            # A tampered payload claiming another user's id is discarded.
+            assert _auth_guard.guard_user_id("attacker-supplied") == "real-user"
+
+    def test_no_principal_trusts_wire_user_id(self):
+        with (
+            patch.object(_auth_guard, "current_user", return_value=None),
+            patch("mcp_server._tool_factory._check_scopes"),
+            patch("mcp_server._tool_factory._check_quota"),
+        ):
+            # CLI / stdio: no auth context, so the supplied id is the only signal.
+            assert _auth_guard.guard_user_id("cli-user") == "cli-user"

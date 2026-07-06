@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -30,7 +31,11 @@ from db.models.google_tokens import GoogleToken
 from db.models.webhooks import WebhookDelivery
 from models.gmail_watch import GmailWatchStartInput
 from models.webhooks import WebhookSubscribeInput
-from services.gmail_watch_svc import gmail_watch_start, process_notification
+from services.gmail_watch_svc import (
+    gmail_watch_start,
+    process_notification,
+    renew_due_watches,
+)
 from services.webhooks_svc import webhook_subscribe
 from tests.test_template import TestTemplate
 
@@ -189,11 +194,11 @@ class TestProcessNotification(TestTemplate):
             with db_engine.use_db_session() as session:
                 assert session.query(WebhookDelivery).count() == 1
 
-    def test_expired_baseline_triggers_full_resync(self):
-        client = _fake_client(
-            history_error=_http_error(404),
-            messages_list={"messages": [{"id": "r1"}, {"id": "r2"}]},
-        )
+    def test_expired_baseline_resets_without_replay(self):
+        # On 404 (expired baseline) we reset the baseline forward WITHOUT
+        # replaying the backlog, so subscribers aren't spammed with old
+        # messages delivered as brand-new events.
+        client = _fake_client(history_error=_http_error(404))
         with (
             _patch_db(),
             _plaintext_encryption(),
@@ -202,6 +207,94 @@ class TestProcessNotification(TestTemplate):
             _seed_token(history_id="1")
             self._subscribe()
             result = process_notification("a@b.com", "999", "pubsub-x")
+            assert result == {"status": "ok", "enqueued": 0}
+            with db_engine.use_db_session() as session:
+                assert session.query(WebhookDelivery).count() == 0
+                row = session.get(GoogleToken, "u1")
+                assert row is not None
+                assert row.watch_history_id == "999"  # reset forward
+
+    def test_baseline_never_regresses_on_out_of_order_push(self):
+        # A notification carrying a LOWER historyId than the stored baseline
+        # must not rewind it (which would re-walk + re-deliver old messages).
+        client = _fake_client(history={"history": []})
+        with (
+            _patch_db(),
+            _plaintext_encryption(),
+            patch("services.gmail_watch_svc._get_gmail_client", return_value=client),
+        ):
+            _seed_token(history_id="500")
+            self._subscribe()
+            result = process_notification("a@b.com", "300", "pubsub-oo")
+            assert result["status"] == "ok"
+            with db_engine.use_db_session() as session:
+                row = session.get(GoogleToken, "u1")
+                assert row is not None
+                assert row.watch_history_id == "500"  # not rewound to 300
+
+    def test_deleted_message_is_skipped_not_poisoning_the_batch(self):
+        # history reports two added messages; one 404s on get (deleted before
+        # fetch). The batch must skip it and still enqueue the survivor.
+        client = _fake_client(
+            history={
+                "history": [
+                    {
+                        "messagesAdded": [
+                            {"message": {"id": "m_gone"}},
+                            {"message": {"id": "m_ok"}},
+                        ]
+                    }
+                ]
+            },
+        )
+
+        def _get(**kw):
+            req = MagicMock()
+            if kw["id"] == "m_gone":
+                req.execute = MagicMock(side_effect=_http_error(404))
+            else:
+                req.execute.return_value = {
+                    "id": "m_ok",
+                    "threadId": "t",
+                    "labelIds": ["INBOX"],
+                    "snippet": "hi",
+                    "payload": {"headers": []},
+                }
+            return req
+
+        client.users.return_value.messages.return_value.get = MagicMock(
+            side_effect=_get
+        )
+        with (
+            _patch_db(),
+            _plaintext_encryption(),
+            patch("services.gmail_watch_svc._get_gmail_client", return_value=client),
+        ):
+            _seed_token(history_id="100")
+            self._subscribe()
+            result = process_notification("a@b.com", "600", "pubsub-del")
+            assert result == {"status": "ok", "enqueued": 1}
+
+    def test_multi_page_history_pagination(self):
+        client = _fake_client()
+        pages = [
+            {
+                "history": [{"messagesAdded": [{"message": {"id": "m1"}}]}],
+                "nextPageToken": "p2",
+            },
+            {"history": [{"messagesAdded": [{"message": {"id": "m2"}}]}]},
+        ]
+        client.users.return_value.history.return_value.list.return_value.execute = (
+            MagicMock(side_effect=pages)
+        )
+        with (
+            _patch_db(),
+            _plaintext_encryption(),
+            patch("services.gmail_watch_svc._get_gmail_client", return_value=client),
+        ):
+            _seed_token(history_id="100")
+            self._subscribe()
+            result = process_notification("a@b.com", "700", "pubsub-pg")
             assert result == {"status": "ok", "enqueued": 2}
 
     def test_unknown_email_is_acked_without_enqueue(self):
@@ -269,6 +362,59 @@ class TestPushRoute(TestTemplate):
             )
             assert resp.status_code == 403
 
+    def test_invalid_oidc_token_is_401(self):
+        with (
+            patch.object(global_config, "GMAIL_PUSH_AUDIENCE", "aud"),
+            patch(
+                "google.oauth2.id_token.verify_oauth2_token",
+                side_effect=ValueError("bad token"),
+            ),
+        ):
+            client = TestClient(app)
+            resp = client.post(
+                "/api/v1/google/webhook/gmail",
+                json=_envelope(),
+                headers={"Authorization": "Bearer bad"},
+            )
+            assert resp.status_code == 401
+
+    def test_unverified_email_is_403(self):
+        with (
+            patch.object(global_config, "GMAIL_PUSH_AUDIENCE", "aud"),
+            patch.object(global_config, "GMAIL_PUSH_SA_EMAIL", "sa@proj.iam"),
+            patch(
+                "google.oauth2.id_token.verify_oauth2_token",
+                return_value={"email": "sa@proj.iam", "email_verified": False},
+            ),
+        ):
+            client = TestClient(app)
+            resp = client.post(
+                "/api/v1/google/webhook/gmail",
+                json=_envelope(),
+                headers={"Authorization": "Bearer tok"},
+            )
+            assert resp.status_code == 403
+
+    def test_missing_sa_email_in_prod_is_503(self):
+        # Fail closed: without GMAIL_PUSH_SA_EMAIL, any Google-signed token
+        # would pass, so outside dev the receiver refuses to run.
+        with (
+            patch.object(global_config, "GMAIL_PUSH_AUDIENCE", "aud"),
+            patch.object(global_config, "GMAIL_PUSH_SA_EMAIL", None),
+            patch.object(global_config, "DEV_ENV", "prod"),
+            patch(
+                "google.oauth2.id_token.verify_oauth2_token",
+                return_value={"email": "whoever@x.com", "email_verified": True},
+            ),
+        ):
+            client = TestClient(app)
+            resp = client.post(
+                "/api/v1/google/webhook/gmail",
+                json=_envelope(),
+                headers={"Authorization": "Bearer tok"},
+            )
+            assert resp.status_code == 503
+
     def test_internal_renew_requires_token(self):
         with patch.object(global_config, "WEBHOOK_RUNNER_TOKEN", "s3cret"):
             client = TestClient(app)
@@ -283,3 +429,67 @@ class TestPushRoute(TestTemplate):
             client = TestClient(app)
             resp = client.post("/api/v1/google/internal/renew")
             assert resp.status_code == 503
+
+    def test_internal_renew_success_drives_both_jobs(self):
+        with (
+            patch.object(global_config, "WEBHOOK_RUNNER_TOKEN", "s3cret"),
+            patch(
+                "api_server.routes.google.webhooks.renew_due_watches",
+                return_value=2,
+            ),
+            patch(
+                "api_server.routes.google.webhooks.drain_due_deliveries",
+                return_value={"sent": 3},
+            ),
+        ):
+            client = TestClient(app)
+            resp = client.post(
+                "/api/v1/google/internal/renew",
+                headers={"X-Runner-Token": "s3cret"},
+            )
+            assert resp.status_code == 200
+            assert resp.json() == {"renewed": 2, "drained": {"sent": 3}}
+
+
+class TestRenewDueWatches(TestTemplate):
+    def test_selects_only_topic_bound_near_expiry_rows(self):
+        client = _fake_client()  # watch() returns a fresh historyId/expiration
+        with (
+            _patch_db(),
+            patch.object(global_config, "GMAIL_PUBSUB_TOPIC", "projects/p/topics/t"),
+            patch("services.gmail_watch_svc._get_gmail_client", return_value=client),
+        ):
+            now = datetime.now(UTC)
+            with db_engine.use_db_session() as session:
+                # due: no expiration
+                session.add(
+                    GoogleToken(
+                        user_id="due_none",
+                        refresh_token_enc=b"x",
+                        key_id="plaintext",
+                        watch_topic="projects/p/topics/t",
+                        watch_expiration=None,
+                    )
+                )
+                # not due: expires far in the future
+                session.add(
+                    GoogleToken(
+                        user_id="fresh",
+                        refresh_token_enc=b"x",
+                        key_id="plaintext",
+                        watch_topic="projects/p/topics/t",
+                        watch_expiration=now + timedelta(days=10),
+                    )
+                )
+                # never watched: no topic -> excluded
+                session.add(
+                    GoogleToken(
+                        user_id="no_watch",
+                        refresh_token_enc=b"x",
+                        key_id="plaintext",
+                        watch_topic=None,
+                    )
+                )
+                session.commit()
+
+            assert renew_due_watches() == 1

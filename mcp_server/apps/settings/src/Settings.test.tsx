@@ -38,12 +38,45 @@ function makeApp(
 }
 
 describe("Settings panel", () => {
-  it("renders the gmail snapshot from ontoolresult", async () => {
-    const app = makeApp([]);
+  it("renders the gmail snapshot from ontoolresult, not the refresh fallback", async () => {
+    // settings.get returns nothing, so a rendered email can only have come
+    // from the ontoolresult payload - the path this test actually names.
+    const app: McpAppLike = {
+      callServerTool: vi.fn(async () => ({})),
+    };
     render(<Settings mcpApp={app} />);
     app.ontoolresult?.({ structuredContent: snap() });
     expect(await screen.findByText("me@example.com")).toBeInTheDocument();
     expect(screen.getByText("Watching inbox")).toBeInTheDocument();
+  });
+
+  it("rotate reveals a new secret and targets the right subscription", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const sub = { id: "s1", url: "https://h/x", event_types: null, active: true };
+    const app = makeApp(calls, snap({ subscriptions: [sub] }));
+    render(<Settings mcpApp={app} />);
+    app.ontoolresult?.({ structuredContent: snap({ subscriptions: [sub] }) });
+
+    fireEvent.click(await screen.findByText("Rotate"));
+    expect(await screen.findByText("whsec_new999")).toBeInTheDocument();
+    expect(
+      calls.find((c) => c.name === "settings.rotate_secret")?.args.subscription_id
+    ).toBe("s1");
+  });
+
+  it("remove deactivates the subscription", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const sub = { id: "s1", url: "https://h/x", event_types: null, active: true };
+    const app = makeApp(calls, snap({ subscriptions: [sub] }));
+    render(<Settings mcpApp={app} />);
+    app.ontoolresult?.({ structuredContent: snap({ subscriptions: [sub] }) });
+
+    fireEvent.click(await screen.findByText("Remove"));
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.name === "settings.unsubscribe")?.args.subscription_id
+      ).toBe("s1")
+    );
   });
 
   it("adds an endpoint and reveals the one-time secret", async () => {
