@@ -4,6 +4,7 @@ import json
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,9 +12,12 @@ from sqlalchemy.pool import StaticPool
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
 from api_server.server import app
-from common import global_config
+from common import global_config, token_encryption
+from common.token_encryption import FernetEncryption
+from db import engine as db_engine
 from db.base import Base
 from db.engine import get_db_session
+from db.models.thread_curation import ThreadCuration
 from tests.test_template import TestTemplate
 
 _engine = create_engine(
@@ -228,3 +232,127 @@ class TestAPIServer(TestTemplate):
                 app.dependency_overrides[get_authenticated_user] = original
             else:
                 app.dependency_overrides.pop(get_authenticated_user, None)
+
+
+class TestInboxSaveCurationIdempotency(TestTemplate):
+    """The auto-generated route for inbox_save_curation (mutating=True) actually
+    enforces Idempotency-Key end-to-end: missing key -> 422, replay -> cached
+    body with no double-write, same key + different payload -> 422.
+
+    This exercises the real route factory + execute_idempotent + the ledger
+    write path, not a synthetic stand-in route.
+    """
+
+    ROUTE = "/api/v1/services/inbox_save_curation"
+
+    def setup_method(self):
+        self.engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+        @contextmanager
+        def _ctx():
+            session = self.SessionLocal()
+            try:
+                yield session
+            finally:
+                session.close()
+
+        def _db_dep():
+            session = self.SessionLocal()
+            try:
+                yield session
+            finally:
+                session.close()
+
+        app.dependency_overrides[get_authenticated_user] = _override_auth
+        app.dependency_overrides[get_db_session] = _db_dep
+
+        # Route every db.engine.use_db_session caller (idempotency claim/replay,
+        # billing quota, and the curation ledger) at this fresh test DB. Both
+        # globals must be set: _init_engine() only short-circuits when _engine
+        # is non-None, otherwise it rebuilds from BACKEND_DB_URI and clobbers
+        # _SessionLocal.
+        self._orig_engine = db_engine._engine
+        self._orig_session_local = db_engine._SessionLocal
+        db_engine._engine = self.engine
+        db_engine._SessionLocal = self.SessionLocal
+
+        self._patchers = [
+            patch("api_server.idempotency.use_db_session", _ctx),
+            patch("api_server.billing.limits.use_db_session", _ctx),
+            # Disable opportunistic idempotency-key cleanup so it can't race.
+            patch("api_server.idempotency.random.random", return_value=1.0),
+            # inbox_save_curation reads each thread's current historyId to stamp
+            # the row; mock the Gmail client + batch fetch (no network).
+            patch("services.inbox_curation_svc._get_gmail_client"),
+            patch(
+                "services.inbox_curation_svc._batch_get_threads",
+                return_value={"t1": {"id": "t1", "historyId": "100"}},
+            ),
+            # Real encryption backend for summary/reasoning at rest.
+            patch.object(
+                token_encryption,
+                "require_encryption",
+                return_value=FernetEncryption(Fernet.generate_key().decode()),
+            ),
+        ]
+        for p in self._patchers:
+            p.start()
+        self.client = TestClient(app)
+
+    def teardown_method(self):
+        for p in self._patchers:
+            p.stop()
+        db_engine._engine = self._orig_engine
+        db_engine._SessionLocal = self._orig_session_local
+        app.dependency_overrides.clear()
+
+    def _payload(self, importance: float = 0.9) -> dict:
+        return {
+            "judgments": [
+                {
+                    "thread_id": "t1",
+                    "bucket": "needs_reply",
+                    "importance": importance,
+                    "summary": "deck due",
+                }
+            ]
+        }
+
+    def _ledger_rows(self, thread_id: str = "t1") -> int:
+        with self.SessionLocal() as s:
+            return (
+                s.query(ThreadCuration)
+                .filter(ThreadCuration.thread_id == thread_id)
+                .count()
+            )
+
+    def test_missing_idempotency_key_422(self):
+        resp = self.client.post(self.ROUTE, json=self._payload())
+        assert resp.status_code == 422
+        assert "Idempotency-Key" in resp.json()["error"]["message"]
+
+    def test_replay_same_key_does_not_double_write(self):
+        headers = {"Idempotency-Key": "k1"}
+        first = self.client.post(self.ROUTE, json=self._payload(), headers=headers)
+        assert first.status_code == 200, first.text
+        assert first.json()["saved"] == 1
+        # Replay: same key + same payload -> cached body, no second write.
+        second = self.client.post(self.ROUTE, json=self._payload(), headers=headers)
+        assert second.status_code == 200
+        assert second.json() == first.json()
+        assert self._ledger_rows("t1") == 1
+
+    def test_same_key_different_payload_conflicts(self):
+        headers = {"Idempotency-Key": "k2"}
+        first = self.client.post(self.ROUTE, json=self._payload(0.9), headers=headers)
+        assert first.status_code == 200, first.text
+        conflict = self.client.post(
+            self.ROUTE, json=self._payload(0.1), headers=headers
+        )
+        assert conflict.status_code == 422
