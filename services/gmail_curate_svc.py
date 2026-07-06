@@ -227,6 +227,23 @@ def _build_draft_thread_map(svc: Any) -> dict[str, str]:
     return draft_thread_map
 
 
+# Base "triageable inbox" query: excludes done threads, Gmail category tabs,
+# and user-applied noise labels. Shared by the deterministic curate service and
+# the ledger read/search path so both agree on what counts as inbox to triage.
+_CURATE_BASE_QUERY = (
+    'in:inbox -label:"MCP/Done"'
+    " -category:updates -category:promotions -category:social -category:forums"
+    " -label:Newsletter -label:Promotion -label:Marketing -label:Notifications"
+    ' -label:"Product Updates" -label:"Marketing/Webinar" -label:Webinar'
+    ' -label:"Cold Outbound" -label:"NPS Survey" -label:Survey'
+)
+
+
+def build_curate_query(query: str | None = None) -> str:
+    """Return the triageable-inbox Gmail query, optionally AND-ed with ``query``."""
+    return f"{_CURATE_BASE_QUERY} ({query})" if query else _CURATE_BASE_QUERY
+
+
 def _thread_has_noise_labels(
     messages: list[dict[str, Any]],
     label_id_to_name: dict[str, str],
@@ -242,7 +259,7 @@ def _thread_has_noise_labels(
 
 @service(
     name="gmail_curate_inbox",
-    description="Rank recent inbox threads by a deterministic importance score. When an interactive UI is rendered alongside the result, keep your text response brief (a one-line summary) since the user can browse details in the UI. Only elaborate if the user asks.",
+    description="Rank recent inbox threads by a deterministic heuristic score and render the inbox dashboard. This is a quick provisional view, NOT the assistant's own triage: for 'what's important / triage my inbox', prefer inbox_get_curation (banked LLM verdicts + coverage), going deeper with inbox_search + inbox_save_curation when coverage shows uncurated/stale threads. When an interactive UI is rendered alongside the result, keep your text response brief (a one-line summary) since the user can browse details in the UI. Only elaborate if the user asks.",
     input_model=GmailCurateInboxInput,
     output_model=GmailCurateInboxResult,
 )
@@ -254,14 +271,7 @@ def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
     # Exclude done threads. The mark-done service applies the label "MCP/Done"
     # (see _MCP_DONE_LABEL_NAME in gmail_messages_svc), so the exclusion must use
     # that exact name - "MCP-Done" would not match and done threads would leak in.
-    base = (
-        'in:inbox -label:"MCP/Done"'
-        " -category:updates -category:promotions -category:social -category:forums"
-        " -label:Newsletter -label:Promotion -label:Marketing -label:Notifications"
-        ' -label:"Product Updates" -label:"Marketing/Webinar" -label:Webinar'
-        ' -label:"Cold Outbound" -label:"NPS Survey" -label:Survey'
-    )
-    q = f"{base} ({input.query})" if input.query else base
+    q = build_curate_query(input.query)
     over_fetch = max(input.limit * 3, 30)
     listing = (
         svc.users().threads().list(userId="me", q=q, maxResults=over_fetch).execute()

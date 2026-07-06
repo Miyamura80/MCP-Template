@@ -112,6 +112,43 @@ describe("Inbox", () => {
     expect(screen.getByText("Just a hello")).toBeInTheDocument();
   });
 
+  it("renders banked ledger verdicts + coverage from inbox_get_curation", async () => {
+    const { app } = makeMcpApp();
+    render(<Inbox mcpApp={app} />);
+    app.ontoolresult?.({
+      structuredContent: {
+        records: [
+          {
+            thread_id: "tL",
+            bucket: "needs_reply",
+            importance: 0.9,
+            summary: "Investor wants the updated deck by Friday",
+            suggested_action: "reply",
+            ledger_status: "curated",
+          },
+          {
+            thread_id: "tS",
+            bucket: "fyi",
+            importance: 0.4,
+            summary: "Weekly digest",
+            ledger_status: "stale",
+          },
+        ],
+        coverage: { curated: 1, stale: 1, uncurated: 3 },
+      },
+    });
+    // Summary becomes the row's primary line; the ledger row is clickable.
+    expect(
+      await screen.findByText(/Investor wants the updated deck/),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("row-tL")).toBeInTheDocument();
+    // Coverage banner surfaces the curated / stale / uncurated counts.
+    const banner = screen.getByTestId("coverage-banner");
+    expect(banner).toHaveTextContent("1 triaged");
+    expect(banner).toHaveTextContent("1 stale");
+    expect(banner).toHaveTextContent("3 not yet triaged");
+  });
+
   it("clicking a row calls gmail_inbox.open_thread and renders the thread", async () => {
     const { app, calls } = makeMcpApp({
       threadResults: { tA: plainThread },

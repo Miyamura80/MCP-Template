@@ -8,8 +8,15 @@ from mcp_server.enhancers.gmail_inbox import (
     APP_URI,
     gmail_curate_inbox_enhanced,
     gmail_get_thread_enhanced,
+    inbox_get_curation_enhanced,
 )
 from mcp_server.server import build_mcp_server
+from models.curation import (
+    CoverageSummary,
+    CurationRecord,
+    GetCurationInput,
+    GetCurationResult,
+)
 from models.gmail import (
     GmailCuratedThread,
     GmailCurateInboxInput,
@@ -85,6 +92,39 @@ class TestGmailInboxEnhancer(TestTemplate):
         result = asyncio.run(gmail_curate_inbox_enhanced(tool))
         assert len(result.threads) == 1
         assert result.threads[0].thread_id == "tA"
+
+
+def _fake_curation(_input: GetCurationInput) -> GetCurationResult:
+    return GetCurationResult(
+        records=[CurationRecord(thread_id="tA", summary="Investor deck due")],
+        coverage=CoverageSummary(curated=1, stale=0, uncurated=2),
+    )
+
+
+class TestInboxGetCurationEnhancer(TestTemplate):
+    def test_attaches_app_when_capabilities_allow(self, monkeypatch):
+        monkeypatch.delenv("MCP_DISABLE_APPS", raising=False)
+        tool: EnhancedTool[GetCurationInput, GetCurationResult] = EnhancedTool(
+            ctx=_make_ctx(),
+            input=GetCurationInput(user_id="alice"),
+            service_fn=_fake_curation,
+        )
+        result = asyncio.run(inbox_get_curation_enhanced(tool))
+        assert isinstance(result, GetCurationResult)
+        assert result.coverage.uncurated == 2
+        meta = tool.app_meta()
+        assert meta is not None
+        assert meta["ui"]["resourceUri"] == APP_URI
+
+    def test_disabled_via_env_skips_app(self, monkeypatch):
+        monkeypatch.setenv("MCP_DISABLE_APPS", "1")
+        tool: EnhancedTool[GetCurationInput, GetCurationResult] = EnhancedTool(
+            ctx=_make_ctx(),
+            input=GetCurationInput(user_id="alice"),
+            service_fn=_fake_curation,
+        )
+        asyncio.run(inbox_get_curation_enhanced(tool))
+        assert tool.app_meta() is None
 
 
 def _fake_thread(_input: GmailGetThreadInput) -> GmailThread:

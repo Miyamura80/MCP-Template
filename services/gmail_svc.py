@@ -284,7 +284,28 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
         row.revoked_at = datetime.now(UTC)
         session.commit()
         _invalidate_gmail_client(input.user_id)
-        return GmailDisconnectResult(revoked=True)
+
+    # Purge all banked curation for this user: disconnecting Gmail must leave no
+    # derived inbox content behind. Call-time import avoids a module-load cycle
+    # (curation_ledger is DB-only and does not import this module). Best-effort:
+    # the token is already revoked+committed above, so a purge failure must not
+    # turn a successful disconnect into a server error (same rationale as
+    # mark_state_best_effort).
+    from sqlalchemy.exc import SQLAlchemyError  # noqa: PLC0415
+
+    from services.curation_ledger import purge_user  # noqa: PLC0415
+
+    try:
+        purged = purge_user(input.user_id)
+        if purged:
+            log.debug("Purged {} curation rows for user {}", purged, input.user_id)
+    except SQLAlchemyError as exc:
+        log.warning(
+            "Curation purge failed for user {} (disconnect still succeeded): {}",
+            input.user_id,
+            exc,
+        )
+    return GmailDisconnectResult(revoked=True)
 
 
 # ---------------------------------------------------------------------------

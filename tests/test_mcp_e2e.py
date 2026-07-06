@@ -16,6 +16,7 @@ import json
 from contextlib import contextmanager
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy import create_engine
@@ -24,12 +25,16 @@ from sqlalchemy.pool import StaticPool
 
 from api_server.auth.api_key_auth import create_api_key
 from api_server.server import app
+from common import token_encryption
+from common.token_encryption import FernetEncryption
 from db import engine as db_engine
 from db.base import Base
 from mcp_server._tool_factory import make_tool
 from mcp_server.enhancers import _enhancers, enhance
 from mcp_server.server import mcp
+from models.curation import CurationBucket, ThreadJudgment
 from services import _registry, get_registry, service
+from services.curation_ledger import upsert_judgments
 from tests.test_template import TestTemplate
 
 _PROTOCOL_VERSION = "2025-03-26"
@@ -198,6 +203,58 @@ class TestMCPWireE2E(TestTemplate):
             assert len(contents) == 1
             assert contents[0]["mimeType"] == "text/html;profile=mcp-app"
             assert contents[0]["text"].lstrip().lower().startswith("<!doctype html>")
+
+    def test_inbox_get_curation_over_wire(self):
+        """inbox_get_curation crosses the wire as a real enhanced tool: banked
+        verdicts + coverage in structuredContent, and the gmail_inbox app in
+        both tools/list and the CallToolResult _meta.ui."""
+        user = "u-e2e-curation"
+        enc = FernetEncryption(Fernet.generate_key().decode())
+        stubs = [{"id": "t1", "historyId": "100"}]
+        with (
+            patch.object(token_encryption, "require_encryption", return_value=enc),
+            _wire_session(user) as session,
+        ):
+            # Bank one verdict into the same in-memory DB the wire uses.
+            upsert_judgments(
+                user,
+                [
+                    ThreadJudgment(
+                        thread_id="t1",
+                        bucket=CurationBucket.needs_reply,
+                        importance=0.9,
+                        summary="deck due Friday",
+                    )
+                ],
+                history_ids={"t1": "100"},
+            )
+            with (
+                patch("services.inbox_curation_svc._get_gmail_client"),
+                patch(
+                    "services.inbox_curation_svc._list_thread_stubs",
+                    return_value=stubs,
+                ),
+            ):
+                tools = {t["name"]: t for t in session.request("tools/list")["tools"]}
+                # Enhanced read tool: publishes outputSchema + its ui:// app.
+                gc = tools["inbox_get_curation"]
+                assert gc["outputSchema"]["type"] == "object"
+                assert gc["_meta"]["ui"]["resourceUri"] == "ui://mymcp/gmail_inbox"
+                # The mutating write-back stays headless (no UI on the wire).
+                save_meta = tools["inbox_save_curation"].get("_meta")
+                assert save_meta in (None, {})
+
+                result = session.request(
+                    "tools/call", {"name": "inbox_get_curation", "arguments": {}}
+                )
+                sc = result["structuredContent"]
+                assert sc["coverage"] == {"curated": 1, "stale": 0, "uncurated": 0}
+                assert sc["records"][0]["thread_id"] == "t1"
+                assert sc["records"][0]["summary"] == "deck due Friday"
+                assert sc["records"][0]["ledger_status"] == "curated"
+                assert result["isError"] is False
+                # Enhancer attached the dashboard app on the result.
+                assert result["_meta"]["ui"]["resourceUri"] == "ui://mymcp/gmail_inbox"
 
     def test_enhanced_tool_call_assembles_full_result_on_wire(self):
         """Register a throwaway enhanced tool and call it through the wire,

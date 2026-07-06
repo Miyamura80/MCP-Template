@@ -7,6 +7,7 @@ which view to render: thread list (curated inbox) or single thread reader.
 
 from mcp_server.enhancers import enhance
 from mcp_server.enhancers.base import EnhancedTool
+from models.curation import GetCurationInput, GetCurationResult
 from models.gmail import (
     GmailCurateInboxInput,
     GmailCurateInboxResult,
@@ -21,6 +22,22 @@ APP_URI = "ui://mymcp/gmail_inbox"
 async def gmail_curate_inbox_enhanced(
     tool: EnhancedTool[GmailCurateInboxInput, GmailCurateInboxResult],
 ) -> GmailCurateInboxResult:
+    result = tool.call()
+    if tool.can_show_app:
+        tool.send_app(APP_URI)
+    return result
+
+
+@enhance("inbox_get_curation", fallback="headless", app_uri=APP_URI)
+async def inbox_get_curation_enhanced(
+    tool: EnhancedTool[GetCurationInput, GetCurationResult],
+) -> GetCurationResult:
+    """Render the inbox dashboard from banked ledger verdicts + coverage.
+
+    The app's ``ontoolresult`` handler detects the ``records``/``coverage``
+    payload shape and renders the persisted curation (with a coverage banner),
+    so the dashboard is consistent across sessions and clients.
+    """
     result = tool.call()
     if tool.can_show_app:
         tool.send_app(APP_URI)
