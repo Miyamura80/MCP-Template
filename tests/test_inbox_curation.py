@@ -137,6 +137,7 @@ class TestServiceRegistration(TestTemplate):
         # Input models are wired to the matching service, too.
         assert by_name["inbox_search"].input_model is InboxSearchInput
         assert by_name["inbox_get_curation"].input_model is GetCurationInput
+        assert by_name["inbox_save_curation"].input_model is SaveCurationInput
 
 
 class TestCurationContracts(TestTemplate):
@@ -464,6 +465,10 @@ class TestInboxSearch(TestTemplate):
                     return_value=fetched,
                 ),
                 patch(
+                    "services.inbox_curation_svc._find_mcp_done_label",
+                    return_value=None,
+                ),
+                patch(
                     "services.inbox_curation_svc._mailbox_history_id",
                     return_value="1000",
                 ),
@@ -716,7 +721,7 @@ class TestGmailShapeHelpers(TestTemplate):
                 ],
             },
         ]
-        ids, latest = _changed_thread_ids(svc, "800", 10)
+        ids, latest = _changed_thread_ids(svc, "800")
         assert ids == ["t1", "t2", "t3"]  # order preserved, deduped
         assert latest == "950"
         # No historyTypes filter is sent (all change types are returned).
@@ -728,7 +733,7 @@ class TestGmailShapeHelpers(TestTemplate):
             resp=MagicMock(status=404, reason="Not Found"), content=b""
         )
         # historyId too old -> (None, None) so the caller runs a normal query.
-        assert _changed_thread_ids(svc, "1", 10) == (None, None)
+        assert _changed_thread_ids(svc, "1") == (None, None)
 
 
 class TestInboxSearchIncremental(TestTemplate):
@@ -775,6 +780,10 @@ class TestInboxSearchIncremental(TestTemplate):
                     return_value=({}, {}),
                 ),
                 patch(
+                    "services.inbox_curation_svc._find_mcp_done_label",
+                    return_value=None,
+                ),
+                patch(
                     "services.inbox_curation_svc._batch_get_threads",
                     return_value=fetched,
                 ),
@@ -785,3 +794,69 @@ class TestInboxSearchIncremental(TestTemplate):
             assert {i.thread_id for i in res.items} == {"t1", "t2"}
             # Watermark comes from history.list, not a getProfile fallback.
             assert res.current_history_id == "999"
+
+    def _msg(self, labels: list[str]) -> dict:
+        return {
+            "id": "m",
+            "labelIds": labels,
+            "internalDate": "1700000000000",
+            "snippet": "s",
+            "payload": {"headers": [{"name": "Subject", "value": "s"}]},
+        }
+
+    def test_incremental_filters_non_triageable_threads(self):
+        # The unfiltered history delta can include archived/done threads after a
+        # label-only change; they must be dropped so inbox_search stays scoped to
+        # the triageable inbox.
+        with _patch_db(), _patch_fernet():
+            svc = MagicMock()
+            svc.users().history().list().execute.return_value = {
+                "historyId": "999",
+                "history": [
+                    {
+                        "messages": [
+                            {"threadId": "keep"},
+                            {"threadId": "archived"},
+                            {"threadId": "done"},
+                        ]
+                    }
+                ],
+            }
+            fetched = {
+                "keep": {
+                    "id": "keep",
+                    "historyId": "1",
+                    "messages": [self._msg(["INBOX"])],
+                },
+                "archived": {
+                    "id": "archived",
+                    "historyId": "1",
+                    "messages": [self._msg([])],
+                },
+                "done": {
+                    "id": "done",
+                    "historyId": "1",
+                    "messages": [self._msg(["INBOX", "DONE_ID"])],
+                },
+            }
+            with (
+                patch(
+                    "services.inbox_curation_svc._get_gmail_client", return_value=svc
+                ),
+                patch(
+                    "services.inbox_curation_svc._build_label_lookups",
+                    return_value=({}, {}),
+                ),
+                patch(
+                    "services.inbox_curation_svc._find_mcp_done_label",
+                    return_value="DONE_ID",
+                ),
+                patch(
+                    "services.inbox_curation_svc._batch_get_threads",
+                    return_value=fetched,
+                ),
+            ):
+                res = inbox_search(
+                    InboxSearchInput(user_id="alice", since_history_id="800")
+                )
+            assert {i.thread_id for i in res.items} == {"keep"}

@@ -52,8 +52,12 @@ from services.gmail_curate_svc import (
     _thread_has_noise_labels,
     build_curate_query,
 )
-from services.gmail_messages_svc import _internal_date_to_dt
+from services.gmail_messages_svc import _find_mcp_done_label, _internal_date_to_dt
 from services.gmail_svc import _get_gmail_client, _headers_to_dict
+
+# Gmail's system label id for the inbox. A thread archived out of band loses it,
+# so an incremental history delta (which is unfiltered) must re-check it.
+_INBOX_LABEL_ID = "INBOX"
 
 # Bound on how many inbox thread stubs the cheap read scans for coverage. The
 # curated verdicts users care about are recent; scanning the whole mailbox for
@@ -130,19 +134,26 @@ def _mailbox_history_id(svc: Any) -> str | None:
 
 
 def _changed_thread_ids(
-    svc: Any, since_history_id: str, limit: int
+    svc: Any, since_history_id: str
 ) -> tuple[list[str] | None, str | None]:
     """Return ``(changed_thread_ids, latest_history_id)`` via users.history.list.
 
     Returns ``(None, None)`` when Gmail rejects the start id as too old (HTTP
     404) so the caller can fall back to a normal query.
 
+    Consumes the FULL history delta (every page) before returning, so the
+    ``latest_history_id`` watermark reflects exactly what was consumed - it is
+    never advanced past changes we didn't return. The delta is not truncated by
+    the caller's ``limit``: a recent watermark yields a small delta, and a very
+    old one 404s into the query fallback, so returning the complete delta keeps
+    incremental sync from permanently skipping overflow threads.
+
     No ``historyTypes`` filter is applied: a thread's ``historyId`` advances on
     *any* change (new message, label add/remove, read/unread), and the ledger's
-    freshness check treats any such advance as stale - so the incremental delta
-    must surface every changed thread, not just ones with a new message.
-    Each history record's ``messages`` field lists every message it touched, so
-    it captures label-only changes that ``messagesAdded`` would miss.
+    freshness check treats any such advance as stale - so the delta must surface
+    every changed thread, not just ones with a new message. Each record's
+    ``messages`` field lists every message it touched, capturing label-only
+    changes that ``messagesAdded`` would miss.
     """
     from googleapiclient.errors import HttpError  # noqa: PLC0415
 
@@ -171,13 +182,13 @@ def _changed_thread_ids(
                         seen.add(tid)
                         thread_ids.append(tid)
             page_token = resp.get("nextPageToken")
-            if not page_token or len(thread_ids) >= limit:
+            if not page_token:
                 break
     except HttpError as exc:
         if exc.resp.status == 404:
             return None, None
         raise
-    return thread_ids[:limit], _history_str(latest)
+    return thread_ids, _history_str(latest)
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +318,29 @@ def _search_item(
     )
 
 
+def _is_triageable(
+    messages: list[dict[str, Any]],
+    *,
+    done_label_id: str | None,
+    label_id_to_name: dict[str, str],
+) -> bool:
+    """Whether a thread still belongs in the triageable inbox.
+
+    The incremental history delta is unfiltered (it returns every changed
+    thread, including ones archived or marked done out of band), so results are
+    re-checked against the same criteria ``build_curate_query()`` enforces
+    server-side: in INBOX, not MCP/Done, and no excluded noise label.
+    """
+    thread_label_ids: set[str] = set()
+    for msg in messages:
+        thread_label_ids.update(msg.get("labelIds") or [])
+    if _INBOX_LABEL_ID not in thread_label_ids:
+        return False
+    if done_label_id is not None and done_label_id in thread_label_ids:
+        return False
+    return not _thread_has_noise_labels(messages, label_id_to_name)
+
+
 @service(
     name="inbox_search",
     description=(
@@ -326,12 +360,13 @@ def _search_item(
 def inbox_search(input: InboxSearchInput) -> InboxSearchResult:
     svc = _get_gmail_client(input.user_id)
     label_id_to_name, label_colors = _build_label_lookups(svc)
+    done_label_id = _find_mcp_done_label(svc)
 
     current_history_id: str | None = None
     thread_ids: list[str] | None = None
     if input.since_history_id:
         thread_ids, current_history_id = _changed_thread_ids(
-            svc, input.since_history_id, input.limit
+            svc, input.since_history_id
         )
     if thread_ids is None:
         # No watermark, or the watermark was too old: normal query.
@@ -352,7 +387,11 @@ def inbox_search(input: InboxSearchInput) -> InboxSearchResult:
         thread = fetched.get(tid)
         if thread is None or not (thread.get("messages") or []):
             continue
-        if _thread_has_noise_labels(thread["messages"], label_id_to_name):
+        if not _is_triageable(
+            thread["messages"],
+            done_label_id=done_label_id,
+            label_id_to_name=label_id_to_name,
+        ):
             continue
         status = _ledger_status_for(
             status_map.get(tid), _history_str(thread.get("historyId"))
