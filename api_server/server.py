@@ -19,6 +19,7 @@ from api_server.middleware.mcp_auth import MCPAuthMiddleware
 from api_server.middleware.rate_limit import RateLimitMiddleware
 from api_server.routes import (
     agentic_payments,
+    ask,
     auth,
     google_oauth,
     health,
@@ -121,6 +122,7 @@ app.include_router(subscription.router)
 app.include_router(webhooks.router)
 app.include_router(google_webhooks.router)
 app.include_router(agentic_payments.router)
+app.include_router(ask.router)
 
 # --- MCP server (streamable HTTP) -----------------------------------------
 # Mounts FastMCP at /mcp so CLI/API/MCP share one process, port, and middleware.
