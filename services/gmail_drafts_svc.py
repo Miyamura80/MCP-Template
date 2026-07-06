@@ -32,6 +32,8 @@ from models.gmail import (
     GmailSendInput,
     GmailSendResult,
     GmailUpdateDraftInput,
+    _UnsetType,
+    unset_to,
 )
 from models.gmail import (
     GmailDraftSummary as _DraftSummary,
@@ -39,6 +41,7 @@ from models.gmail import (
 from services import service
 from services.gmail_draft_helpers import (
     _draft_resource_to_model,
+    _fetch_draft_model,
     _rebuild_draft,
     _resolve_inline_images,
     _resolve_update_attachments,
@@ -182,11 +185,13 @@ def gmail_get_draft(input: GmailGetDraftInput) -> GmailDraft:
     ),
     input_model=GmailUpdateDraftInput,
     output_model=GmailDraft,
+    mutating=True,
 )
 def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
     """Patch a draft non-destructively: omitted fields stay, null clears them.
 
-    Distinguishes "omitted" from "explicit null" via ``model_fields_set`` so a
+    Distinguishes "omitted" from "explicit null" via the ``UNSET`` sentinel
+    default (``model_fields_set`` cannot, over MCP - see ``_UnsetType``) so a
     caller can change just the body without disturbing recipients, subject, or
     attachments. Because Gmail's ``drafts().update`` replaces the entire MIME
     message, existing attachments are re-downloaded and re-attached unless the
@@ -203,18 +208,17 @@ def gmail_update_draft(input: GmailUpdateDraftInput) -> GmailDraft:
     parsed = _parse_message_resource(message)
     message_id = message.get("id") or parsed.get("message_id") or ""
 
-    fields_set = input.model_fields_set
-    to = (input.to if "to" in fields_set else parsed.get("to")) or ""
-    subject = (input.subject if "subject" in fields_set else parsed.get("subject")) or ""
-    cc = input.cc if "cc" in fields_set else parsed.get("cc")
-    bcc = input.bcc if "bcc" in fields_set else parsed.get("bcc")
+    to = unset_to(input.to, parsed.get("to")) or ""
+    subject = unset_to(input.subject, parsed.get("subject")) or ""
+    cc = unset_to(input.cc, parsed.get("cc"))
+    bcc = unset_to(input.bcc, parsed.get("bcc"))
 
     # When the caller sets body, it replaces the content (plain text, no HTML).
     # When omitted, preserve whatever representation the draft already had -
     # including an HTML-only body (and its inline cid: images), which would
     # otherwise be erased. Replacing the body with plain text orphans those
     # images, so they are dropped along with the HTML.
-    if "body" in fields_set:
+    if not isinstance(input.body, _UnsetType):
         body = input.body or ""
         body_html = None
         inline_images = []
@@ -276,7 +280,10 @@ def gmail_compose(input: GmailComposeInput) -> GmailDraft:
     body_dict = draft_message_body(raw, input.in_reply_to_thread_id)
     created = svc.users().drafts().create(userId="me", body=body_dict).execute()
     log.debug("Created Gmail draft id={}", created.get("id"))
-    return _draft_resource_to_model(created)
+    # Gmail's create response carries only a minimal message (id/threadId), so
+    # re-fetch at format=full to echo the real saved state (recipients, body,
+    # attachment ids) the tool contract promises.
+    return _fetch_draft_model(svc, created.get("id") or "")
 
 
 @service(
@@ -453,4 +460,6 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         .execute()
     )
     log.debug("Created Gmail reply draft id={}", created.get("id"))
-    return _draft_resource_to_model(created)
+    # Re-fetch at format=full: the create response omits the saved recipients,
+    # subject, and body, so echoing it directly would return all-null.
+    return _fetch_draft_model(svc, created.get("id") or "")

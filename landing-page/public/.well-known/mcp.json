@@ -12,6 +12,15 @@
       }
     }
   ],
+  "ask": {
+    "url": "https://gmailmcp.com/ask",
+    "protocol": "nlweb",
+    "methods": [
+      "POST",
+      "GET"
+    ],
+    "streaming": "sse"
+  },
   "documentation": "https://gmailmcp.com/llms-full.txt",
   "website": "https://gmailmcp.com",
   "repository": "https://github.com/Miyamura80/MCP-Template"

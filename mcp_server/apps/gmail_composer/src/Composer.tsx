@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sanitizeHtml } from "./sanitize";
 
 export type Draft = {
@@ -78,7 +78,72 @@ function fieldsEqual(a: Draft, b: Draft): boolean {
   );
 }
 
+// Tracks whether the app is rendered in a narrow (mobile) viewport. Guards
+// against `matchMedia` being unavailable (jsdom in tests) by falling back to
+// desktop behavior, so the thread stays expanded and the body keeps its inner
+// scroll there - exactly the "desktop is fine" case.
+function useIsMobile(query = "(max-width: 600px)"): boolean {
+  const getMatch = () =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(query).matches
+      : false;
+  const [matches, setMatches] = useState(getMatch);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mql = window.matchMedia(query);
+    const onChange = () => setMatches(mql.matches);
+    onChange();
+    // Safari < 14 (older iOS) has no addEventListener on MediaQueryList and
+    // only implements the legacy addListener/removeListener API. Calling the
+    // missing method would throw at mount, so fall back when it's absent.
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }, [query]);
+  return matches;
+}
+
+// Grows a textarea to fit its content while `enabled`, so there is no inner
+// scroll region for a touch drag to fight. Recomputes on three triggers:
+//   - `value` changes (typing / an agent rewriting the body),
+//   - `enabled` flips (crossing the mobile breakpoint),
+//   - the element's own width changes (host iframe resized *without* crossing
+//     the breakpoint - otherwise the height would go stale and, because the
+//     mobile style hides overflow, the extra lines would be unreachable).
+// Uses useLayoutEffect so the box is sized before paint, avoiding a one-frame
+// clip on each keystroke. When disabled it clears the inline height so the
+// CSS fixed-height (desktop) box takes back over.
+function useAutoGrow(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  value: string,
+  enabled: boolean,
+) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!enabled) {
+      el.style.height = "";
+      return;
+    }
+    const resize = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    resize();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(resize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, value, enabled]);
+}
+
 export function Composer({ mcpApp }: ComposerProps) {
+  const isMobile = useIsMobile();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
@@ -89,10 +154,16 @@ export function Composer({ mcpApp }: ComposerProps) {
   const localDirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef<Draft | null>(null);
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+
+  // On mobile the body grows to fit its content so there is no inner scroll
+  // region competing with the page scroll - the whole iframe scrolls naturally
+  // under a finger drag. Desktop keeps its fixed height and own scrollbar.
+  useAutoGrow(bodyRef, draft?.body ?? "", isMobile);
 
   useEffect(() => {
     const handler = (raw: unknown) => {
@@ -231,7 +302,11 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   // Thread context: fetch when draft has a thread_id
   const [thread, setThread] = useState<Thread | null>(null);
-  const [threadCollapsed, setThreadCollapsed] = useState(false);
+  // `null` means "follow the viewport default": collapsed on mobile so the
+  // reply box is reachable without scrolling past a long thread, expanded on
+  // desktop. Once the user toggles, their explicit choice sticks.
+  const [threadCollapsed, setThreadCollapsed] = useState<boolean | null>(null);
+  const threadCollapsedEffective = threadCollapsed ?? isMobile;
   const fetchedThreadRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -282,8 +357,11 @@ export function Composer({ mcpApp }: ComposerProps) {
       {thread && thread.messages.length > 0 && (
         <ThreadPanel
           thread={thread}
-          collapsed={threadCollapsed}
-          onToggle={() => setThreadCollapsed((v) => !v)}
+          collapsed={threadCollapsedEffective}
+          messagesStyle={
+            isMobile ? mobileThreadMessagesContainer : threadMessagesContainer
+          }
+          onToggle={() => setThreadCollapsed(!threadCollapsedEffective)}
         />
       )}
 
@@ -360,10 +438,11 @@ export function Composer({ mcpApp }: ComposerProps) {
       </Row>
 
       <textarea
+        ref={bodyRef}
         value={draft.body ?? ""}
         onChange={(e) => updateField("body", e.target.value)}
         rows={14}
-        style={textareaStyle}
+        style={isMobile ? mobileTextareaStyle : textareaStyle}
         aria-label="Body"
       />
 
@@ -412,10 +491,12 @@ function extractThread(raw: unknown): Thread | null {
 function ThreadPanel({
   thread,
   collapsed,
+  messagesStyle,
   onToggle,
 }: {
   thread: Thread;
   collapsed: boolean;
+  messagesStyle: React.CSSProperties;
   onToggle: () => void;
 }) {
   return (
@@ -425,7 +506,7 @@ function ThreadPanel({
         {thread.messages.length === 1 ? "" : "s"})
       </button>
       {!collapsed && (
-        <div style={threadMessagesContainer}>
+        <div style={messagesStyle}>
           {thread.messages.map((m, i) => (
             <ThreadMessageView
               key={m.message_id}
@@ -661,6 +742,18 @@ const textareaStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
+// Mobile: the box auto-grows to its content (see the effect in Composer), so
+// there is no inner scroll to trap a finger drag - the page scrolls instead.
+// `touchAction: manipulation` and a comfortable min-height round it out.
+const mobileTextareaStyle: React.CSSProperties = {
+  ...textareaStyle,
+  minHeight: 180,
+  overflowY: "hidden",
+  resize: "none",
+  fontSize: 16, // prevents iOS Safari from zooming in on focus
+  touchAction: "manipulation",
+};
+
 const buttonRowStyle: React.CSSProperties = {
   display: "flex",
   gap: 8,
@@ -768,10 +861,20 @@ const threadToggleBtn: React.CSSProperties = {
 const threadMessagesContainer: React.CSSProperties = {
   maxHeight: 280,
   overflowY: "auto",
+  WebkitOverflowScrolling: "touch",
   marginTop: 6,
   display: "flex",
   flexDirection: "column",
   gap: 4,
+};
+
+// Mobile: drop the fixed-height inner scroll region. Nested scrolling inside
+// the iframe is the thing that feels broken under touch, so let the messages
+// flow and the whole page scroll instead.
+const mobileThreadMessagesContainer: React.CSSProperties = {
+  ...threadMessagesContainer,
+  maxHeight: "none",
+  overflowY: "visible",
 };
 
 const threadMsgCollapsedStyle: React.CSSProperties = {

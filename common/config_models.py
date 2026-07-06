@@ -161,6 +161,24 @@ class BrandingConfig(BaseModel):
     )
 
 
+class WebBotAuthConfig(BaseModel):
+    """Web Bot Auth signing-key directory configuration.
+
+    Drives ``/.well-known/http-message-signatures-directory``
+    (draft-meunier-http-message-signatures-directory), which publishes this
+    agent's Ed25519 public signing key(s) as a JWK Set so origins can verify
+    HTTP Message Signatures it sends. The private key is supplied out of band
+    via the ``WEB_BOT_AUTH_PRIVATE_KEY`` secret (a base64url-encoded 32-byte
+    Ed25519 seed); when that is unset the route returns 404, cleanly signalling
+    "no signing identity" instead of advertising an empty directory.
+
+    ``key_lifetime_days`` sets the per-key ``exp`` (relative to first publish);
+    ``nbf`` is the publish time.
+    """
+
+    key_lifetime_days: int = Field(default=365, ge=1)
+
+
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration."""
 
@@ -250,6 +268,16 @@ class AgenticPaymentsConfig(BaseModel):
     x402: X402ProtocolConfig = Field(default_factory=X402ProtocolConfig)
     mpp: MppProtocolConfig = Field(default_factory=MppProtocolConfig)
     acp: AcpProtocolConfig = Field(default_factory=AcpProtocolConfig)
+
+
+class AskConfig(BaseModel):
+    """NLWeb ``/ask`` Q&A endpoint configuration."""
+
+    enabled: bool = False
+    corpus_path: str = "docs/content/docs"
+    docs_base_url: str = "https://docs.gmailmcp.com"
+    top_k: int = 5
+    rate_limit_per_minute: int = 20
 
 
 class FeaturesConfig(BaseModel):

@@ -6,8 +6,24 @@ a later wiring step (we deliberately do not use ContextVars).
 """
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+# The "omitted vs explicit-null" sentinel lives in ``models.patch`` (it is
+# transport-generic, not Gmail-specific). Re-exported here so callers can keep
+# importing ``UNSET`` / ``unset_to`` from the Gmail models facade.
+from models.patch import (
+    UNSET as UNSET,
+)
+from models.patch import (
+    _PatchStr,
+    _UnsetJson,
+    _UnsetType,
+)
+from models.patch import (
+    unset_to as unset_to,
+)
 
 # ---------------------------------------------------------------------------
 # Connect / status / disconnect
@@ -193,6 +209,12 @@ class GmailUpdateDraftInput(BaseModel):
     draft; a field you set to ``null`` is cleared. This applies to ``to``,
     ``cc``, ``bcc``, ``subject``, ``body``, and ``attachments``.
 
+    The omitted-vs-null distinction is carried by the ``UNSET`` sentinel
+    default rather than ``model_fields_set``, because the latter cannot tell
+    the two apart over the MCP transport (see ``_UnsetType``). Every patchable
+    field therefore defaults to ``UNSET`` (preserve) instead of ``None``
+    (clear).
+
     ``attachments`` accepts a mix of new uploads (``AttachmentInput`` with
     base64 bytes) and references to files already on the draft
     (``AttachmentReference`` with just an ``attachment_id``), so a caller can
@@ -201,14 +223,19 @@ class GmailUpdateDraftInput(BaseModel):
     drop them all.
     """
 
+    # UNSET is not a Pydantic type, so allow it as a field default/value.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     user_id: str = ""
     draft_id: str
-    to: str | None = None
-    subject: str | None = None
-    body: str | None = None
-    cc: str | None = None
-    bcc: str | None = None
-    attachments: list[AttachmentInput | AttachmentReference] | None = None
+    to: _PatchStr = UNSET
+    subject: _PatchStr = UNSET
+    body: _PatchStr = UNSET
+    cc: _PatchStr = UNSET
+    bcc: _PatchStr = UNSET
+    attachments: Annotated[
+        list[AttachmentInput | AttachmentReference] | None | _UnsetType, _UnsetJson
+    ] = UNSET
 
 
 class GmailAddAttachmentInput(BaseModel):
