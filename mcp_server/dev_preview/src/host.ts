@@ -6,10 +6,10 @@
 // `dist/mcp-app.html` bundle with zero backing services - no MCP server, no
 // Gmail, no OAuth, no network.
 //
-// Two reads at runtime, injected by build.mjs into the generated HTML:
+// Two values are injected by build.mjs into the generated HTML and are always
+// present (the generated file is the only entry point):
 //   window.__APP_NAME__      e.g. "gmail_inbox" (selects the initial payload)
-//   window.__APP_HTML_B64__  the base64 app bundle (optional; falls back to
-//                            fetch("./app.html") for the served dev flow)
+//   window.__APP_HTML_B64__  the base64-encoded app bundle
 import {
   AppBridge,
   PostMessageTransport,
@@ -24,21 +24,24 @@ type Globals = {
   __READY__?: boolean;
 };
 
-function appName(): string {
-  return (window as unknown as Globals).__APP_NAME__ ?? "gmail_inbox";
-}
-
-async function appHtml(): Promise<string> {
-  const inlined = (window as unknown as Globals).__APP_HTML_B64__;
-  if (inlined) {
-    return new TextDecoder().decode(
-      Uint8Array.from(atob(inlined), (c) => c.charCodeAt(0)),
+function requireGlobal(key: "__APP_NAME__" | "__APP_HTML_B64__"): string {
+  const value = (window as unknown as Globals)[key];
+  if (!value) {
+    throw new Error(
+      `[dev_preview] missing window.${key}; regenerate with \`make preview_app\``,
     );
   }
-  return (await fetch("./app.html")).text();
+  return value;
+}
+
+function decodeAppHtml(b64: string): string {
+  return new TextDecoder().decode(
+    Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)),
+  );
 }
 
 async function main(): Promise<void> {
+  const appName = requireGlobal("__APP_NAME__");
   const iframe = document.getElementById("app") as HTMLIFrameElement;
   const win = iframe.contentWindow!;
   const width = Math.round(iframe.getBoundingClientRect().width) || 760;
@@ -75,7 +78,7 @@ async function main(): Promise<void> {
   bridge.oninitialized = async () => {
     // ext-apps contract: sendToolInput must precede sendToolResult.
     await bridge.sendToolInput({ arguments: {} });
-    const result = initialResult(appName());
+    const result = initialResult(appName);
     // Some apps register their `ontoolresult` handler only after React mounts
     // (i.e. after connect() resolves), so a result sent the instant the app
     // reports initialized can be missed - the inbox self-heals via its own
@@ -96,7 +99,7 @@ async function main(): Promise<void> {
   // double-iframe sandbox relay.
   await bridge.connect(new PostMessageTransport(win, win));
 
-  const html = await appHtml();
+  const html = decodeAppHtml(requireGlobal("__APP_HTML_B64__"));
   const doc = iframe.contentDocument!;
   doc.open();
   doc.write(html);
