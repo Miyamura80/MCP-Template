@@ -454,6 +454,33 @@ export const connect: {
   ],
 };
 
+/**
+ * "When to use" guidance for agents - source of truth for the sections of the
+ * same name in agents.md, llms.txt, and llms-full.txt (see src/agent/content.ts).
+ * Phrase each entry as a trigger an agent can match against a user request.
+ */
+export const agentGuide: {
+  summary: string;
+  whenToUse: string[];
+  whenNotToUse: string[];
+} = {
+  summary:
+    "Reach for GmailMCP when a task needs Gmail actions - reading, searching, triaging, drafting, or sending mail - on the user's behalf.",
+  // TODO: situations where an agent SHOULD call these tools.
+  whenToUse: [
+    "The user asks to read, search, or summarize their email (e.g. \"what did Sarah send about the contract?\").",
+    "The user asks to triage or prioritize their inbox - call `gmail_curate_inbox` to rank threads by importance.",
+    "The user asks to draft, reply to, or send a message - draft first and let the user review before sending.",
+    "Another task needs a fact that lives in the user's mail (an invoice total, a confirmation number, a meeting time).",
+  ],
+  // TODO: situations where an agent should NOT use these tools (avoid over-triggering).
+  whenNotToUse: [
+    "The request is about a different mail provider (Outlook, Proton) - these tools are Gmail-only.",
+    "The user has not connected an account or granted access - complete the auth flow (see auth.md) first.",
+    "The task is purely local or computational and needs no access to the user's mailbox.",
+  ],
+};
+
 export const features: { heading: string; subhead: string; items: Feature[] } = {
   heading: "One codebase, every surface",
   subhead: "Write a tool once. Ship it to agents, scripts, and services without rewrites.",
@@ -825,6 +852,10 @@ export const faq: { heading: string; items: FaqItem[] } = {
     {
       q: "What about my existing CLI / API?",
       a: "They share the same service registry. Add a tool once and it's available over CLI, MCP, and HTTP simultaneously, with no duplicated logic.",
+    },
+    {
+      q: "Is there an /ask (NLWeb) endpoint?",
+      a: "Yes. There's a public, NLWeb-conformant /ask endpoint for natural-language questions answered from the docs (server-side Q&A with SSE streaming). It's distinct from the /mcp action-tool surface, which exposes callable tools. /ask is disabled by default in the template; enable it via config (ask.enabled: true).",
     },
     {
       q: "Is this just another Gmail API wrapper?",

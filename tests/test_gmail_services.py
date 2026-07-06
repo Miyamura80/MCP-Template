@@ -10,6 +10,7 @@ the MIME helpers, and the Pydantic mapping.
 from __future__ import annotations
 
 import base64
+import json
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from email import message_from_bytes
@@ -24,8 +25,13 @@ from common import global_config
 from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
-from mcp_server.app_tools.gmail_composer import _coerce_attachments
+from mcp_server.app_tools.gmail_composer import (
+    _coerce_attachments,
+    _patch_attachments,
+)
+from mcp_server.app_tools.gmail_composer import save_draft as _save_draft
 from models.gmail import (
+    UNSET,
     AttachmentInput,
     AttachmentReference,
     GmailAddAttachmentInput,
@@ -42,6 +48,7 @@ from models.gmail import (
     GmailThread,
     GmailUpdateDraftInput,
 )
+from services import get_registry
 from services.gmail_attachments_svc import (
     gmail_add_attachment,
     gmail_remove_attachment,
@@ -470,7 +477,12 @@ class TestGmailUpdateDraft(TestTemplate):
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
-            mock.users().drafts().get().execute.return_value = original
+            # get() is called twice: the pre-read (current state) and the
+            # post-update re-fetch (saved state the response echoes).
+            mock.users().drafts().get().execute.side_effect = [
+                original,
+                updated_resource,
+            ]
             mock.users().drafts().update().execute.return_value = updated_resource
 
             patches = _patch_client(mock)
@@ -510,7 +522,9 @@ class TestGmailCompose(TestTemplate):
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
-            mock.users().drafts().create().execute.return_value = _draft_resource(
+            mock.users().drafts().create().execute.return_value = {"id": "d-new"}
+            # compose re-fetches the saved state at format=full after create.
+            mock.users().drafts().get().execute.return_value = _draft_resource(
                 draft_id="d-new",
                 to="alice@example.com",
                 subject="Subj",
@@ -1045,18 +1059,17 @@ class TestDraftRoundTrip(TestTemplate):
             _seed_token(factory)
             mock = _make_mock_service()
 
-            mock.users().drafts().create().execute.return_value = _draft_resource(
-                draft_id="d-new", to="alice@example.com", subject="S", body="B"
-            )
+            # Gmail's create/update responses carry only a minimal message;
+            # the services re-fetch at format=full, so get() is the source of
+            # truth for the echoed state.
+            mock.users().drafts().create().execute.return_value = {"id": "d-new"}
             mock.users().drafts().get().execute.return_value = _draft_resource(
-                draft_id="d-new", to="alice@example.com", subject="S", body="B"
-            )
-            mock.users().drafts().update().execute.return_value = _draft_resource(
                 draft_id="d-new",
                 to="alice@example.com",
                 subject="S",
                 body="B-updated",
             )
+            mock.users().drafts().update().execute.return_value = {"id": "d-new"}
             mock.users().drafts().send().execute.return_value = {
                 "id": "msg-final",
                 "threadId": "t-1",
@@ -1164,7 +1177,12 @@ class TestGmailReplyToThread(TestTemplate):
             ],
         }
         mock.users().threads().get().execute.return_value = thread_payload
-        mock.users().drafts().create().execute.return_value = created_draft
+        # Real Gmail returns only {id} from create; the service re-fetches the
+        # saved draft at format=full for the echoed state.
+        mock.users().drafts().create().execute.return_value = {
+            "id": created_draft["id"]
+        }
+        mock.users().drafts().get().execute.return_value = created_draft
         return mock
 
     def test_derives_to_and_subject_from_last_message(self):
@@ -1262,7 +1280,12 @@ class TestGmailReplyToThread(TestTemplate):
             "id": "t-rep",
             "messages": messages,
         }
-        mock.users().drafts().create().execute.return_value = created_draft
+        # Real Gmail returns only {id} from create; the service re-fetches the
+        # saved draft at format=full for the echoed state.
+        mock.users().drafts().create().execute.return_value = {
+            "id": created_draft["id"]
+        }
+        mock.users().drafts().get().execute.return_value = created_draft
         return mock
 
     @staticmethod
@@ -1378,7 +1401,9 @@ class TestGmailReplyToThread(TestTemplate):
             patches = _patch_client(mock)
             _apply(patches)
             try:
-                with pytest.raises(ValueError, match="Cannot determine a reply recipient"):
+                with pytest.raises(
+                    ValueError, match="Cannot determine a reply recipient"
+                ):
                     gmail_reply_to_thread(
                         GmailReplyInput(user_id="alice", thread_id="t-rep")
                     )
@@ -1539,6 +1564,129 @@ class TestGmailReplyToThread(TestTemplate):
 
 
 # ---------------------------------------------------------------------------
+# MCP-transport regression: omit vs null must survive FastMCP default-filling
+# ---------------------------------------------------------------------------
+
+
+def _mcp_kwargs(model_cls, provided: dict) -> dict:
+    """Reproduce how FastMCP hands arguments to a tool.
+
+    ``func_metadata.model_dump_one_level`` does ``getattr`` over *every*
+    declared field, so an omitted parameter reaches the service filled with its
+    default - never truly absent. This helper mirrors that: validate only the
+    keys a caller actually sent, then read back every field. Building the input
+    model from the result is exactly what the tool factory does on the wire.
+
+    A model that relied on ``model_fields_set`` to tell omitted from null would
+    have every field marked "set" here (the bug); the ``UNSET`` sentinel is the
+    only thing that survives to say "omitted".
+    """
+    validated = model_cls.model_validate(provided)
+    return {name: getattr(validated, name) for name in model_cls.model_fields}
+
+
+class TestUpdateDraftOmitVsNullOverMcp(TestTemplate):
+    """The reported bug: passing only to/cc over MCP wiped body and subject."""
+
+    def _run(self, provided: dict, *, current_body="Original body"):
+        original = _draft_resource(
+            draft_id="d-1",
+            to="orig@x",
+            subject="Original Subject",
+            body=current_body,
+        )
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.side_effect = [original, original]
+            mock.users().drafts().update().execute.return_value = {"id": "d-1"}
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                # Build the input the way the MCP transport does: every field
+                # present, omitted ones filled with their (sentinel) default.
+                gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        **_mcp_kwargs(GmailUpdateDraftInput, provided)
+                    )
+                )
+            finally:
+                _stop(patches)
+        raw = _last_update_raw(mock)
+        return message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+
+    def test_only_to_and_cc_preserves_body_and_subject(self):
+        mime = self._run(
+            {"user_id": "alice", "draft_id": "d-1", "to": "new@x", "cc": "cc@x"}
+        )
+        # The whole point of the report: omitted body/subject are NOT wiped.
+        assert mime["To"] == "new@x"
+        assert mime["Cc"] == "cc@x"
+        assert mime["Subject"] == "Original Subject"
+        decoded = mime.get_payload(decode=True)
+        assert isinstance(decoded, bytes)
+        assert "Original body" in decoded.decode("utf-8")
+
+    def test_explicit_null_subject_over_mcp_still_clears(self):
+        mime = self._run({"user_id": "alice", "draft_id": "d-1", "subject": None})
+        # Explicit null is distinct from omitted: it clears.
+        assert (mime["Subject"] or "") == ""
+        assert mime["To"] == "orig@x"  # untouched
+
+
+class TestMutationsEchoSavedState(TestTemplate):
+    """Mutations must return the persisted draft, not the minimal API response."""
+
+    def test_update_echoes_saved_state_not_minimal_response(self):
+        original = _draft_resource(draft_id="d-1", to="a@x", subject="Subj", body="old")
+        saved = _draft_resource(
+            draft_id="d-1", to="a@x", subject="Subj", body="patched"
+        )
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.side_effect = [original, saved]
+            # Real Gmail returns only {id} here - the previous code echoed this
+            # verbatim and produced an all-null draft.
+            mock.users().drafts().update().execute.return_value = {"id": "d-1"}
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                draft = gmail_update_draft(
+                    GmailUpdateDraftInput(
+                        user_id="alice", draft_id="d-1", body="patched"
+                    )
+                )
+            finally:
+                _stop(patches)
+        assert draft.to == "a@x"
+        assert draft.subject == "Subj"
+        assert draft.body == "patched"
+        assert draft.body_preview == "patched"
+
+    def test_compose_echoes_saved_state_from_minimal_create_response(self):
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().create().execute.return_value = {"id": "d-new"}
+            mock.users().drafts().get().execute.return_value = _draft_resource(
+                draft_id="d-new", to="a@x", subject="S", body="B"
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                draft = gmail_compose(
+                    GmailComposeInput(user_id="alice", to="a@x", subject="S", body="B")
+                )
+            finally:
+                _stop(patches)
+        # Would be all-null if the minimal create response were echoed directly.
+        assert draft.draft_id == "d-new"
+        assert draft.to == "a@x"
+        assert draft.body == "B"
+
+
+# ---------------------------------------------------------------------------
 # Non-destructive update + stable attachment handles (this change)
 # ---------------------------------------------------------------------------
 
@@ -1561,8 +1709,10 @@ class TestUpdateDraftPreservesAttachments(TestTemplate):
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
-            mock.users().drafts().get().execute.return_value = original
-            mock.users().drafts().update().execute.return_value = echoed
+            # Pre-read returns the current draft; the post-update re-fetch
+            # returns the saved state the response echoes.
+            mock.users().drafts().get().execute.side_effect = [original, echoed]
+            mock.users().drafts().update().execute.return_value = {"id": "d-1"}
             mock.users().messages().attachments().get().execute.return_value = (
                 _gmail_attachment_blob()
             )
@@ -1601,8 +1751,10 @@ class TestUpdateDraftPreservesAttachments(TestTemplate):
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
-            mock.users().drafts().get().execute.return_value = original
-            mock.users().drafts().update().execute.return_value = echoed
+            # Pre-read still has the file; the post-update re-fetch reflects the
+            # cleared attachment list.
+            mock.users().drafts().get().execute.side_effect = [original, echoed]
+            mock.users().drafts().update().execute.return_value = {"id": "d-1"}
             mock.users().messages().attachments().get().execute.return_value = (
                 _gmail_attachment_blob()
             )
@@ -1637,9 +1789,7 @@ class TestUpdateDraftPreservesAttachments(TestTemplate):
             _apply(patches)
             try:
                 gmail_update_draft(
-                    GmailUpdateDraftInput(
-                        user_id="alice", draft_id="d-1", subject=None
-                    )
+                    GmailUpdateDraftInput(user_id="alice", draft_id="d-1", subject=None)
                 )
             finally:
                 _stop(patches)
@@ -1822,9 +1972,7 @@ class TestAddRemoveAttachment(TestTemplate):
         # Content fields untouched.
         assert mime["To"] == "keep@x"
         assert mime["Subject"] == "Keep subj"
-        body_part = next(
-            p for p in mime.walk() if p.get_content_type() == "text/plain"
-        )
+        body_part = next(p for p in mime.walk() if p.get_content_type() == "text/plain")
         decoded = body_part.get_payload(decode=True)
         assert isinstance(decoded, bytes)
         assert "Keep this body" in decoded.decode("utf-8")
@@ -1835,13 +1983,17 @@ class TestAddRemoveAttachment(TestTemplate):
         original = _draft_resource_with_attachment(
             body="Body stays", subject="Subj stays", to="stay@x"
         )
-        echoed = _draft_resource(draft_id="d-1", to="stay@x", subject="Subj stays", body="Body stays")
+        echoed = _draft_resource(
+            draft_id="d-1", to="stay@x", subject="Subj stays", body="Body stays"
+        )
 
         with _patch_db() as factory:
             _seed_token(factory)
             mock = _make_mock_service()
-            mock.users().drafts().get().execute.return_value = original
-            mock.users().drafts().update().execute.return_value = echoed
+            # Pre-read has the file (so it can be found and removed); the
+            # post-update re-fetch reflects the file being gone.
+            mock.users().drafts().get().execute.side_effect = [original, echoed]
+            mock.users().drafts().update().execute.return_value = {"id": "d-1"}
             mock.users().messages().attachments().get().execute.return_value = (
                 _gmail_attachment_blob()
             )
@@ -2140,6 +2292,80 @@ class TestAppToolAttachmentCoercion(TestTemplate):
         with pytest.raises(ValueError, match="data_base64"):
             _coerce_attachments([{}])
 
+    def test_unset_passes_through_to_preserve(self):
+        # The composer autosave omits attachments; UNSET must survive the patch
+        # coercion so the update preserves existing files instead of clearing.
+        assert _patch_attachments(UNSET) is UNSET
+        # None/[] still clear; a list still coerces to models.
+        assert _patch_attachments(None) is None
+        assert _patch_attachments([]) is None
+
+
+class TestComposerAutosavePreservesAttachments(TestTemplate):
+    """save_draft/send omit attachments on autosave - files must NOT be dropped."""
+
+    def _run_save_draft(self, **kwargs):
+        original = _draft_resource_with_attachment(body="draft body")
+        echoed = _draft_resource_with_attachment(body="draft body")
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().drafts().get().execute.side_effect = [original, echoed]
+            mock.users().drafts().update().execute.return_value = {"id": "d-1"}
+            mock.users().messages().attachments().get().execute.return_value = (
+                _gmail_attachment_blob()
+            )
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                # Call the app-tool exactly as the composer does: text fields
+                # only, attachments omitted entirely.
+                result = _save_draft(draft_id="d-1", user_id="alice", **kwargs)
+            finally:
+                _stop(patches)
+        return result, _last_update_raw(mock)
+
+    def test_autosave_without_attachments_keeps_existing_file(self):
+        result, raw = self._run_save_draft(
+            to="a@x", cc="", bcc="", subject="Subj", body="edited body"
+        )
+        # The re-attached file survives in the outgoing MIME...
+        assert _attachment_filenames_in_raw(raw) == ["report.pdf"]
+        # ...and the echoed draft still reports it.
+        assert [a.filename for a in result.attachments] == ["report.pdf"]
+
+    def test_explicit_empty_list_still_clears(self):
+        # Distinct from omission: an explicit [] means "drop them all".
+        _result, raw = self._run_save_draft(
+            to="a@x", subject="S", body="b", attachments=[]
+        )
+        assert _attachment_filenames_in_raw(raw) == []
+
+
+class TestUpdateInputJsonSerializable(TestTemplate):
+    """UNSET must not make the patch model unserializable (idempotency/logging)."""
+
+    def test_partial_update_dumps_to_json_without_crashing(self):
+        m = GmailUpdateDraftInput(draft_id="d-1", to="a@b")
+        dumped = m.model_dump(mode="json")
+        # Omitted fields collapse to null on the wire; provided fields verbatim.
+        assert dumped["to"] == "a@b"
+        assert dumped["subject"] is None
+        assert dumped["body"] is None
+        # Round-trips through JSON (what the idempotency store does).
+        assert json.loads(json.dumps(dumped))["to"] == "a@b"
+
+    def test_update_draft_is_mutating_and_survives_idempotency_dump(self):
+        # gmail_update_draft patches server state, so its API route is
+        # idempotency-guarded like compose/reply/send. That guard dumps the
+        # request body via model_dump(mode="json") - which only works because
+        # UNSET is serializable (above). Lock both facts together.
+        entry = next(e for e in get_registry() if e.name == "gmail_update_draft")
+        assert entry.mutating is True
+        partial = GmailUpdateDraftInput(draft_id="d-1", body="just the body")
+        # Exactly what api_server.idempotency.execute_idempotent stores.
+        assert partial.model_dump(mode="json")["body"] == "just the body"
+
 
 # ---------------------------------------------------------------------------
 # Inline (cid:) image preservation on rebuild
@@ -2297,9 +2523,9 @@ def _draft_alt_with_inline_image(
                                 "mimeType": "image/png",
                                 "headers": _headers({"Content-ID": f"<{img_cid}>"}),
                                 "body": {
-                                    "data": base64.urlsafe_b64encode(
-                                        img_bytes
-                                    ).decode("ascii"),
+                                    "data": base64.urlsafe_b64encode(img_bytes).decode(
+                                        "ascii"
+                                    ),
                                     "size": len(img_bytes),
                                 },
                             },

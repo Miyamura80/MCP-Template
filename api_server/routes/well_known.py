@@ -1,6 +1,6 @@
 """Well-known discovery documents for the /mcp endpoint.
 
-Four documents live here:
+The discovery documents that live here:
 
 * **OAuth 2.0 Protected Resource Metadata** (RFC 9728) - tells MCP clients
   where the authorization server is. Required of resource servers by the MCP
@@ -28,23 +28,49 @@ Four documents live here:
   before opening a transport. Always available (no auth dependency) and served
   with ``Access-Control-Allow-Origin: *`` so any registry crawler can read it.
 
+* **A2A Agent Card** (Agent2Agent spec v0.3.0) - the agent-protocol analogue of
+  the Server Card. Served at ``/.well-known/agent-card.json`` so A2A clients and
+  orchestrators can discover this agent's identity, endpoint, and skills. Built
+  from the same branding config plus the shared service registry (each service
+  becomes an A2A skill). Public and cross-origin readable, like the Server Card.
+
 * **API Catalog** (RFC 9727) - a single discovery URL that points agents and
   crawlers at this server's OpenAPI description via an RFC 9264 linkset. Always
   available and CORS-readable, so function-calling agents can find the
   machine-readable API contract without prior knowledge of the spec path.
+
+* **Web Bot Auth key directory**
+  (draft-meunier-http-message-signatures-directory) - publishes this agent's
+  Ed25519 public signing key(s) as a JWK Set so origins can verify the HTTP
+  Message Signatures it sends. Served only when ``WEB_BOT_AUTH_PRIVATE_KEY`` is
+  configured (404 otherwise), so a key-less template signals "no signing
+  identity" rather than advertising an empty directory.
 """
 
+import base64
+import functools
+import hashlib
+import json
 import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
 from common import global_config
-from common.config_models import IconConfig
+from common.config_models import BrandingConfig, IconConfig
+from models.a2a import (
+    A2AAgentCapabilities,
+    A2AAgentCard,
+    A2AAgentProvider,
+    A2AAgentSkill,
+)
+from services import discover_services, get_registry
 
 router = APIRouter(tags=["well-known"])
 
@@ -52,6 +78,10 @@ router = APIRouter(tags=["well-known"])
 # resource server does not make an outbound call on every discovery request.
 _AS_METADATA_TTL_SECONDS = 3600.0
 _as_metadata_cache: dict[str, tuple[float, dict]] = {}
+
+# Media type for the Web Bot Auth key directory (the JWKS variant defined by
+# draft-meunier-http-message-signatures-directory).
+_WEB_BOT_AUTH_MEDIA_TYPE = "application/http-message-signatures-directory+json"
 
 
 def _server_version() -> str:
@@ -118,6 +148,68 @@ def mcp_server_card() -> JSONResponse:
     return JSONResponse(card, headers={"Access-Control-Allow-Origin": "*"})
 
 
+def _agent_endpoint_url(b: BrandingConfig) -> str:
+    """Resolve the public host to advertise as the agent's ``url``.
+
+    A2A requires ``url``. This template ships a *discovery* card only - it does
+    not implement an A2A wire transport (no JSON-RPC ``message/send``, no
+    HTTP+JSON REST binding), so we deliberately omit ``preferredTransport`` and
+    point ``url`` at the MCP endpoint, the agent's real machine-facing surface.
+    A2A clients use the card to discover that this agent exists and what it can
+    do; the MCP host is the honest place to send them today. Prefer a configured
+    public host over the branding website, and never the localhost dev default
+    (which would point clients at a dead endpoint).
+    """
+    return (
+        global_config.MCP_PUBLIC_URL or global_config.API_PUBLIC_URL or b.website_url
+    ).rstrip("/")
+
+
+def _service_skills() -> list[A2AAgentSkill]:
+    """Map each registered service onto an A2A skill (id == service name)."""
+    discover_services()
+    return [
+        A2AAgentSkill(
+            id=entry.name,
+            name=entry.name,
+            description=entry.description,
+            tags=["mcp"],
+            input_modes=["application/json"],
+            output_modes=["application/json"],
+        )
+        for entry in get_registry()
+    ]
+
+
+@router.get("/.well-known/agent-card.json")
+def a2a_agent_card() -> JSONResponse:
+    """A2A Agent Card (spec v0.3.0) - pre-connect agent discovery document.
+
+    Discovery/branding only: it advertises this agent's identity and skills so
+    A2A registries/clients can find it. We intentionally do not declare a
+    ``preferredTransport`` because the template implements no A2A wire transport;
+    advertising one would point clients at an endpoint that can't speak it.
+    """
+    b = global_config.branding
+    card = A2AAgentCard(
+        name=b.title,
+        description=b.description,
+        url=_agent_endpoint_url(b),
+        version=_server_version(),
+        capabilities=A2AAgentCapabilities(),
+        default_input_modes=["application/json", "text/plain"],
+        default_output_modes=["application/json", "text/plain"],
+        skills=_service_skills(),
+        # preferred_transport intentionally omitted: see docstring - no A2A wire
+        # transport is implemented, so we advertise presence, not a binding.
+        provider=A2AAgentProvider(organization=b.title, url=b.website_url),
+        icon_url=b.icons[0].src if b.icons else None,
+        documentation_url=b.website_url,
+    )
+    # Public discovery document: any A2A crawler (cross-origin) must read it.
+    return JSONResponse(card.to_wire(), headers={"Access-Control-Allow-Origin": "*"})
+
+
 @router.get("/.well-known/api-catalog")
 def api_catalog(request: Request) -> JSONResponse:
     """RFC 9727 API catalog - points agents/crawlers at the OpenAPI description.
@@ -149,6 +241,102 @@ def api_catalog(request: Request) -> JSONResponse:
     return JSONResponse(
         catalog,
         media_type="application/linkset+json",
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+def _b64url(data: bytes) -> str:
+    """base64url-encode without padding (the JOSE convention)."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(value: str) -> bytes:
+    """Decode base64url, tolerating missing padding."""
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _jwk_thumbprint(x: str) -> str:
+    """RFC 7638 JWK SHA-256 thumbprint for an Ed25519 (OKP) public key.
+
+    The required members are serialized as compact JSON with lexicographically
+    sorted keys, then SHA-256'd and base64url-encoded - this is the ``kid`` form
+    the web-bot-auth architecture mandates for Ed25519 keys.
+    """
+    canonical = json.dumps(
+        {"crv": "Ed25519", "kty": "OKP", "x": x},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return _b64url(hashlib.sha256(canonical.encode("utf-8")).digest())
+
+
+@functools.cache
+def _signing_key_jwk(seed_b64: str) -> dict:
+    """The stable JWK members for a configured Ed25519 seed.
+
+    Everything except the ``nbf``/``exp`` validity window, which is derived per
+    response (see ``_web_bot_auth_directory``) so it tracks wall-clock instead of
+    freezing to one process's first request. Cached because the derivation (key
+    load + RFC 7638 thumbprint) is deterministic for a given seed. Raises
+    ``ValueError`` on a malformed seed.
+    """
+    private_key = Ed25519PrivateKey.from_private_bytes(_b64url_decode(seed_b64))
+    public_bytes = private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    x = _b64url(public_bytes)
+    return {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": x,
+        "kid": _jwk_thumbprint(x),
+        "use": "sig",
+        "alg": "EdDSA",
+    }
+
+
+def _web_bot_auth_directory() -> dict:
+    """Build the Ed25519 JWK Set for /.well-known/http-message-signatures-directory.
+
+    Returns 404 when no signing key is configured; 500 when the configured seed
+    is not a valid 32-byte Ed25519 private key (a deployment misconfiguration we
+    surface loudly rather than serving a bad directory).
+    """
+    # Strip before the emptiness check so a whitespace-only secret reads as
+    # "unconfigured" (404), not as a malformed seed (500).
+    seed_b64 = (global_config.WEB_BOT_AUTH_PRIVATE_KEY or "").strip()
+    if not seed_b64:
+        raise HTTPException(status_code=404, detail="Web Bot Auth is not configured")
+
+    try:
+        jwk = dict(_signing_key_jwk(seed_b64))
+    except ValueError as exc:
+        # binascii.Error (bad base64) subclasses ValueError, as does an
+        # incorrectly sized seed - both mean the secret is misconfigured.
+        raise HTTPException(
+            status_code=500,
+            detail="WEB_BOT_AUTH_PRIVATE_KEY is not a valid Ed25519 seed",
+        ) from exc
+
+    # Derive the validity window per response: it then follows wall-clock and
+    # stays consistent no matter which replica - or how long-lived a process -
+    # serves the request, rather than freezing to one first-publish instant.
+    issued = int(time.time())
+    jwk["nbf"] = issued
+    jwk["exp"] = issued + global_config.web_bot_auth.key_lifetime_days * 86_400
+    return {"keys": [jwk]}
+
+
+@router.get("/.well-known/http-message-signatures-directory")
+def web_bot_auth_directory() -> JSONResponse:
+    """Web Bot Auth key directory - the agent's Ed25519 public signing keys.
+
+    Public discovery: any origin verifying this agent's HTTP Message Signatures
+    reads it cross-origin, so it is served with ``Access-Control-Allow-Origin:
+    *`` and the directory-specific JWKS media type.
+    """
+    return JSONResponse(
+        _web_bot_auth_directory(),
+        media_type=_WEB_BOT_AUTH_MEDIA_TYPE,
         headers={"Access-Control-Allow-Origin": "*"},
     )
 

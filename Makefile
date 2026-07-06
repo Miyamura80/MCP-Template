@@ -137,6 +137,18 @@ dev_host: ## Run upstream @modelcontextprotocol/ext-apps basic-host for manual s
 	@if [ ! -d /tmp/ext-apps ]; then git clone --depth 1 https://github.com/modelcontextprotocol/ext-apps.git /tmp/ext-apps; fi
 	@cd /tmp/ext-apps/examples/basic-host && bun install --silent && bun start
 
+.PHONY: preview_app preview_smoke
+APP ?= gmail_inbox
+preview_app: ## Build a standalone fixture-driven preview of an MCP App (APP=gmail_inbox)
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@echo "$(YELLOW)🖼  Building $(APP) fixture preview...$(RESET)"
+	@cd mcp_server/dev_preview && bun install --silent && APP=$(APP) bun run build.mjs
+
+preview_smoke: ## Headless Playwright check that an MCP App renders from fixtures (APP=gmail_inbox)
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@echo "$(YELLOW)🧪 Smoke-testing $(APP) fixture preview...$(RESET)"
+	@cd mcp_server/dev_preview && bun install --silent && APP=$(APP) bun run smoke.mjs
+
 mcp_conformance: check_uv ## Run MCPJam apps + protocol conformance against the local /mcp server (requires node)
 	@command -v npx >/dev/null 2>&1 || { echo "$(RED)npx (Node.js) is not installed. Install from https://nodejs.org$(RESET)"; exit 1; }
 	@echo "$(YELLOW)🔌 Running MCPJam conformance...$(RESET)"
@@ -147,16 +159,6 @@ gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page
 	@echo "$(YELLOW)🛠  Exporting tool surface...$(RESET)"
 	@uv run python scripts/export_tool_surface.py
 	@echo "$(GREEN)✅ Tool surface exported.$(RESET)"
-
-ralph: check_jq ## Run Ralph agent loop
-	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
-	@echo "$(RED)⚠️  It is HIGHLY RECOMMENDED to run Ralph in a sandboxed environment.$(RESET)"
-	@printf "$(YELLOW)Are you sure you want to continue? [y/N] $(RESET)" && read ans && [ "$$ans" = "y" ] || (echo "$(RED)Aborted.$(RESET)"; exit 1)
-	@echo "$(GREEN)🤖 Starting Ralph Agent...$(RESET)"
-	@chmod +x scripts/ralph.sh
-	@./scripts/ralph.sh $(ARGS)
-	@echo "$(GREEN)✅ Ralph Agent finished.$(RESET)"
-
 
 ########################################################
 # Run Tests

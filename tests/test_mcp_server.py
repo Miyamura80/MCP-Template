@@ -94,6 +94,71 @@ class TestMCPServer(TestTemplate):
             assert "ctx" not in tool.parameters.get("properties", {})
             assert "ctx" not in tool.parameters.get("required", [])
 
+    def test_default_factory_fields_resolve_to_concrete_defaults(self):
+        # Regression: inspect.signature() renders a Pydantic default_factory
+        # field with the private <factory> sentinel. FastMCP copies each
+        # parameter default verbatim into the tool's argument model, so an
+        # unresolved sentinel is handed back as the value when the caller omits
+        # the field, failing validation ("Input should be a valid list ...
+        # input_value=<factory>") and making the field effectively required.
+        # _apply_tool_signature must resolve the factory to a concrete default.
+        for tool_name, tool in mcp._tool_manager._tools.items():
+            arg_model = tool.fn_metadata.arg_model
+            for name, field in arg_model.model_fields.items():
+                default_repr = repr(field.default)
+                assert "<factory>" not in default_repr, (
+                    f"{tool_name}.{name} leaks the default_factory sentinel "
+                    f"into its tool schema: {default_repr}"
+                )
+
+    def test_reply_to_thread_attachments_optional_without_factory_sentinel(self):
+        # Concrete end-to-end guard for the reported gmail_reply_to_thread bug:
+        # validating the tool's argument model with attachments omitted must
+        # yield a real empty list, and building the service input from it must
+        # not raise.
+        from services.gmail_drafts_svc import GmailReplyInput  # noqa: PLC0415
+
+        arg_model = mcp._tool_manager._tools[
+            "gmail_reply_to_thread"
+        ].fn_metadata.arg_model
+        validated = arg_model.model_validate({"thread_id": "t1"}).model_dump()
+        assert validated["attachments"] == []
+        # Downstream construction that previously raised the validation error.
+        assert GmailReplyInput(**validated).attachments == []
+
+    def test_resolve_signature_default_covers_all_factory_forms(self):
+        # Unit-covers _resolve_signature_default across every branch, including
+        # the validated-data factory form no shipped input model exercises yet.
+        import inspect  # noqa: PLC0415
+
+        from pydantic import Field  # noqa: PLC0415
+
+        from mcp_server._tool_factory import _resolve_signature_default  # noqa: PLC0415
+
+        class _Model(BaseModel):
+            plain: str = "x"
+            zero: list[str] = Field(default_factory=list)
+            validated: str = Field(default_factory=lambda data: "derived")
+
+        params = inspect.signature(_Model).parameters
+        fields = _Model.model_fields
+
+        # No FieldInfo, or a field without a factory -> keep the signature default.
+        assert _resolve_signature_default(params["plain"], None) == "x"
+        assert _resolve_signature_default(params["plain"], fields["plain"]) == "x"
+
+        # Zero-arg factory resolves and yields a fresh object each call.
+        first = _resolve_signature_default(params["zero"], fields["zero"])
+        second = _resolve_signature_default(params["zero"], fields["zero"])
+        first.append("mutated")
+        assert first == ["mutated"] and second == []
+
+        # Validated-data factory form is dispatched by arity, not a caught error.
+        assert (
+            _resolve_signature_default(params["validated"], fields["validated"])
+            == "derived"
+        )
+
 
 class TestMCPServerIntegration(TestTemplate):
     """End-to-end integration tests calling tools through the registered FastMCP wrapper."""

@@ -55,20 +55,21 @@ dependencies = [
     "httpx>=0.28.0",
     "anyio>=4.0.0",
     "uvicorn[standard]>=0.49.0",
-    "sqlalchemy>=2.0.0",
+    "sqlalchemy>=2.0.51",
     "alembic>=1.15.0",
     "PyJWT[crypto]>=2.10.0",
     "cryptography>=49.0.0",
     "itsdangerous>=2.2.0",
-    "stripe>=15.2.0",
+    "stripe>=15.3.0",
     "limits>=5.8.0",
     "redis>=5.0.0",
     "x402[fastapi,httpx]>=2.12.0",
     "starlette>=0.40.0",
-    "google-api-python-client>=2.196.0",
+    "google-api-python-client>=2.198.0",
     "google-auth>=2.53.0",
     "psycopg2-binary>=2.9.12",
-    "sse-starlette>=3.3.3",
+    "rank-bm25>=0.2.2",
+    "sse-starlette>=3.4.5",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
@@ -96,7 +97,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "common", "utils", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html"}
+force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html", "mcp_server/apps/settings/dist/mcp-app.html" = "mcp_server/apps/settings/dist/mcp-app.html", "docs/content/docs" = "docs/content/docs"}
 
 [tool.ruff]
 line-length = 88
@@ -238,4 +239,7 @@ exclude-newer = "7 days"
 dev = [
     "pre-commit>=4.5.1",
     "pytest-check-links>=0.9.1",
+    # Validates the served A2A Agent Card against the vendored AgentCard schema
+    # in tests/data/ (test-only; the app builds the card from typed models).
+    "jsonschema>=4.26.0",
 ]

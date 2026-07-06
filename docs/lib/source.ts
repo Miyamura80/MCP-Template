@@ -1,11 +1,26 @@
+import { createElement } from "react";
 import { docs } from "fumadocs-mdx:collections/server";
 import { loader } from "fumadocs-core/source";
 import { i18n } from "@/lib/i18n";
+import { ChatGPTIcon, ClaudeIcon } from "@/components/icons";
+
+// Custom SVG icons resolved from a page's `icon:` frontmatter field. Add an
+// entry here, then set `icon: <key>` in the page frontmatter to show it in the
+// sidebar.
+const iconMap = {
+  claude: ClaudeIcon,
+  chatgpt: ChatGPTIcon,
+} as const;
 
 export const source = loader({
   baseUrl: "/docs",
   source: docs.toFumadocsSource(),
   i18n,
+  icon(icon) {
+    if (icon && icon in iconMap) {
+      return createElement(iconMap[icon as keyof typeof iconMap]);
+    }
+  },
 });
 
 export function getPageImage(page: ReturnType<typeof source.getPage> & {}) {
