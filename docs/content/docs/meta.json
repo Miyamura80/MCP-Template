@@ -2,9 +2,11 @@
   "title": "Documentation",
   "pages": [
     "index",
+    "quickstart",
     "cli",
     "mcp",
     "api",
+    "gmail-webhooks",
     "deployment"
   ]
 }

@@ -22,6 +22,13 @@ paths for machine and internal clients.
   `/.well-known/oauth-protected-resource/mcp` (path form, tried first by
   clients) and `/.well-known/oauth-protected-resource`. It names the canonical
   resource URI and points at your AuthKit instance.
+- **Authorization Server Metadata (RFC 8414)** at
+  `/.well-known/oauth-authorization-server` (and the `/mcp` path form). AuthKit
+  is the authorization server and publishes its own RFC 8414 document; the
+  spec-correct discovery path is PRM → AuthKit. But many MCP clients and
+  registry crawlers probe this well-known against the *resource server* origin
+  directly, so the server redirects (`307`) those requests to AuthKit's
+  authoritative metadata. Both endpoints return `404` when OAuth is unconfigured.
 - **Discovery hint on 401**: unauthenticated `/mcp` requests get
   `WWW-Authenticate: Bearer realm="mcp", resource_metadata="..."`, which is
   how clients bootstrap the flow.

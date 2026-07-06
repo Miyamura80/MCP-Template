@@ -161,6 +161,24 @@ class BrandingConfig(BaseModel):
     )
 
 
+class WebBotAuthConfig(BaseModel):
+    """Web Bot Auth signing-key directory configuration.
+
+    Drives ``/.well-known/http-message-signatures-directory``
+    (draft-meunier-http-message-signatures-directory), which publishes this
+    agent's Ed25519 public signing key(s) as a JWK Set so origins can verify
+    HTTP Message Signatures it sends. The private key is supplied out of band
+    via the ``WEB_BOT_AUTH_PRIVATE_KEY`` secret (a base64url-encoded 32-byte
+    Ed25519 seed); when that is unset the route returns 404, cleanly signalling
+    "no signing identity" instead of advertising an empty directory.
+
+    ``key_lifetime_days`` sets the per-key ``exp`` (relative to first publish);
+    ``nbf`` is the publish time.
+    """
+
+    key_lifetime_days: int = Field(default=365, ge=1)
+
+
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration."""
 
@@ -266,3 +284,23 @@ class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 
     model_config = {"extra": "allow"}  # Allow arbitrary flags
+
+
+class GmailConfig(BaseModel):
+    """Gmail integration configuration."""
+
+    # Ceiling (in decoded bytes) on a single attachment fetched via
+    # ``gmail_get_attachment``. That tool returns the file's base64 straight
+    # into the model's context, so an unbounded fetch of a large file re-creates
+    # the very context-bloat the lean thread payload was designed to avoid.
+    # Deliberately set absurdly high for now (~1 TiB = effectively unbounded) so
+    # nothing is rejected until we pick a real limit; tighten this later.
+    max_attachment_bytes: int = Field(
+        default=1_099_511_627_776,
+        ge=0,
+        description=(
+            "Max decoded size (bytes) of a single attachment returned by "
+            "gmail_get_attachment before it is rejected. Effectively unbounded "
+            "by default; lower it to protect the model's context window."
+        ),
+    )

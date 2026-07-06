@@ -23,12 +23,14 @@ from .config_models import (
     DefaultLlm,
     ExampleParent,
     FeaturesConfig,
+    GmailConfig,
     LlmConfig,
     LoggingConfig,
     RateLimitConfig,
     ServerConfig,
     SubscriptionConfig,
     TelemetryConfig,
+    WebBotAuthConfig,
 )
 
 # Get the path to the root directory (one level up from common)
@@ -195,6 +197,8 @@ class Config(BaseSettings):
         default_factory=lambda: AgenticPaymentsConfig()
     )
     ask: AskConfig = Field(default_factory=lambda: AskConfig())
+    web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
+    gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
 
     # Environment variables
     DEV_ENV: str
@@ -219,6 +223,15 @@ class Config(BaseSettings):
     # Canonical public URL of the /mcp endpoint (RFC 8707 resource identifier);
     # must match the resource indicator configured in the WorkOS dashboard
     MCP_PUBLIC_URL: str | None = None
+    # Canonical public base URL of the HTTP API (no trailing slash, e.g.
+    # https://api.example.com). When set, it is advertised as the `servers`
+    # entry in the published OpenAPI spec so codegen / Swagger "Try it out" and
+    # the landing-page API reference target the right host. Unset -> relative.
+    API_PUBLIC_URL: str | None = None
+    # Web Bot Auth signing identity: base64url-encoded 32-byte Ed25519 private
+    # key seed. When set, /.well-known/http-message-signatures-directory
+    # publishes the matching public key as a JWK Set; unset -> the route 404s.
+    WEB_BOT_AUTH_PRIVATE_KEY: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
 
     # Stripe & billing
@@ -238,6 +251,29 @@ class Config(BaseSettings):
     GOOGLE_REDIRECT_URI: str | None = None
     # Base64-url Fernet key used to encrypt stored refresh tokens
     GOOGLE_TOKEN_ENC_KEY: str | None = None
+
+    # Gmail push notifications (Pub/Sub) + outbound webhook fan-out.
+    # All optional; if GMAIL_PUBSUB_TOPIC is unset the push pipeline stays
+    # dormant (no watch auto-start, no runner loop).
+    # Fully-qualified Pub/Sub topic, e.g. "projects/<proj>/topics/<topic>".
+    GMAIL_PUBSUB_TOPIC: str | None = None
+    # OIDC "aud" claim the push receiver requires on the Pub/Sub JWT.
+    GMAIL_PUSH_AUDIENCE: str | None = None
+    # OIDC "email" claim the push receiver requires (the push subscription's
+    # service account). Empty disables the identity check (dev only).
+    GMAIL_PUSH_SA_EMAIL: str | None = None
+    # How the periodic runner (watch renewal + outbox drain) is driven:
+    #   "off"      - no runner (default)
+    #   "loop"     - in-process asyncio loop started in the FastAPI lifespan
+    #   "endpoint" - driven externally by POSTing the internal /renew route
+    WEBHOOK_RUNNER_MODE: str = "off"
+    # Seconds between in-process runner ticks when WEBHOOK_RUNNER_MODE="loop".
+    WEBHOOK_RUNNER_INTERVAL_S: int = 30
+    # Max delivery attempts before an outbox row is marked "failed".
+    WEBHOOK_MAX_ATTEMPTS: int = 6
+    # Shared bearer required by the internal POST /api/v1/google/internal/renew
+    # endpoint (WEBHOOK_RUNNER_MODE="endpoint"). Unset -> endpoint disabled.
+    WEBHOOK_RUNNER_TOKEN: str | None = None
 
     # Runtime environment (computed via default_factory)
     is_local: bool = Field(
@@ -269,6 +305,10 @@ class Config(BaseSettings):
             self.WORKOS_AUTHKIT_DOMAIN = self.WORKOS_AUTHKIT_DOMAIN.strip() or None
         if self.MCP_PUBLIC_URL is not None:
             self.MCP_PUBLIC_URL = self.MCP_PUBLIC_URL.strip() or None
+        # Same normalization for the API host: a trailing space would produce a
+        # broken servers[0].url in the published OpenAPI spec.
+        if self.API_PUBLIC_URL is not None:
+            self.API_PUBLIC_URL = self.API_PUBLIC_URL.strip() or None
         # Tokens are audience-bound to MCP_PUBLIC_URL; without it the resource
         # URI falls back to localhost and OAuth silently breaks in production.
         if (

@@ -5,10 +5,13 @@ from sqlalchemy import create_engine
 
 # Import all models so Base.metadata knows about them
 import db.models.api_keys  # noqa: F401
+import db.models.gmail_push  # noqa: F401
 import db.models.google_tokens  # noqa: F401
+import db.models.idempotency_keys  # noqa: F401
 import db.models.processed_stripe_events  # noqa: F401
 import db.models.profiles  # noqa: F401
 import db.models.user_subscriptions  # noqa: F401
+import db.models.webhooks  # noqa: F401
 from common import global_config
 from db.base import Base
 

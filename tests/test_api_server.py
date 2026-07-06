@@ -1,7 +1,8 @@
 """Integration tests for API server route registration."""
 
+import json
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -10,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
 from api_server.server import app
+from common import global_config
 from db.base import Base
 from db.engine import get_db_session
 from tests.test_template import TestTemplate
@@ -31,6 +33,21 @@ def _override_use_db_session():
         yield session
     finally:
         session.close()
+
+
+def _parse_sse(body: str) -> list[dict[str, str]]:
+    """Parse an SSE body into a list of ``{"event", "data"}`` dicts."""
+    events: list[dict[str, str]] = []
+    for block in body.replace("\r\n", "\n").split("\n\n"):
+        event: dict[str, str] = {}
+        for line in block.splitlines():
+            if line.startswith("event:"):
+                event["event"] = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                event["data"] = line[len("data:") :].strip()
+        if event:
+            events.append(event)
+    return events
 
 
 def _override_auth():
@@ -104,12 +121,91 @@ class TestAPIServer(TestTemplate):
         assert "/api/v1/services/greet" in routes
         assert "/api/v1/services/config_show" in routes
 
+    def test_mutating_service_requires_idempotency_key(self):
+        """gmail_send is mutating=True, so its route enforces Idempotency-Key."""
+        resp = self.client.post(
+            "/api/v1/services/gmail_send",
+            json={"draft_id": "draft-123"},
+        )
+        assert resp.status_code == 422
+        assert "Idempotency-Key" in resp.json()["error"]["message"]
+
+    def test_oversized_attachment_returns_413(self):
+        """An over-cap gmail_get_attachment surfaces as 413, not a generic 500."""
+        mock_svc = MagicMock()
+        mock_svc.users().messages().attachments().get().execute.return_value = {
+            "data": "QUJD",  # "ABC"
+            "size": 10_000,
+        }
+        with (
+            patch(
+                "services.gmail_messages_svc._get_gmail_client", return_value=mock_svc
+            ),
+            patch.object(global_config.gmail, "max_attachment_bytes", 5),
+        ):
+            resp = self.client.post(
+                "/api/v1/services/gmail_get_attachment",
+                json={"message_id": "m-1", "attachment_id": "att-1"},
+            )
+        assert resp.status_code == 413
+        assert resp.json()["error"]["code"] == "payload_too_large"
+
     def test_billing_routes_registered(self):
         """Billing routes should be registered."""
         routes = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/api/v1/billing/checkout/create" in routes
         assert "/api/v1/billing/usage/current" in routes
         assert "/api/v1/billing/subscription/status" in routes
+
+    def test_stream_doctor_route_registered(self):
+        routes = [r.path for r in app.routes if hasattr(r, "path")]
+        assert "/api/v1/stream/doctor" in routes
+
+    def test_stream_doctor_emits_sse_events(self):
+        """The SSE endpoint streams one `check` event per check, then `done`."""
+        with self.client.stream(
+            "POST", "/api/v1/stream/doctor", json={"fix": False}
+        ) as resp:
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            body = "".join(resp.iter_text())
+
+        events = _parse_sse(body)
+        checks = [e for e in events if e.get("event") == "check"]
+        dones = [e for e in events if e.get("event") == "done"]
+
+        assert len(checks) >= 1
+        assert len(dones) == 1
+        # Ordering contract: every check streams before the terminal `done`.
+        assert events[-1]["event"] == "done"
+        assert all(e["event"] == "check" for e in events[:-1])
+
+        first = json.loads(checks[0]["data"])
+        assert "name" in first
+        assert first["status"] in ("pass", "fail", "warn")
+
+        done = json.loads(dones[0]["data"])
+        assert isinstance(done["has_failures"], bool)
+
+    def test_stream_doctor_requires_execute_scope(self):
+        """A read-only key may not open the doctor stream."""
+        original = app.dependency_overrides.get(get_authenticated_user)
+        try:
+            app.dependency_overrides[get_authenticated_user] = lambda: (
+                AuthenticatedUser(
+                    user_id="scoped-user",
+                    auth_method="api_key",
+                    scopes=["services:read"],
+                )
+            )
+            client = TestClient(app)
+            resp = client.post("/api/v1/stream/doctor", json={"fix": False})
+            assert resp.status_code == 403
+        finally:
+            if original is not None:
+                app.dependency_overrides[get_authenticated_user] = original
+            else:
+                app.dependency_overrides.pop(get_authenticated_user, None)
 
     def test_403_on_insufficient_scopes(self):
         """A key with read-only scopes should be rejected from service execution."""

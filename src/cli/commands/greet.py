@@ -5,8 +5,15 @@ from typing import Annotated
 import typer
 
 from src.cli.state import is_dry_run, is_verbose
+from src.utils.cli_help import examples_epilog
 from src.utils.interactive import interactive_fallback
 from src.utils.output import render
+
+EPILOG = examples_epilog(
+    "mymcp greet Ada",
+    "mymcp greet Ada --shout --times 3",
+    "mymcp --dry-run greet Ada",
+)
 
 
 @interactive_fallback

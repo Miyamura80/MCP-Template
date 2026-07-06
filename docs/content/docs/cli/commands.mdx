@@ -8,13 +8,13 @@ description: All available CLI commands
 Greet someone by name.
 
 ```bash
-mycli greet Alice
+mymcp greet Alice
 # Hello, Alice!
 
-mycli greet Alice --shout
+mymcp greet Alice --shout
 # HELLO, ALICE!
 
-mycli greet Bob --shout --times 3
+mymcp greet Bob --shout --times 3
 ```
 
 | Option | Short | Default | Description |
@@ -27,9 +27,9 @@ mycli greet Bob --shout --times 3
 Inspect and modify configuration.
 
 ```bash
-mycli config show                           # view full config
-mycli config get llm_config.cache_enabled   # get a single value
-mycli config set logging.verbose false      # set an override
+mymcp config show                           # view full config
+mymcp config get llm_config.cache_enabled   # get a single value
+mymcp config set logging.verbose false      # set an override
 ```
 
 | Subcommand | Description |
@@ -43,8 +43,8 @@ mycli config set logging.verbose false      # set an override
 Run health checks on the project environment.
 
 ```bash
-mycli doctor          # check everything
-mycli doctor --fix    # auto-fix what it can
+mymcp doctor          # check everything
+mymcp doctor --fix    # auto-fix what it can
 ```
 
 Checks Python version, `uv` installation, dependency sync, config validity, `.env` file, pre-commit hooks, and git status.
@@ -54,9 +54,9 @@ Checks Python version, `uv` installation, dependency sync, config validity, `.en
 Scaffold a new command from a built-in template.
 
 ```bash
-mycli init my_command --desc "Does something useful"
+mymcp init my_command --desc "Does something useful"
 # Creates commands/my_command.py
-# Run it: mycli my-command
+# Run it: mymcp my-command
 ```
 
 | Option | Description |
@@ -70,10 +70,10 @@ The name must be `snake_case`. Underscores are converted to hyphens for the CLI 
 Install shell tab-completions for faster usage.
 
 ```bash
-mycli completions install bash    # append to ~/.bashrc
-mycli completions install zsh     # append to ~/.zshrc
-mycli completions install fish    # append to config.fish
-mycli completions show bash       # print script to stdout
+mymcp completions install bash    # append to ~/.bashrc
+mymcp completions install zsh     # append to ~/.zshrc
+mymcp completions install fish    # append to config.fish
+mymcp completions show bash       # print script to stdout
 ```
 
 ## update
@@ -81,7 +81,7 @@ mycli completions show bash       # print script to stdout
 Check for a newer version and upgrade.
 
 ```bash
-mycli update
+mymcp update
 ```
 
 ## telemetry
@@ -89,9 +89,9 @@ mycli update
 Manage anonymous usage telemetry.
 
 ```bash
-mycli telemetry status     # show enabled/disabled
-mycli telemetry disable    # opt out
-mycli telemetry enable     # opt back in
+mymcp telemetry status     # show enabled/disabled
+mymcp telemetry disable    # opt out
+mymcp telemetry enable     # opt back in
 ```
 
 You can also set `CLI_TELEMETRY_DISABLED=1` to disable.

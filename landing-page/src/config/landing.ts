@@ -68,6 +68,8 @@ export const site = {
   // TODO: the deployed streamable-HTTP MCP endpoint users add to their client.
   // This is the URL you paste / one-click-install into Claude, Cursor, etc.
   mcpUrl: "https://mcp.gmailmcp.com/mcp",
+  // TODO: the deployed HTTP API base URL (same backend, vanity host for REST).
+  apiUrl: "https://api.gmailmcp.com",
   // Server name used in client configs / deep links (no spaces).
   serverName: "gmail-mcp",
 } as const;
@@ -81,8 +83,10 @@ export const site = {
  * show your server's name, icon, and description BEFORE anyone connects.
  *
  * Title, description, website, repo URL, icon, and the MCP endpoint are all
- * derived from `site` above so you brand the product in one place. The three
- * fields below have no marketing-copy equivalent, so they live here:
+ * derived from `site` above so you brand the product in one place. The fields
+ * below have no marketing-copy equivalent, so they live here. (The advertised
+ * `tools[]` surface is NOT here - it is generated from the Python `@service`
+ * registry into `tool-surface.generated.json`; see `scripts/gen-discovery.ts`.)
  */
 export const serverCard = {
   // Reverse-DNS registry identity, exactly one slash. Usually io.github.<owner>/<repo>.
@@ -106,6 +110,7 @@ export const nav: {
     { label: "Features", href: "/#features" },
     { label: "How it works", href: "/#how-it-works" },
     { label: "Compare", href: "/compare" },
+    { label: "API", href: "/api" },
     { label: "Docs", href: site.docsUrl },
   ],
   // Highlighted in the header to signal the project is open source & self-hostable.
@@ -322,16 +327,16 @@ cd MCP-Template && make all`,
       icon: "/logos/api.svg",
       setupTitle: "Point at the endpoint",
       setupBody:
-        "No install required: the HTTP API is live at your deployment URL. Authenticate with a bearer token and call it from anything.",
+        "No install required: the HTTP API is live at its own host. Authenticate with a bearer token and call it from anything.",
       setupKind: "code",
       setupLang: "bash",
-      setupCode: `export GMAILMCP_URL=https://mcp.gmailmcp.com
+      setupCode: `export GMAILMCP_API_URL=${site.apiUrl}
 export TOKEN=sk-...   # OAuth 2.1 bearer`,
       callTitle: "Call a tool",
       callBody:
         "Hit the same service over plain HTTP: identical inputs and outputs as the CLI and MCP.",
       callLang: "bash",
-      callCode: `$ curl -s $GMAILMCP_URL/api/v1/services/gmail_curate_inbox \\
+      callCode: `$ curl -s $GMAILMCP_API_URL/api/v1/services/gmail_curate_inbox \\
     -H "Authorization: Bearer $TOKEN" \\
     -H "Content-Type: application/json" \\
     -d '{ "limit": 3 }'
@@ -446,6 +451,33 @@ export const connect: {
         "Paste the URL above, then click Create",
       ],
     },
+  ],
+};
+
+/**
+ * "When to use" guidance for agents - source of truth for the sections of the
+ * same name in agents.md, llms.txt, and llms-full.txt (see src/agent/content.ts).
+ * Phrase each entry as a trigger an agent can match against a user request.
+ */
+export const agentGuide: {
+  summary: string;
+  whenToUse: string[];
+  whenNotToUse: string[];
+} = {
+  summary:
+    "Reach for GmailMCP when a task needs Gmail actions - reading, searching, triaging, drafting, or sending mail - on the user's behalf.",
+  // TODO: situations where an agent SHOULD call these tools.
+  whenToUse: [
+    "The user asks to read, search, or summarize their email (e.g. \"what did Sarah send about the contract?\").",
+    "The user asks to triage or prioritize their inbox - call `gmail_curate_inbox` to rank threads by importance.",
+    "The user asks to draft, reply to, or send a message - draft first and let the user review before sending.",
+    "Another task needs a fact that lives in the user's mail (an invoice total, a confirmation number, a meeting time).",
+  ],
+  // TODO: situations where an agent should NOT use these tools (avoid over-triggering).
+  whenNotToUse: [
+    "The request is about a different mail provider (Outlook, Proton) - these tools are Gmail-only.",
+    "The user has not connected an account or granted access - complete the auth flow (see auth.md) first.",
+    "The task is purely local or computational and needs no access to the user's mailbox.",
   ],
 };
 
@@ -707,36 +739,57 @@ export const testimonials: { enabled: boolean; heading: string; items: Testimoni
 };
 
 export const pricing: { enabled: boolean; heading: string; subhead: string; tiers: PricingTier[] } = {
-  // Most dev-tool pages defer pricing to a separate page - flip to false to hide.
-  enabled: false,
-  heading: "Simple, honest pricing",
-  subhead: "Start free. Upgrade when you ship.",
+  // Surfaced on the homepage AND in the machine-readable /pricing.md manifest.
+  // Flip to false to hide the on-page section (the manifest still generates).
+  enabled: true,
+  heading: "Pricing & licensing",
+  subhead:
+    "Open source under the MIT license and free to self-host - no setup fee, no seat minimum. Pay only when you want us to run and scale it for you.",
   tiers: [
     {
       name: "Open Source",
       price: "$0",
-      description: "Self-host the full template, forever.",
-      features: ["All three transports", "OAuth + billing scaffolding", "Community support"],
-      cta: "Get started",
-      href: "#how-it-works",
+      cadence: "forever",
+      description:
+        "MIT-licensed. Self-host the full server on your own infrastructure - zero setup cost, no license fee.",
+      features: [
+        "MIT license - fork, modify, and ship freely",
+        "All three transports: CLI, MCP, HTTP API",
+        "Interactive MCP Apps (composer + ranked inbox)",
+        "Your own OAuth credentials & encrypted tokens",
+        "Community support",
+      ],
+      cta: "Get the source",
+      href: site.githubUrl,
     },
     {
-      name: "Pro",
+      name: "Hosted Pro",
       price: "$20",
       cadence: "/mo",
-      description: "Hosted, managed, and monitored.",
-      features: ["Managed deployment", "Usage analytics", "Priority support"],
+      description:
+        "We run the streamable-HTTP server for you. No infrastructure to manage, paste-a-URL setup.",
+      features: [
+        "Managed cloud deployment (zero ops)",
+        "Hosted OAuth 2.1 & encrypted token storage",
+        "Usage analytics & monitoring",
+        "Priority support",
+      ],
       cta: "Start free trial",
-      href: "#how-it-works",
+      href: "/#how-it-works",
       featured: true,
     },
     {
       name: "Team",
       price: "Custom",
-      description: "For teams running agents in production.",
-      features: ["SSO + audit logs", "SLA", "Dedicated support"],
+      description: "For teams running agents in production, with commercial licensing options.",
+      features: [
+        "SSO + audit logs",
+        "Commercial / OEM licensing",
+        "Uptime SLA",
+        "Dedicated support & onboarding",
+      ],
       cta: "Contact sales",
-      href: "#how-it-works",
+      href: "/#how-it-works",
     },
   ],
 };
@@ -836,13 +889,15 @@ export const footer: { columns: FooterColumn[]; copyright: string } = {
         { label: "How it works", href: "/#how-it-works" },
         { label: "Compare", href: "/compare" },
         // The #pricing section only renders when pricing.enabled - don't link a dead anchor otherwise.
-        ...(pricing.enabled ? [{ label: "Pricing", href: "#pricing" }] : []),
+        // Absolute (/#pricing) so it also resolves from sub-pages like /compare and /vs/*.
+        ...(pricing.enabled ? [{ label: "Pricing", href: "/#pricing" }] : []),
       ],
     },
     {
       heading: "Resources",
       links: [
         { label: "Docs", href: site.docsUrl },
+        { label: "API Reference", href: "/api" },
         { label: "GitHub", href: site.githubUrl },
         { label: "Changelog", href: site.githubUrl + "/releases" },
       ],

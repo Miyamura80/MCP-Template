@@ -15,7 +15,10 @@
   "ask": {
     "url": "https://gmailmcp.com/ask",
     "protocol": "nlweb",
-    "methods": ["POST", "GET"],
+    "methods": [
+      "POST",
+      "GET"
+    ],
     "streaming": "sse"
   },
   "documentation": "https://gmailmcp.com/llms-full.txt",
