@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - '**.py'
+      - '**.ts'
+      - '**.tsx'
 
 jobs:
   check-file-sizes:
@@ -19,7 +21,7 @@ jobs:
       - name: Check for large source files
         run: |
           if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
-            mapfile -t files < <(git diff --name-only --diff-filter=d "${{ github.event.pull_request.base.sha }}...HEAD" -- '*.py')
+            mapfile -t files < <(git diff --name-only --diff-filter=d "${{ github.event.pull_request.base.sha }}...HEAD" -- '*.py' '*.ts' '*.tsx')
             if [ "${#files[@]}" -eq 0 ]; then
               echo "No source files changed."
               exit 0

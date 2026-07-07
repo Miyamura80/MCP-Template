@@ -47,7 +47,7 @@ id = "check-large-files"
 name = "fail if any source file exceeds the line-count error threshold"
 language = "system"
 entry = "scripts/check_large_files.sh"
-files = "\\.(py)$"
+files = "\\.(py|ts|tsx)$"
 
 [[repos.hooks]]
 id = "check-folder-sizes"

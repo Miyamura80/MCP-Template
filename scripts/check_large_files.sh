@@ -19,13 +19,17 @@ set -euo pipefail
 WARN_THRESHOLD="${LARGE_FILE_WARN_THRESHOLD:-500}"
 ERROR_THRESHOLD="${LARGE_FILE_ERROR_THRESHOLD:-800}"
 
-EXCLUDE_PATH_RE='(^|/)(node_modules|__pycache__|\.venv|venv|visual-tests|e2e|tests|test|__tests__|\.git)(/|$)'
+EXCLUDE_PATH_RE='(^|/)(node_modules|__pycache__|\.venv|venv|visual-tests|e2e|tests|test|__tests__|\.git|dist|build|\.next|\.astro|\.source)(/|$)'
 ALEMBIC_RE='(^|/)alembic[^/]*/versions(/|$)'
 EXCLUDE_NAME_RE='(^test_[^/]+\.py|^conftest\.py|^vulture_whitelist\.py|^onboard\.py)$'
+# Grandfathered: intentional data/copy file (all landing-page marketing copy
+# lives here by design), not logic - the line-count rule does not apply. Kept in
+# step with the [tool.file_length] exclude in pyproject.toml.
+GRANDFATHERED_RE='(^|/)landing-page/src/config/landing\.ts$'
 
 is_source_file() {
   case "$1" in
-    *.py) return 0 ;;
+    *.py | *.ts | *.tsx) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -34,17 +38,24 @@ is_excluded() {
   local f="$1" base
   echo "$f" | grep -qE "$EXCLUDE_PATH_RE" && return 0
   echo "$f" | grep -qE "$ALEMBIC_RE" && return 0
+  echo "$f" | grep -qE "$GRANDFATHERED_RE" && return 0
   base=$(basename "$f")
   echo "$base" | grep -qE "$EXCLUDE_NAME_RE" && return 0
   return 1
 }
 
 collect_all() {
-  find . -type f -name '*.py' \
+  find . -type f \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' \) \
     -not -path './.git/*' \
     -not -path '*/__pycache__/*' \
     -not -path '*/.venv/*' \
     -not -path '*/venv/*' \
+    -not -path '*/node_modules/*' \
+    -not -path '*/dist/*' \
+    -not -path '*/build/*' \
+    -not -path '*/.next/*' \
+    -not -path '*/.astro/*' \
+    -not -path '*/.source/*' \
     | sed 's|^\./||'
 }
 

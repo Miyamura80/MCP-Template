@@ -4,7 +4,16 @@ import pathlib
 import tomllib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-ROOT_SKIP_DIRS = {
+
+# Extensions that count as first-party source. `.ts`/`.tsx` cover the MCP App
+# frontends (mcp_server/apps/*/src) and the docs/landing-page sub-projects.
+SOURCE_GLOBS = ("*.py", "*.ts", "*.tsx")
+
+# Directory names skipped at ANY depth. Vendored deps and build output live
+# *inside* first-party trees (e.g. mcp_server/apps/x/node_modules,
+# apps/x/dist), so a root-only skip would miss them and the scan would drown
+# in third-party `.ts`. Matching on any path segment catches every nesting.
+SKIP_DIRS = {
     ".git",
     ".venv",
     ".uv_cache",
@@ -13,11 +22,15 @@ ROOT_SKIP_DIRS = {
     ".uv-tools",
     ".cache",
     "node_modules",
+    "dist",
+    "build",
     ".next",
+    ".astro",
+    ".source",
+    "coverage",
     "__pycache__",
     ".pytest_cache",
 }
-RECURSIVE_SKIP_DIRS = {"__pycache__", ".pytest_cache"}
 
 
 def load_config() -> tuple[int, set[str]]:
@@ -33,25 +46,27 @@ def load_config() -> tuple[int, set[str]]:
 def main() -> int:
     max_lines, exclude = load_config()
     violations: list[tuple[pathlib.Path, int]] = []
+    seen: set[pathlib.Path] = set()
 
-    for path in REPO_ROOT.rglob("*.py"):
-        rel = path.relative_to(REPO_ROOT)
-        parts = rel.parts
-        if parts[0] in ROOT_SKIP_DIRS:
-            continue
-        if any(part in RECURSIVE_SKIP_DIRS for part in parts[:-1]):
-            continue
-        if rel.as_posix() in exclude:
-            continue
-        try:
-            line_count = len(
-                path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            )
-        except OSError as e:
-            print(f"  Warning: could not read {rel}: {e}")
-            continue
-        if line_count > max_lines:
-            violations.append((rel, line_count))
+    for glob in SOURCE_GLOBS:
+        for path in REPO_ROOT.rglob(glob):
+            rel = path.relative_to(REPO_ROOT)
+            if rel in seen:
+                continue
+            seen.add(rel)
+            if any(part in SKIP_DIRS for part in rel.parts[:-1]):
+                continue
+            if rel.as_posix() in exclude:
+                continue
+            try:
+                line_count = len(
+                    path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                )
+            except OSError as e:
+                print(f"  Warning: could not read {rel}: {e}")
+                continue
+            if line_count > max_lines:
+                violations.append((rel, line_count))
 
     if violations:
         print(
