@@ -11,6 +11,41 @@ function makeMcpApp(callResult: unknown = null) {
   return { app, callServerTool };
 }
 
+// A save_draft mock that echoes the attachment set it was given back as
+// persisted rows (uploads -> a minted server id, refs -> preserved), so the
+// component's attachmentsRef tracks committed server state across serialized
+// ops - the exact thing the concurrency tests need to exercise.
+function makeEchoingMcpApp() {
+  const calls: { name: string; args: Record<string, any> }[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const callServerTool = vi.fn(
+    async ({ name, arguments: args }: { name: string; arguments: Record<string, any> }) => {   // eslint-disable-line @typescript-eslint/no-explicit-any
+      calls.push({ name, args });
+      if (name === "gmail_composer.save_draft") {
+        const atts = ((args.attachments as any[]) ?? []).map((a) =>   // eslint-disable-line @typescript-eslint/no-explicit-any
+          a.data_base64 !== undefined
+            ? { attachment_id: `srv-${a.filename}`, filename: a.filename, mime_type: a.mime_type, size: 1 }
+            : { attachment_id: a.attachment_id, filename: String(a.attachment_id).replace(/^srv-/, ""), size: 1 },
+        );
+        return {
+          structuredContent: {
+            draft_id: args.draft_id,
+            to: args.to,
+            subject: args.subject,
+            body: args.body,
+            attachments: atts,
+          },
+        };
+      }
+      return { structuredContent: {} };
+    },
+  );
+  const app = {
+    ontoolresult: undefined as ((raw: unknown) => void) | undefined,
+    callServerTool,
+  };
+  return { app, callServerTool, calls };
+}
+
 // Installs a matchMedia stub so useIsMobile() resolves deterministically.
 // jsdom ships no matchMedia, so tests without this helper exercise the
 // desktop path (the graceful fallback in useIsMobile). Uses vi.stubGlobal so
@@ -338,6 +373,60 @@ describe("Composer", () => {
           attachments: [{ attachment_id: "att-1" }],
         }),
       });
+    });
+  });
+
+  it("an attachment save uses the latest body, not a pre-read snapshot", async () => {
+    // Regression: the attachment path used to send the text it snapshotted
+    // before the async file read, reverting an edit made during the read.
+    const { app, calls } = makeEchoingMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft }); // body "Hi Bob"
+    });
+    fireEvent.change(screen.getByLabelText("Body"), {
+      target: { value: "Hi Bob EDITED" },
+    });
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    const file = new File(["x"], "note.txt", { type: "text/plain" });
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+    await waitFor(() => {
+      const save = calls.find((c) => c.name === "gmail_composer.save_draft");
+      expect(save?.args.body).toBe("Hi Bob EDITED");
+    });
+  });
+
+  it("serializes concurrent uploads so neither file is dropped", async () => {
+    // Regression: two quick drops each built their whole-set-replace from the
+    // same stale draft, so the second clobbered the first's file.
+    const { app, calls } = makeEchoingMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: { ...sampleDraft, attachments: [] } });
+    });
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    const fileA = new File(["AAA"], "a.txt", { type: "text/plain" });
+    const fileB = new File(["BBB"], "b.txt", { type: "text/plain" });
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [fileA] } });
+      fireEvent.change(input, { target: { files: [fileB] } });
+    });
+    await waitFor(() => {
+      const saves = calls.filter((c) => c.name === "gmail_composer.save_draft");
+      expect(saves.length).toBe(2);
+      // The second save carries BOTH files (a ref to the first + the second),
+      // proving it built on the committed result of the first, not a stale draft.
+      expect(saves[saves.length - 1].args.attachments).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("a.txt")).toBeInTheDocument();
+      expect(screen.getByText("b.txt")).toBeInTheDocument();
     });
   });
 
