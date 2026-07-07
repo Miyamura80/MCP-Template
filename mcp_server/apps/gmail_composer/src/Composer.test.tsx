@@ -217,6 +217,130 @@ describe("Composer", () => {
     expect(await screen.findByText("Second message")).toBeInTheDocument();
   });
 
+  it("renders existing draft attachments with a remove control", () => {
+    const { app } = makeMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({
+        structuredContent: {
+          ...sampleDraft,
+          attachments: [
+            {
+              attachment_id: "att-1",
+              filename: "report.pdf",
+              mime_type: "application/pdf",
+              size: 2048,
+            },
+          ],
+        },
+      });
+    });
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /remove report\.pdf/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("uploads a chosen file via save_draft with base64 and keeps existing refs", async () => {
+    const savedDraft = {
+      structuredContent: {
+        draft_id: "d-1",
+        to: "bob@example.com",
+        subject: "Hello",
+        body: "Hi Bob",
+        attachments: [
+          { attachment_id: "att-existing", filename: "old.pdf", size: 10 },
+          { attachment_id: "att-new", filename: "hello.txt", size: 5 },
+        ],
+      },
+    };
+    const { app, callServerTool } = makeMcpApp(savedDraft);
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({
+        structuredContent: {
+          ...sampleDraft,
+          attachments: [
+            { attachment_id: "att-existing", filename: "old.pdf", size: 10 },
+          ],
+        },
+      });
+    });
+    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+    await waitFor(() => {
+      expect(callServerTool).toHaveBeenCalledWith({
+        name: "gmail_composer.save_draft",
+        arguments: expect.objectContaining({
+          draft_id: "d-1",
+          // Existing file preserved by reference; new file uploaded as base64
+          // ("hello" -> aGVsbG8=).
+          attachments: [
+            { attachment_id: "att-existing" },
+            {
+              filename: "hello.txt",
+              mime_type: "text/plain",
+              data_base64: "aGVsbG8=",
+            },
+          ],
+        }),
+      });
+    });
+    // The save_draft response echoes both files; the transient chip is replaced
+    // by the persisted attachment.
+    expect(await screen.findByText("hello.txt")).toBeInTheDocument();
+  });
+
+  it("rejects an oversized file without calling save_draft", async () => {
+    const { app, callServerTool } = makeMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    const big = new File(["x"], "big.zip", { type: "application/zip" });
+    Object.defineProperty(big, "size", { value: 26 * 1024 * 1024 });
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [big] } });
+    });
+    expect(callServerTool).not.toHaveBeenCalled();
+    expect(await screen.findByText(/too large/i)).toBeInTheDocument();
+  });
+
+  it("removes an existing attachment via save_draft without its id", async () => {
+    const savedDraft = { structuredContent: { ...sampleDraft, attachments: [] } };
+    const { app, callServerTool } = makeMcpApp(savedDraft);
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({
+        structuredContent: {
+          ...sampleDraft,
+          attachments: [
+            { attachment_id: "att-1", filename: "keep.pdf" },
+            { attachment_id: "att-2", filename: "drop.pdf" },
+          ],
+        },
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: /remove drop\.pdf/i }));
+    await waitFor(() => {
+      expect(callServerTool).toHaveBeenCalledWith({
+        name: "gmail_composer.save_draft",
+        arguments: expect.objectContaining({
+          draft_id: "d-1",
+          attachments: [{ attachment_id: "att-1" }],
+        }),
+      });
+    });
+  });
+
   it("expands the conversation by default on desktop", async () => {
     mockViewport(false);
     const { app } = makeMcpApp({ structuredContent: sampleThread });

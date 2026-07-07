@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sanitizeHtml } from "./sanitize";
 
+export type DraftAttachment = {
+  attachment_id: string;
+  filename: string;
+  mime_type?: string;
+  size?: number;
+};
+
 export type Draft = {
   draft_id: string;
   from?: string;
@@ -10,6 +17,26 @@ export type Draft = {
   subject?: string;
   body?: string;
   thread_id?: string;
+  attachments?: DraftAttachment[];
+};
+
+// Gmail rejects a message over 25 MB; the server's AttachmentInput validator
+// caps base64 at 34M chars (~25.5 MB decoded). Guard per-file client-side so an
+// oversized drop fails instantly with a clear message instead of after a full
+// base64 upload round-trip. Total-message size is still enforced server-side.
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+// A file the user just dropped/selected, tracked while it is read + uploaded.
+// Persisted attachments (with a real attachment_id) live on `draft.attachments`;
+// these transient entries disappear once the save_draft response echoes them
+// back as real attachments, or stick around with an error the user can dismiss.
+type PendingUpload = {
+  local_id: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  status: "reading" | "uploading" | "error";
+  error?: string;
 };
 
 export type ThreadMessage = {
@@ -65,7 +92,56 @@ export function extractDraft(raw: unknown): Draft | null {
       typeof data["thread_id"] === "string"
         ? (data["thread_id"] as string)
         : undefined,
+    attachments: extractAttachments(data["attachments"]),
   };
+}
+
+// Pull the draft's existing attachments (each with a stable attachment_id) off a
+// GmailDraft payload. Only files with an id are usable here - the id is what we
+// pass back as a reference to preserve the file on the next save.
+function extractAttachments(raw: unknown): DraftAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DraftAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Record<string, unknown>;
+    const id = a["attachment_id"];
+    if (typeof id !== "string" || id.length === 0) continue;
+    // GmailDraftAttachment emits both `size` and the computed `size_bytes`;
+    // prefer the public `size_bytes` name and fall back to `size`.
+    const rawSize = a["size_bytes"] ?? a["size"];
+    out.push({
+      attachment_id: id,
+      filename: typeof a["filename"] === "string" ? (a["filename"] as string) : "(file)",
+      mime_type: typeof a["mime_type"] === "string" ? (a["mime_type"] as string) : undefined,
+      size: typeof rawSize === "number" ? rawSize : undefined,
+    });
+  }
+  return out;
+}
+
+// Read a File to bare base64 (no data: URL prefix), the shape AttachmentInput
+// wants. FileReader is available in every host iframe and in jsdom, so this
+// path is identical in the app and in tests.
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error(`Could not read ${file.name}`));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatBytes(n: number | undefined): string {
+  if (typeof n !== "number" || n <= 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function fieldsEqual(a: Draft, b: Draft): boolean {
@@ -151,10 +227,15 @@ export function Composer({ mcpApp }: ComposerProps) {
   const [discarded, setDiscarded] = useState(false);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const [pendingAgent, setPendingAgent] = useState<Draft | null>(null);
+  const [uploads, setUploads] = useState<PendingUpload[]>([]);
+  const [dragActive, setDragActive] = useState(false);
   const localDirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef<Draft | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadSeqRef = useRef(0);
+  const nextUploadId = () => `u${(uploadSeqRef.current += 1)}`;
 
   useEffect(() => {
     draftRef.current = draft;
@@ -299,6 +380,129 @@ export function Composer({ mcpApp }: ComposerProps) {
   };
 
   const keepLocal = () => setPendingAgent(null);
+
+  // Save the draft with an explicit, full attachment set. The server's
+  // `attachments` arg is a whole-set replace, so every file we want to keep must
+  // be listed: existing files as {attachment_id} references (their bytes are
+  // re-downloaded server-side, not re-sent over the wire) plus `newUploads` as
+  // fresh {filename, mime_type, data_base64}. Text fields ride along so the save
+  // is one consistent snapshot, matching the send/save_draft call shape.
+  const persistAttachmentSet = async (
+    base: Draft,
+    keepIds: string[],
+    newUploads: { filename: string; mime_type: string; data_base64: string }[],
+  ): Promise<DraftAttachment[]> => {
+    const attachments = [
+      ...keepIds.map((attachment_id) => ({ attachment_id })),
+      ...newUploads,
+    ];
+    const raw = await mcpApp.callServerTool({
+      name: "gmail_composer.save_draft",
+      arguments: {
+        draft_id: base.draft_id,
+        to: base.to ?? "",
+        cc: base.cc ?? "",
+        bcc: base.bcc ?? "",
+        subject: base.subject ?? "",
+        body: base.body ?? "",
+        attachments,
+      },
+    });
+    return extractDraft(raw)?.attachments ?? [];
+  };
+
+  const onFilesChosen = async (files: FileList | File[] | null) => {
+    const base = draftRef.current;
+    if (!base || !files) return;
+    const chosen = Array.from(files);
+    if (chosen.length === 0) return;
+
+    // Oversized files never leave the browser: mark them errored inline so the
+    // user sees why, and don't include them in the upload call.
+    const oversized = chosen.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+    const okFiles = chosen.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+
+    const okEntries: PendingUpload[] = okFiles.map((f) => ({
+      local_id: nextUploadId(),
+      filename: f.name,
+      mime_type: f.type || "application/octet-stream",
+      size: f.size,
+      status: "reading",
+    }));
+    const oversizedEntries: PendingUpload[] = oversized.map((f) => ({
+      local_id: nextUploadId(),
+      filename: f.name,
+      mime_type: f.type || "application/octet-stream",
+      size: f.size,
+      status: "error",
+      error: `Too large (${formatBytes(f.size)} > 25 MB)`,
+    }));
+    setUploads((u) => [...u, ...okEntries, ...oversizedEntries]);
+    if (okFiles.length === 0) return;
+
+    const okIds = okEntries.map((e) => e.local_id);
+    setSaveStatus({ kind: "saving" });
+    try {
+      const encoded = await Promise.all(okFiles.map(readFileAsBase64));
+      setUploads((u) =>
+        u.map((e) =>
+          okIds.includes(e.local_id) ? { ...e, status: "uploading" } : e,
+        ),
+      );
+      const newUploads = okFiles.map((f, i) => ({
+        filename: f.name,
+        mime_type: f.type || "application/octet-stream",
+        data_base64: encoded[i],
+      }));
+      const keepIds = (base.attachments ?? []).map((a) => a.attachment_id);
+      const attachments = await persistAttachmentSet(base, keepIds, newUploads);
+      // The response now lists every file (old + new) with real ids; adopt it as
+      // the source of truth and drop the transient upload chips it replaces.
+      setDraft((d) => (d ? { ...d, attachments } : d));
+      setUploads((u) => u.filter((e) => !okIds.includes(e.local_id)));
+      setSaveStatus({ kind: "saved", at: new Date() });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUploads((u) =>
+        u.map((e) =>
+          okIds.includes(e.local_id) ? { ...e, status: "error", error: msg } : e,
+        ),
+      );
+      setSaveStatus({ kind: "error", message: msg });
+    }
+  };
+
+  const onRemoveAttachment = async (attachmentId: string) => {
+    const base = draftRef.current;
+    if (!base) return;
+    const previous = base.attachments ?? [];
+    const remaining = previous.filter((a) => a.attachment_id !== attachmentId);
+    // Optimistic: reflect the removal immediately, revert if the save fails.
+    setDraft((d) => (d ? { ...d, attachments: remaining } : d));
+    setSaveStatus({ kind: "saving" });
+    try {
+      const attachments = await persistAttachmentSet(
+        base,
+        remaining.map((a) => a.attachment_id),
+        [],
+      );
+      setDraft((d) => (d ? { ...d, attachments } : d));
+      setSaveStatus({ kind: "saved", at: new Date() });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDraft((d) => (d ? { ...d, attachments: previous } : d));
+      setSaveStatus({ kind: "error", message: msg });
+    }
+  };
+
+  const dismissUpload = (localId: string) =>
+    setUploads((u) => u.filter((e) => e.local_id !== localId));
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    void onFilesChosen(e.dataTransfer?.files ?? null);
+  };
 
   // Thread context: fetch when draft has a thread_id
   const [thread, setThread] = useState<Thread | null>(null);
@@ -445,6 +649,108 @@ export function Composer({ mcpApp }: ComposerProps) {
         style={isMobile ? mobileTextareaStyle : textareaStyle}
         aria-label="Body"
       />
+
+      <div
+        style={dragActive ? dropZoneActiveStyle : dropZoneStyle}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!dragActive) setDragActive(true);
+        }}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={(e) => {
+          // Only clear when the pointer actually leaves the zone, not when it
+          // crosses onto a child element inside it.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setDragActive(false);
+          }
+        }}
+        onDrop={onDrop}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          aria-label="Attach files"
+          onChange={(e) => {
+            void onFilesChosen(e.target.files);
+            // Reset so choosing the same file twice fires change again.
+            e.target.value = "";
+          }}
+        />
+        <div style={dropHintStyle}>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            style={secondaryButtonStyle}
+          >
+            Attach files
+          </button>
+          <span style={{ color: "#888", fontSize: 12 }}>
+            or drag &amp; drop here (max 25 MB each)
+          </span>
+        </div>
+
+        {((draft.attachments?.length ?? 0) > 0 || uploads.length > 0) && (
+          <ul style={attachmentListStyle} aria-label="Attachments">
+            {(draft.attachments ?? []).map((a) => (
+              <li key={a.attachment_id} style={attachmentItemStyle}>
+                <span style={attachmentIconStyle}>📎</span>
+                <span style={attachmentNameStyle} title={a.filename}>
+                  {a.filename}
+                </span>
+                {a.size ? (
+                  <span style={attachmentMetaStyle}>{formatBytes(a.size)}</span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void onRemoveAttachment(a.attachment_id)}
+                  style={attachmentRemoveStyle}
+                  aria-label={`Remove ${a.filename}`}
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+            {uploads.map((u) => (
+              <li
+                key={u.local_id}
+                style={{
+                  ...attachmentItemStyle,
+                  ...(u.status === "error" ? attachmentErrorItemStyle : {}),
+                }}
+              >
+                <span style={attachmentIconStyle}>
+                  {u.status === "error" ? "⚠️" : "⏳"}
+                </span>
+                <span style={attachmentNameStyle} title={u.filename}>
+                  {u.filename}
+                </span>
+                <span style={attachmentMetaStyle}>
+                  {u.status === "error"
+                    ? (u.error ?? "Failed")
+                    : u.status === "reading"
+                      ? "Reading…"
+                      : "Uploading…"}
+                </span>
+                {u.status === "error" && (
+                  <button
+                    type="button"
+                    onClick={() => dismissUpload(u.local_id)}
+                    style={attachmentRemoveStyle}
+                    aria-label={`Dismiss ${u.filename}`}
+                  >
+                    ✕
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <div style={buttonRowStyle}>
         <button onClick={onSend} style={primaryButtonStyle}>
@@ -752,6 +1058,83 @@ const mobileTextareaStyle: React.CSSProperties = {
   resize: "none",
   fontSize: 16, // prevents iOS Safari from zooming in on focus
   touchAction: "manipulation",
+};
+
+const dropZoneStyle: React.CSSProperties = {
+  marginTop: 10,
+  padding: 10,
+  border: "1px dashed #d1d5db",
+  borderRadius: 6,
+  background: "#fafafa",
+  transition: "background 0.12s, border-color 0.12s",
+};
+
+const dropZoneActiveStyle: React.CSSProperties = {
+  ...dropZoneStyle,
+  borderColor: "#3b82f6",
+  background: "#eff6ff",
+};
+
+const dropHintStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+
+const attachmentListStyle: React.CSSProperties = {
+  listStyle: "none",
+  margin: "10px 0 0",
+  padding: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const attachmentItemStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "4px 8px",
+  borderRadius: 4,
+  background: "#fff",
+  border: "1px solid #eee",
+  fontSize: 13,
+};
+
+const attachmentErrorItemStyle: React.CSSProperties = {
+  background: "#fef2f2",
+  border: "1px solid #fecaca",
+};
+
+const attachmentIconStyle: React.CSSProperties = {
+  flexShrink: 0,
+  fontSize: 13,
+};
+
+const attachmentNameStyle: React.CSSProperties = {
+  flex: 1,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#111",
+};
+
+const attachmentMetaStyle: React.CSSProperties = {
+  flexShrink: 0,
+  color: "#888",
+  fontSize: 12,
+};
+
+const attachmentRemoveStyle: React.CSSProperties = {
+  flexShrink: 0,
+  background: "transparent",
+  border: "none",
+  color: "#991b1b",
+  cursor: "pointer",
+  fontSize: 13,
+  lineHeight: 1,
+  padding: 2,
 };
 
 const buttonRowStyle: React.CSSProperties = {
