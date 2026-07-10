@@ -239,7 +239,7 @@ exclude-newer = "7 days"
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.5.1",
+    "pre-commit>=4.6.0",
     "pytest-check-links>=0.9.1",
     # Validates the served A2A Agent Card against the vendored AgentCard schema
     # in tests/data/ (test-only; the app builds the card from typed models).
