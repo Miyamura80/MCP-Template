@@ -79,11 +79,12 @@ export function extractDraft(raw: unknown): Draft | null {
 // this into the debounced autosave would spam the context on every pause in
 // typing).
 export function sentContextText(draft: Draft, messageId: string): string {
+  const f = draftFields(draft);
   const fields = [
-    `to: ${draft.to ?? ""}`,
-    ...(draft.cc ? [`cc: ${draft.cc}`] : []),
-    ...(draft.bcc ? [`bcc: ${draft.bcc}`] : []),
-    `subject: ${draft.subject ?? ""}`,
+    `to: ${f.to}`,
+    ...(f.cc ? [`cc: ${f.cc}`] : []),
+    ...(f.bcc ? [`bcc: ${f.bcc}`] : []),
+    `subject: ${f.subject}`,
     ...(messageId ? [`message_id: ${messageId}`] : []),
   ];
   return [
@@ -93,7 +94,7 @@ export function sentContextText(draft: Draft, messageId: string): string {
     ...fields,
     "---",
     "",
-    draft.body ?? "",
+    f.body,
   ].join("\n");
 }
 
@@ -103,6 +104,26 @@ export function discardContextText(draft: Draft): string {
     "was deleted without being sent; it no longer exists and must not be " +
     "referenced or sent."
   );
+}
+
+// Canonical enumeration of the user-editable draft fields, normalized to the
+// empty-string wire form the server tools expect. persistDraft, onSend, and
+// sentContextText must all agree on this set - a new Draft field is added
+// here, not at each call site.
+function draftFields(draft: Draft): {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+} {
+  return {
+    to: draft.to ?? "",
+    cc: draft.cc ?? "",
+    bcc: draft.bcc ?? "",
+    subject: draft.subject ?? "",
+    body: draft.body ?? "",
+  };
 }
 
 function fieldsEqual(a: Draft, b: Draft): boolean {
@@ -229,7 +250,9 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   // Best-effort: host support for `ui/update-model-context` varies (the MCP
   // Apps extension is young), and the send/discard that triggered the push
-  // already succeeded - a failure here must never surface in the UI.
+  // already succeeded - a failure here must never surface in the UI. Call
+  // sites use `void pushModelContext(...)` (never `await`) so a surrounding
+  // try/catch structurally cannot repurpose a push failure into an error UI.
   const pushModelContext = async (text: string) => {
     try {
       await mcpApp.updateModelContext({ content: [{ type: "text", text }] });
@@ -253,14 +276,7 @@ export function Composer({ mcpApp }: ComposerProps) {
     try {
       await mcpApp.callServerTool({
         name: "gmail_composer.save_draft",
-        arguments: {
-          draft_id: snapshot.draft_id,
-          to: snapshot.to ?? "",
-          cc: snapshot.cc ?? "",
-          bcc: snapshot.bcc ?? "",
-          subject: snapshot.subject ?? "",
-          body: snapshot.body ?? "",
-        },
+        arguments: { draft_id: snapshot.draft_id, ...draftFields(snapshot) },
       });
       setSaveStatus({ kind: "saved", at: new Date() });
       // Only clear dirty if the user hasn't typed anything newer.
@@ -294,20 +310,13 @@ export function Composer({ mcpApp }: ComposerProps) {
     try {
       const raw = await mcpApp.callServerTool({
         name: "gmail_composer.send",
-        arguments: {
-          draft_id: draft.draft_id,
-          to: draft.to ?? "",
-          cc: draft.cc ?? "",
-          bcc: draft.bcc ?? "",
-          subject: draft.subject ?? "",
-          body: draft.body ?? "",
-        },
+        arguments: { draft_id: draft.draft_id, ...draftFields(draft) },
       });
       const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
       const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
       const messageId = (inner as { message_id?: string })?.message_id ?? "";
       setSent({ message_id: messageId });
-      await pushModelContext(sentContextText(draft, messageId));
+      void pushModelContext(sentContextText(draft, messageId));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
@@ -328,7 +337,7 @@ export function Composer({ mcpApp }: ComposerProps) {
         arguments: { draft_id: draft.draft_id },
       });
       setDiscarded(true);
-      await pushModelContext(discardContextText(draft));
+      void pushModelContext(discardContextText(draft));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
