@@ -10,7 +10,6 @@ import type { Draft, McpAppLike, ThreadMessage } from "./types";
 import {
   formatDate,
   formatFileSize,
-  formatSize,
   isPreviewable,
   relativeTime,
   splitHtmlAtQuote,
@@ -243,7 +242,7 @@ export function MessageView({
                     {a.filename || "image"}
                   </div>
                   <div style={{ fontSize: 11, color: "#999" }}>
-                    {a.mime_type}{typeof a.size === "number" && ` · ${formatSize(a.size)}`}
+                    {a.mime_type}{typeof a.size === "number" && ` · ${formatFileSize(a.size)}`}
                   </div>
                 </div>
               )}
@@ -264,7 +263,7 @@ export function MessageView({
               {a.filename || "(file)"}
               {typeof a.size === "number" && (
                 <span style={{ color: "#888", marginLeft: 6 }}>
-                  {formatSize(a.size)}
+                  {formatFileSize(a.size)}
                 </span>
               )}
             </span>

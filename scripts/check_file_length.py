@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import pathlib
 import tomllib
 
@@ -39,24 +40,27 @@ def main() -> int:
     max_lines, exclude = load_config()
     violations: list[tuple[pathlib.Path, int]] = []
 
-    for path in REPO_ROOT.rglob("*"):
-        if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
-            continue
-        rel = path.relative_to(REPO_ROOT)
-        parts = rel.parts
-        if any(part in SKIP_DIRS for part in parts[:-1]):
-            continue
-        if rel.as_posix() in exclude:
-            continue
-        try:
-            line_count = len(
-                path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            )
-        except OSError as e:
-            print(f"  Warning: could not read {rel}: {e}")
-            continue
-        if line_count > max_lines:
-            violations.append((rel, line_count))
+    # Prune skipped directories in place so os.walk never descends into
+    # node_modules/.venv/etc. - the TypeScript trees hold tens of thousands of
+    # files we would otherwise stat only to discard.
+    for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for name in filenames:
+            if not name.endswith(SOURCE_SUFFIXES):
+                continue
+            path = pathlib.Path(dirpath) / name
+            rel = path.relative_to(REPO_ROOT)
+            if rel.as_posix() in exclude:
+                continue
+            try:
+                line_count = len(
+                    path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                )
+            except OSError as e:
+                print(f"  Warning: could not read {rel}: {e}")
+                continue
+            if line_count > max_lines:
+                violations.append((rel, line_count))
 
     if violations:
         print(
