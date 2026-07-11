@@ -42,6 +42,7 @@ Spec of edge cases for the MCP UI layer (enhancers, elicitation, MCP Apps, rich 
 | A4 | App-only tool surfaces to LLM | `meta={"ui": {"visibility": ["app"]}}` is convention, not spec. Some clients will expose these to the LLM. Acceptable; documented limitation. For hard isolation, run a second `FastMCP` instance app-tools-only (out of scope). |
 | A5 | App calls server tool that doesn't exist | `app.callServerTool({name})` round-trip returns `isError: true` with a "tool not found" message. Frontend handles via `ontoolresult` error branch. |
 | A6 | Dashboard JS tries to access network/storage | Iframe is sandboxed by the host. Most hosts disallow `fetch`, `localStorage`, top-level navigation. Plan UI accordingly - all state through `callServerTool`. |
+| A7 | Host doesn't implement `ui/update-model-context` | Composer pushes send/discard outcomes (final sent draft, discard notice) via `app.updateModelContext` so the model learns about user-initiated actions on app-only tools. The push is best-effort try/catch: on rejection the Sent/Discarded UI state is unaffected and no error is shown - the model just stays uninformed, which is the pre-push status quo. |
 
 ## Output schema
 

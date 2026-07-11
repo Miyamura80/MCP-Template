@@ -31,6 +31,9 @@ export type Thread = {
 export type McpAppLike = {
   ontoolresult?: (result: any) => void;  // eslint-disable-line @typescript-eslint/no-explicit-any
   callServerTool: (args: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
+  updateModelContext: (args: {
+    content: Array<{ type: "text"; text: string }>;
+  }) => Promise<unknown>;
 };
 
 type ComposerProps = {
@@ -66,6 +69,40 @@ export function extractDraft(raw: unknown): Draft | null {
         ? (data["thread_id"] as string)
         : undefined,
   };
+}
+
+// All composer tools are `visibility: ["app"]` and app-initiated tool calls
+// never enter the model's context, so without an explicit push the agent
+// never learns the user clicked Send/Discard - or that they edited fields
+// after the agent's last update. These build the text pushed via
+// `updateModelContext` on those two transitions (and only those two: wiring
+// this into the debounced autosave would spam the context on every pause in
+// typing).
+export function sentContextText(draft: Draft, messageId: string): string {
+  const fields = [
+    `to: ${draft.to ?? ""}`,
+    ...(draft.cc ? [`cc: ${draft.cc}`] : []),
+    ...(draft.bcc ? [`bcc: ${draft.bcc}`] : []),
+    `subject: ${draft.subject ?? ""}`,
+    ...(messageId ? [`message_id: ${messageId}`] : []),
+  ];
+  return [
+    "The user clicked Send in the email composer. The email below has been sent.",
+    "This is the final sent version; it supersedes any earlier draft content in this conversation (the user may have edited fields after the last agent update).",
+    "---",
+    ...fields,
+    "---",
+    "",
+    draft.body ?? "",
+  ].join("\n");
+}
+
+export function discardContextText(draft: Draft): string {
+  return (
+    `The user clicked Discard in the email composer. Draft ${draft.draft_id} ` +
+    "was deleted without being sent; it no longer exists and must not be " +
+    "referenced or sent."
+  );
 }
 
 function fieldsEqual(a: Draft, b: Draft): boolean {
@@ -190,6 +227,17 @@ export function Composer({ mcpApp }: ComposerProps) {
     };
   }, [mcpApp]);
 
+  // Best-effort: host support for `ui/update-model-context` varies (the MCP
+  // Apps extension is young), and the send/discard that triggered the push
+  // already succeeded - a failure here must never surface in the UI.
+  const pushModelContext = async (text: string) => {
+    try {
+      await mcpApp.updateModelContext({ content: [{ type: "text", text }] });
+    } catch {
+      // Host rejected or doesn't implement context updates; nothing to do.
+    }
+  };
+
   const scheduleAutoSave = (next: Draft) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
@@ -259,6 +307,7 @@ export function Composer({ mcpApp }: ComposerProps) {
       const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
       const messageId = (inner as { message_id?: string })?.message_id ?? "";
       setSent({ message_id: messageId });
+      await pushModelContext(sentContextText(draft, messageId));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
@@ -279,6 +328,7 @@ export function Composer({ mcpApp }: ComposerProps) {
         arguments: { draft_id: draft.draft_id },
       });
       setDiscarded(true);
+      await pushModelContext(discardContextText(draft));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
