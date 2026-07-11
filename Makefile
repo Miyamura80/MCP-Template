@@ -291,7 +291,7 @@ check_deps: install_tools ## Check for unused dependencies
 	@uv run deptry .
 	@echo "$(GREEN)✅Dependency check completed.$(RESET)"
 
-file_len_check: check_uv ## Check Python files don't exceed max line count
+file_len_check: check_uv ## Check Python/TS/TSX files don't exceed max line count
 	@echo "$(YELLOW)🔍Checking file lengths...$(RESET)"
 	@uv run python scripts/check_file_length.py
 	@echo "$(GREEN)✅File length check completed.$(RESET)"

@@ -17,7 +17,21 @@ ROOT_SKIP_DIRS = {
     "__pycache__",
     ".pytest_cache",
 }
-RECURSIVE_SKIP_DIRS = {"__pycache__", ".pytest_cache"}
+# node_modules/dist/.next/.astro must be skipped at ANY depth, not just the
+# repo root: the MCP App frontends vendor node_modules and commit generated
+# dist/ bundles under mcp_server/apps/<name>/.
+RECURSIVE_SKIP_DIRS = {
+    "__pycache__",
+    ".pytest_cache",
+    "node_modules",
+    "dist",
+    ".next",
+    ".astro",
+}
+
+# .ts/.tsx included: the MCP App frontends and landing page are first-class
+# source in this repo, not vendored assets.
+CHECKED_GLOBS = ("*.py", "*.ts", "*.tsx")
 
 
 def load_config() -> tuple[int, set[str]]:
@@ -34,24 +48,25 @@ def main() -> int:
     max_lines, exclude = load_config()
     violations: list[tuple[pathlib.Path, int]] = []
 
-    for path in REPO_ROOT.rglob("*.py"):
-        rel = path.relative_to(REPO_ROOT)
-        parts = rel.parts
-        if parts[0] in ROOT_SKIP_DIRS:
-            continue
-        if any(part in RECURSIVE_SKIP_DIRS for part in parts[:-1]):
-            continue
-        if rel.as_posix() in exclude:
-            continue
-        try:
-            line_count = len(
-                path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            )
-        except OSError as e:
-            print(f"  Warning: could not read {rel}: {e}")
-            continue
-        if line_count > max_lines:
-            violations.append((rel, line_count))
+    for pattern in CHECKED_GLOBS:
+        for path in REPO_ROOT.rglob(pattern):
+            rel = path.relative_to(REPO_ROOT)
+            parts = rel.parts
+            if parts[0] in ROOT_SKIP_DIRS:
+                continue
+            if any(part in RECURSIVE_SKIP_DIRS for part in parts[:-1]):
+                continue
+            if rel.as_posix() in exclude:
+                continue
+            try:
+                line_count = len(
+                    path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                )
+            except OSError as e:
+                print(f"  Warning: could not read {rel}: {e}")
+                continue
+            if line_count > max_lines:
+                violations.append((rel, line_count))
 
     if violations:
         print(
