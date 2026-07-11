@@ -21,7 +21,7 @@ ERROR_THRESHOLD="${FOLDER_ERROR_THRESHOLD:-35}"
 
 GRANDFATHERED=()
 
-EXCLUDE_PATH_RE='(^|/)(node_modules|__pycache__|\.venv|venv|visual-tests|e2e|tests|test|__tests__|\.git|dist|build)(/|$)'
+EXCLUDE_PATH_RE='(^|/)(node_modules|__pycache__|\.venv|venv|\.next|visual-tests|e2e|tests|test|__tests__|\.git|dist|build)(/|$)'
 ALEMBIC_RE='(^|/)alembic[^/]*/versions(/|$)'
 
 is_grandfathered() {
@@ -43,10 +43,15 @@ should_skip() {
 
 count_folder() {
   find "$1" -mindepth 1 -maxdepth 1 -type f \
-    -name '*.py' \
+    \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' \) \
     -not -name 'test_*.py' \
     -not -name 'conftest.py' \
     -not -name 'vulture_whitelist.py' \
+    -not -name '*.test.ts' \
+    -not -name '*.test.tsx' \
+    -not -name '*.spec.ts' \
+    -not -name '*.spec.tsx' \
+    -not -name '*.d.ts' \
     | wc -l
 }
 
@@ -56,6 +61,10 @@ collect_all_folders() {
     -not -path '*/__pycache__/*' \
     -not -path '*/.venv/*' \
     -not -path '*/venv/*' \
+    -not -path '*/node_modules/*' \
+    -not -path '*/.next/*' \
+    -not -path '*/dist/*' \
+    -not -path '*/build/*' \
     | sed 's|^\./||'
 }
 
@@ -106,7 +115,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && { [ "$errors" -gt 0 ] || [ "$warnings" -
     [ "$errors" -gt 0 ] && printf '%b' "$error_list"
     [ "$warnings" -gt 0 ] && printf '%b' "$warn_list"
     echo ""
-    echo "**Thresholds:** warn at ${WARN_THRESHOLD} files, error at ${ERROR_THRESHOLD} files. Counts immediate \`.py\` children only - subfolders are the fix, not the problem."
+    echo "**Thresholds:** warn at ${WARN_THRESHOLD} files, error at ${ERROR_THRESHOLD} files. Counts immediate \`.py\`/\`.ts\`/\`.tsx\` children only - subfolders are the fix, not the problem."
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 

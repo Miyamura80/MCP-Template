@@ -4,7 +4,11 @@ import pathlib
 import tomllib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-ROOT_SKIP_DIRS = {
+SOURCE_SUFFIXES = (".py", ".ts", ".tsx")
+# Directory names skipped wherever they appear in the tree. TypeScript sources
+# live beside deep, per-package `node_modules` / `dist` / `.next` folders, so a
+# top-level-only skip is not enough - match these at any depth.
+SKIP_DIRS = {
     ".git",
     ".venv",
     ".uv_cache",
@@ -14,10 +18,11 @@ ROOT_SKIP_DIRS = {
     ".cache",
     "node_modules",
     ".next",
+    "dist",
+    "build",
     "__pycache__",
     ".pytest_cache",
 }
-RECURSIVE_SKIP_DIRS = {"__pycache__", ".pytest_cache"}
 
 
 def load_config() -> tuple[int, set[str]]:
@@ -34,12 +39,12 @@ def main() -> int:
     max_lines, exclude = load_config()
     violations: list[tuple[pathlib.Path, int]] = []
 
-    for path in REPO_ROOT.rglob("*.py"):
+    for path in REPO_ROOT.rglob("*"):
+        if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
+            continue
         rel = path.relative_to(REPO_ROOT)
         parts = rel.parts
-        if parts[0] in ROOT_SKIP_DIRS:
-            continue
-        if any(part in RECURSIVE_SKIP_DIRS for part in parts[:-1]):
+        if any(part in SKIP_DIRS for part in parts[:-1]):
             continue
         if rel.as_posix() in exclude:
             continue
