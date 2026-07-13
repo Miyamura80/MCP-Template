@@ -8,8 +8,7 @@
 #   check_folder_sizes.sh --all        # scan every folder in the tree
 #
 # Thresholds: warn at WARN files-per-folder, error at ERROR. Override via
-# FOLDER_WARN_THRESHOLD / FOLDER_ERROR_THRESHOLD env vars (namespaced so
-# they don't collide with check_large_files.sh).
+# the FOLDER_WARN_THRESHOLD / FOLDER_ERROR_THRESHOLD env vars.
 # Exit 1 on non-grandfathered errors, 0 on warnings-only or clean.
 #
 # If $GITHUB_STEP_SUMMARY is set, a markdown summary is appended to it.

@@ -1,3 +1,11 @@
+"""Enforce a max line count on source files.
+
+The single source of truth for the source-file line-length limit, shared by
+`make ci` (file_len_check), the Lint GitHub workflow, and prek. Scans the whole
+tree for .py/.ts/.tsx; the limit and per-file exclusions come from
+[tool.file_length] in pyproject.toml.
+"""
+
 from __future__ import annotations
 
 import os
