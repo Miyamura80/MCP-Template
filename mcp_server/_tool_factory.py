@@ -22,7 +22,9 @@ from pydantic import BaseModel
 
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
 from mcp_server.enhancers.base import EnhancedTool, build_app_meta
+from mcp_server.url_elicitation import raise_connect_elicitation
 from services import ServiceEntry
+from services.gmail_svc import GmailNotConnectedError
 from src.utils.current_user import current_user
 
 
@@ -62,6 +64,18 @@ def _check_quota() -> None:
     ensure_daily_limit(user.user_id)
 
 
+def _current_session(mcp: FastMCP):  # noqa: ANN202 - ServerSession, avoids leaking SDK types
+    """Return the live ServerSession, or None outside an MCP request.
+
+    Direct in-process invocations (unit tests calling a tool function) have no
+    request context; None makes capability support read as "unknown".
+    """
+    try:
+        return mcp.get_context().session
+    except (LookupError, ValueError):
+        return None
+
+
 def make_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
     """Register a service as an MCP tool - enhanced if an enhancer exists, else headless."""
     enhancer_entry = get_enhancer(entry.name)
@@ -87,7 +101,13 @@ def _make_headless_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
                 kwargs.setdefault("user_id", "")
         input_obj = input_model(**kwargs)
         _check_quota()
-        return func(input_obj)
+        try:
+            return func(input_obj)
+        except GmailNotConnectedError as exc:
+            # MCP-only affordance: upgrade to the SEP-1036 URL-elicitation
+            # error (-32042) so capable hosts open the consent flow natively.
+            raise_connect_elicitation(_current_session(mcp), exc)
+            raise
 
     _apply_tool_signature(tool_fn, entry, return_annotation=output_model)
     mcp.tool(name=entry.name, description=entry.description)(tool_fn)
@@ -113,19 +133,30 @@ def _make_enhanced_tool(
         _check_quota()
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
         try:
-            result = await enhancer_entry.fn(tool)
-        except Exception:  # noqa: BLE001
-            # Enhancer failures of any kind must fall back to the pure service
-            # so MCP clients still get a structured result on the headless path.
-            if enhancer_entry.fallback == "error":
+            try:
+                result = await enhancer_entry.fn(tool)
+            except GmailNotConnectedError:
+                # Expected condition, not an enhancer crash: skip the headless
+                # fallback (it would just raise the same error again) and the
+                # log.exception noise; handled by the outer except.
                 raise
-            log.exception(
-                "enhancer for {!r} crashed; falling back to headless", entry.name
-            )
-            result = func(input_obj)
-            # Discard any partial output the enhancer accumulated before crashing.
-            tool.extra_content = []
-            tool.app_resource_uri = None
+            except Exception:  # noqa: BLE001
+                # Enhancer failures of any kind must fall back to the pure service
+                # so MCP clients still get a structured result on the headless path.
+                if enhancer_entry.fallback == "error":
+                    raise
+                log.exception(
+                    "enhancer for {!r} crashed; falling back to headless", entry.name
+                )
+                result = func(input_obj)
+                # Discard any partial output the enhancer accumulated before crashing.
+                tool.extra_content = []
+                tool.app_resource_uri = None
+        except GmailNotConnectedError as exc:
+            # MCP-only affordance: upgrade to the SEP-1036 URL-elicitation
+            # error (-32042) so capable hosts open the consent flow natively.
+            raise_connect_elicitation(ctx.session, exc)
+            raise
 
         return _build_call_tool_result(result, tool)
 
