@@ -1,3 +1,10 @@
+export type DraftAttachment = {
+  attachment_id: string;
+  filename: string;
+  mime_type?: string;
+  size?: number;
+};
+
 export type Draft = {
   draft_id: string;
   from?: string;
@@ -7,6 +14,7 @@ export type Draft = {
   subject?: string;
   body?: string;
   thread_id?: string;
+  attachments?: DraftAttachment[];
 };
 
 export type ThreadMessage = {

@@ -1,4 +1,30 @@
-import type { Draft, Thread } from "./types";
+import type { Draft, DraftAttachment, Thread } from "./types";
+
+// Pull the draft's existing attachments (each with a stable attachment_id) off a
+// GmailDraft payload. Only files with an id are usable: the id is what a save
+// passes back as a reference to preserve the file in the whole-set replace.
+export function extractAttachments(raw: unknown): DraftAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DraftAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Record<string, unknown>;
+    const id = a["attachment_id"];
+    if (typeof id !== "string" || id.length === 0) continue;
+    // GmailDraftAttachment emits both `size` and the computed `size_bytes`;
+    // prefer the public `size_bytes` name and fall back to `size`.
+    const rawSize = a["size_bytes"] ?? a["size"];
+    out.push({
+      attachment_id: id,
+      filename:
+        typeof a["filename"] === "string" ? (a["filename"] as string) : "(file)",
+      mime_type:
+        typeof a["mime_type"] === "string" ? (a["mime_type"] as string) : undefined,
+      size: typeof rawSize === "number" ? rawSize : undefined,
+    });
+  }
+  return out;
+}
 
 export function extractDraft(raw: unknown): Draft | null {
   if (!raw || typeof raw !== "object") return null;
@@ -20,6 +46,7 @@ export function extractDraft(raw: unknown): Draft | null {
       typeof data["thread_id"] === "string"
         ? (data["thread_id"] as string)
         : undefined,
+    attachments: extractAttachments(data["attachments"]),
   };
 }
 
