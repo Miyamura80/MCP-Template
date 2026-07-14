@@ -348,4 +348,29 @@ describe("Composer attachments", () => {
       resolveSend({ structuredContent: { message_id: "m" } });
     });
   });
+
+  it("fails the size preflight closed when an existing attachment size is unknown", async () => {
+    const { app, callServerTool } = makeMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({
+        structuredContent: {
+          ...sampleDraft,
+          // No size on the existing file: must be treated as a full 25 MB, not 0.
+          attachments: [{ attachment_id: "att-x", filename: "unknown.bin" }],
+        },
+      });
+    });
+    const file = new File(["x"], "small.txt", { type: "text/plain" });
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+    // Unknown existing size counts as the full cap, so the preflight refuses the
+    // batch before issuing any save_draft.
+    expect(callServerTool).not.toHaveBeenCalled();
+    expect(await screen.findByText(/exceed/i)).toBeInTheDocument();
+  });
 });

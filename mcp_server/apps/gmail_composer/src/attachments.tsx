@@ -144,9 +144,13 @@ export function useAttachments({
       const result = await enqueue(async () => {
         // Cumulative preflight against the committed set: refuse a batch that
         // would blow past Gmail's total-message limit before reading hundreds
-        // of MB of base64 into the iframe.
+        // of MB of base64 into the iframe. Fail CLOSED on an unknown existing
+        // size - existing files are server-side references (bytes never re-read
+        // here) whose sizes the server virtually always provides; coalescing a
+        // missing one to 0 would undercount and let an over-limit batch through,
+        // so treat unknown as "can't fit" rather than guessing low.
         const existingBytes = attachmentsRef.current.reduce(
-          (s, a) => s + (a.size ?? 0),
+          (s, a) => s + (a.size ?? MAX_ATTACHMENT_BYTES),
           0,
         );
         const incomingBytes = okFiles.reduce((s, f) => s + f.size, 0);
