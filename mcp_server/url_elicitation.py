@@ -1,19 +1,24 @@
-"""Convert Gmail "not connected" failures into SEP-1036 URL-mode elicitation.
+"""Convert connect-required service failures into SEP-1036 URL-mode elicitation.
 
-When a Gmail-dependent tool is called for a user with no linked account, the
-MCP layer upgrades the service's ``GmailNotConnectedError`` into the spec's
-URL-elicitation-required error (JSON-RPC code -32042, spec 2025-11-25) whose
-``data.elicitations`` carries the Google OAuth authorization URL. Hosts that
-support URL-mode elicitation open the consent flow natively and may retry the
-original call; the conversion is MCP-only, so CLI/API consumers of the same
-services still see the plain exception.
+When a tool is called for a user who must first complete an external connect
+flow (the service raised a ``ConnectRequiredError`` subclass - Gmail linking
+today), the MCP layer upgrades it into the spec's URL-elicitation-required
+error (JSON-RPC code -32042, spec 2025-11-25) whose ``data.elicitations``
+carries the flow's authorization URL. Hosts that support URL-mode elicitation
+open the consent flow natively and may retry the original call; the conversion
+is MCP-only, so CLI/API consumers of the same services still see the plain
+exception.
+
+This module is feature-agnostic: everything integration-specific (the auth
+URL, the elicitation message, the textual recovery script) travels on the
+``ConnectRequiredError`` contract defined in ``services/__init__.py``.
 
 Conversion policy (the spec says servers SHOULD check client capabilities
 before sending mode-specific requests):
 
-- Client declared elicitation WITHOUT url mode -> no conversion. The plain
-  ``GmailNotConnectedError`` text (which contains the manual recovery script)
-  crosses the wire as an ``isError`` tool result.
+- Client declared elicitation WITHOUT url mode -> no conversion. The original
+  exception (whose message contains the manual recovery script) crosses the
+  wire as an ``isError`` tool result.
 - Client declared ``elicitation.url`` -> convert.
 - Client capabilities unknown -> convert. This is the production norm: with
   ``stateless_http=True`` every tools/call arrives on a fresh transport that
@@ -30,23 +35,23 @@ never arrives, clients SHOULD provide a manual way for the user to continue").
 """
 
 import secrets
-from typing import Any
+from typing import NoReturn
 
 from loguru import logger as log
+from mcp.server.session import ServerSession
 from mcp.shared.exceptions import UrlElicitationRequiredError
 from mcp.types import ElicitRequestURLParams
 
-from models.gmail import GmailConnectInput
-from services.gmail_svc import GmailNotConnectedError, gmail_connect
+from services import ConnectRequiredError
 
 
-def _client_url_support(session: Any) -> bool | None:
+def _client_url_support(session: ServerSession | None) -> bool | None:
     """Tri-state URL-elicitation support: True/False when declared, None when unknown.
 
     ``None`` (unknown) is the norm in production stateless-HTTP mode, where the
     per-request session never observed the client's ``initialize`` params.
     """
-    params = getattr(session, "client_params", None)
+    params = session.client_params if session is not None else None
     if params is None:
         return None
     elicitation = params.capabilities.elicitation
@@ -57,37 +62,40 @@ def _client_url_support(session: Any) -> bool | None:
     return elicitation.url is not None
 
 
-def raise_connect_elicitation(session: Any, exc: GmailNotConnectedError) -> None:
-    """Raise the SEP-1036 error for ``exc``, or return to let the caller re-raise.
+def reraise_with_elicitation(
+    session: ServerSession | None, exc: ConnectRequiredError
+) -> NoReturn:
+    """Raise the SEP-1036 error for ``exc`` when possible, else re-raise ``exc``.
 
-    Returns normally (no conversion) when the client declared it cannot do
-    URL-mode elicitation, or when Google OAuth is unconfigured - in both cases
-    the caller re-raises the original error so its self-recovering message
-    reaches the host as an ``isError`` tool result.
+    ``exc`` propagates unconverted (its self-recovering message becomes the
+    ``isError`` tool-result text) when the client declared it cannot do
+    URL-mode elicitation, or when the connect flow is unconfigured in this
+    deployment (``build_auth_url()`` returned None).
     """
     if _client_url_support(session) is False:
-        return
-    try:
-        connect = gmail_connect(GmailConnectInput(user_id=exc.user_id))
-    except RuntimeError as err:
-        # "Google OAuth not configured" (dev box without client credentials):
-        # the textual recovery path is all we can offer.
-        log.debug("URL elicitation unavailable ({}); using textual recovery", err)
-        return
+        raise exc
+    auth_url = exc.build_auth_url()
+    if auth_url is None:
+        log.debug(
+            "{} has no auth URL (connect flow unconfigured); using textual recovery",
+            type(exc).__name__,
+        )
+        raise exc
     raise UrlElicitationRequiredError(
         [
             ElicitRequestURLParams(
                 mode="url",
-                message="Authorize Gmail access in your browser to continue.",
-                url=connect.auth_url,
+                message=exc.elicitation_message,
+                url=auth_url,
                 # Opaque + unique per server as the spec requires; the actual
-                # user binding travels inside the auth URL's signed `state`.
-                elicitationId=f"gmail-connect-{secrets.token_urlsafe(8)}",
+                # user binding travels inside the auth URL (e.g. Gmail's
+                # signed `state` parameter).
+                elicitationId=f"connect-{secrets.token_urlsafe(8)}",
             )
         ],
         message=(
             f"{exc} If URL-mode elicitation is unsupported, present this "
-            f"Google authorization URL to the user yourself and retry after "
-            f"they consent: {connect.auth_url}"
+            f"authorization URL to the user yourself and retry after "
+            f"they consent: {auth_url}"
         ),
     ) from exc

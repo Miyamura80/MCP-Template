@@ -296,7 +296,7 @@ class TestMCPWireE2E(TestTemplate):
                 assert error["code"] == -32042, f"{tool_name}: {error}"
                 elic = error["data"]["elicitations"][0]
                 assert elic["mode"] == "url"
-                assert elic["elicitationId"].startswith("gmail-connect-")
+                assert elic["elicitationId"].startswith("connect-")
                 assert elic["url"].startswith("https://accounts.google.com/")
                 # Hosts that don't understand -32042 fall back to the message
                 # text alone, so it must stay self-recovering on its own.
