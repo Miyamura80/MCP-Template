@@ -40,15 +40,52 @@ from models.gmail import (
     GmailStatusResult,
     InlineImageUpload,
 )
-from services import service
+from services import ConnectRequiredError, service
 
 # ---------------------------------------------------------------------------
 # Domain errors
 # ---------------------------------------------------------------------------
 
 
-class GmailNotConnectedError(Exception):
-    """Raised when a Gmail-API service is invoked for a user with no active token row."""
+class GoogleOAuthNotConfiguredError(RuntimeError):
+    """GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI missing.
+
+    Subclasses RuntimeError so pre-existing callers catching the old bare
+    ``RuntimeError("Google OAuth not configured")`` keep working.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Google OAuth not configured")
+
+
+class GmailNotConnectedError(ConnectRequiredError):
+    """Raised when a Gmail-API service is invoked for a user with no active token row.
+
+    The message doubles as the recovery script for the calling host/LLM: over
+    MCP it is surfaced verbatim as the ``isError`` tool-result text, which is
+    the only channel guaranteed to reach the caller at failure time - so it
+    must say what to do next (gmail_connect -> show auth_url -> retry), not
+    just what went wrong. Every Gmail-connection-dependent service raises this
+    class, so the recovery text lives here rather than at each raise site.
+    """
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(
+            user_id,
+            f"No Gmail account is linked for user_id={user_id!r}. "
+            "To recover: call the gmail_connect tool, present the returned "
+            "auth_url to the user as a clickable link so they can complete "
+            "Google's consent flow, then retry this tool. gmail_status "
+            "reports whether the connection is active.",
+            elicitation_message="Authorize Gmail access in your browser to continue.",
+        )
+
+    def build_auth_url(self) -> str | None:
+        """Mint the Google consent URL, or None when OAuth is unconfigured here."""
+        try:
+            return gmail_connect(GmailConnectInput(user_id=self.user_id)).auth_url
+        except GoogleOAuthNotConfiguredError:
+            return None
 
 
 class GmailAttachmentTooLargeError(Exception):
@@ -200,10 +237,8 @@ def gmail_connect(input: GmailConnectInput) -> GmailConnectResult:
     """Build the Google OAuth authorization URL for the user."""
     client_id = global_config.GOOGLE_CLIENT_ID
     redirect_uri = global_config.GOOGLE_REDIRECT_URI
-    if not client_id:
-        raise RuntimeError("Google OAuth not configured")
-    if not redirect_uri:
-        raise RuntimeError("Google OAuth not configured")
+    if not client_id or not redirect_uri:
+        raise GoogleOAuthNotConfiguredError
 
     state = _sign_state(input.user_id)
     params = {
@@ -321,7 +356,7 @@ def _mint_access_token(refresh_token: str) -> str:
     client_id = global_config.GOOGLE_CLIENT_ID
     client_secret = global_config.GOOGLE_CLIENT_SECRET
     if not client_id or not client_secret:
-        raise RuntimeError("Google OAuth not configured")
+        raise GoogleOAuthNotConfiguredError
 
     with httpx.Client(timeout=20.0) as client:
         resp = client.post(
@@ -373,9 +408,7 @@ def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource 
     with _get_db_session() as session:
         row = _load_token_row(session, user_id)
         if row is None:
-            raise GmailNotConnectedError(
-                f"No active Gmail connection for user_id={user_id!r}"
-            )
+            raise GmailNotConnectedError(user_id)
         encrypted = row.refresh_token_enc
 
     refresh_token = require_encryption().decrypt(encrypted)

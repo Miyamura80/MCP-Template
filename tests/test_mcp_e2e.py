@@ -25,7 +25,7 @@ from sqlalchemy.pool import StaticPool
 
 from api_server.auth.api_key_auth import create_api_key
 from api_server.server import app
-from common import token_encryption
+from common import global_config, token_encryption
 from common.token_encryption import FernetEncryption
 from db import engine as db_engine
 from db.base import Base
@@ -113,6 +113,24 @@ class _McpSession:
         msg = _read_sse_first_message(resp)
         assert "error" not in msg, f"{method} returned error: {msg.get('error')}"
         return msg["result"]
+
+    def request_error(self, method: str, params: dict | None = None) -> dict:
+        """POST a JSON-RPC request expected to fail; return the `error` member."""
+        self._next_id += 1
+        resp = self._client.post(
+            "/mcp",
+            headers=self._headers(),
+            json={
+                "jsonrpc": "2.0",
+                "id": self._next_id,
+                "method": method,
+                "params": params or {},
+            },
+        )
+        assert resp.status_code == 200, f"{method}: {resp.status_code} {resp.text}"
+        msg = _read_sse_first_message(resp)
+        assert "error" in msg, f"{method} unexpectedly succeeded: {msg}"
+        return msg["error"]
 
     def notify(self, method: str) -> None:
         resp = self._client.post(
@@ -255,6 +273,35 @@ class TestMCPWireE2E(TestTemplate):
                 assert result["isError"] is False
                 # Enhancer attached the dashboard app on the result.
                 assert result["_meta"]["ui"]["resourceUri"] == "ui://mymcp/gmail_inbox"
+
+    def test_not_connected_gmail_tool_returns_url_elicitation_error(self):
+        """A Gmail tool called by a user with no linked account surfaces the
+        SEP-1036 URL-elicitation-required error (JSON-RPC -32042) carrying the
+        Google consent URL - on both the headless (gmail_list_inbox) and
+        enhanced (inbox_get_curation) registration paths. The stateless mount
+        never sees client capabilities, so conversion is the default."""
+        with (
+            patch.object(global_config, "GOOGLE_CLIENT_ID", "e2e-client"),
+            patch.object(
+                global_config,
+                "GOOGLE_REDIRECT_URI",
+                "http://localhost:8000/api/v1/auth/google/callback",
+            ),
+            _wire_session("u-e2e-nolink") as session,
+        ):
+            for tool_name in ("gmail_list_inbox", "inbox_get_curation"):
+                error = session.request_error(
+                    "tools/call", {"name": tool_name, "arguments": {}}
+                )
+                assert error["code"] == -32042, f"{tool_name}: {error}"
+                elic = error["data"]["elicitations"][0]
+                assert elic["mode"] == "url"
+                assert elic["elicitationId"].startswith("connect-")
+                assert elic["url"].startswith("https://accounts.google.com/")
+                # Hosts that don't understand -32042 fall back to the message
+                # text alone, so it must stay self-recovering on its own.
+                assert "gmail_connect" in error["message"]
+                assert elic["url"] in error["message"]
 
     def test_enhanced_tool_call_assembles_full_result_on_wire(self):
         """Register a throwaway enhanced tool and call it through the wire,
