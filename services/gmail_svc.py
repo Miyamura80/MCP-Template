@@ -48,7 +48,25 @@ from services import service
 
 
 class GmailNotConnectedError(Exception):
-    """Raised when a Gmail-API service is invoked for a user with no active token row."""
+    """Raised when a Gmail-API service is invoked for a user with no active token row.
+
+    The message doubles as the recovery script for the calling host/LLM: over
+    MCP it is surfaced verbatim as the ``isError`` tool-result text, which is
+    the only channel guaranteed to reach the caller at failure time - so it
+    must say what to do next (gmail_connect -> show auth_url -> retry), not
+    just what went wrong. Every Gmail-connection-dependent service raises this
+    class, so the recovery text lives here rather than at each raise site.
+    """
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        super().__init__(
+            f"No Gmail account is linked for user_id={user_id!r}. "
+            "To recover: call the gmail_connect tool, present the returned "
+            "auth_url to the user as a clickable link so they can complete "
+            "Google's consent flow, then retry this tool. gmail_status "
+            "reports whether the connection is active."
+        )
 
 
 class GmailAttachmentTooLargeError(Exception):
@@ -373,9 +391,7 @@ def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource 
     with _get_db_session() as session:
         row = _load_token_row(session, user_id)
         if row is None:
-            raise GmailNotConnectedError(
-                f"No active Gmail connection for user_id={user_id!r}"
-            )
+            raise GmailNotConnectedError(user_id)
         encrypted = row.refresh_token_enc
 
     refresh_token = require_encryption().decrypt(encrypted)

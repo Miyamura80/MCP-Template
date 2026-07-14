@@ -1049,8 +1049,20 @@ class TestGmailCurateInbox(TestTemplate):
 
 class TestGmailNotConnected(TestTemplate):
     def test_raises_when_no_row(self):
-        with _patch_db(), pytest.raises(GmailNotConnectedError):
+        with _patch_db(), pytest.raises(GmailNotConnectedError) as excinfo:
             _get_gmail_client("nonexistent-user")
+        assert excinfo.value.user_id == "nonexistent-user"
+
+    def test_message_is_self_recovering(self):
+        """The error text is what the MCP host LLM sees (isError tool result),
+        so it must contain the full recovery path, not just the diagnosis."""
+        err = GmailNotConnectedError("u-123")
+        msg = str(err)
+        assert "u-123" in msg
+        assert "gmail_connect" in msg
+        assert "auth_url" in msg
+        assert "retry" in msg
+        assert "gmail_status" in msg
 
 
 class TestDraftRoundTrip(TestTemplate):

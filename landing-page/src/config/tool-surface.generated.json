@@ -5,7 +5,7 @@
   },
   {
     "name": "gmail_archive_thread",
-    "description": "Archive a Gmail thread by removing the INBOX label"
+    "description": "Archive a Gmail thread by removing the INBOX label. Also marks the thread dismissed in the curation ledger. During a triage pass, continue on to the next uncurated or stale thread."
   },
   {
     "name": "gmail_compose",
@@ -17,7 +17,7 @@
   },
   {
     "name": "gmail_curate_inbox",
-    "description": "Rank recent inbox threads by a deterministic importance score. When an interactive UI is rendered alongside the result, keep your text response brief (a one-line summary) since the user can browse details in the UI. Only elaborate if the user asks."
+    "description": "Rank recent inbox threads by a deterministic heuristic score and render the inbox dashboard. This is a quick provisional view, NOT the assistant's own triage: for 'what's important / triage my inbox', prefer inbox_get_curation (banked LLM verdicts + coverage), going deeper with inbox_search + inbox_save_curation when coverage shows uncurated/stale threads. When an interactive UI is rendered alongside the result, keep your text response brief (a one-line summary) since the user can browse details in the UI. Only elaborate if the user asks."
   },
   {
     "name": "gmail_discard_draft",
@@ -49,7 +49,7 @@
   },
   {
     "name": "gmail_mark_thread_done",
-    "description": "Mark a Gmail thread as done by applying the MCP/Done label (hides from curated inbox)"
+    "description": "Mark a Gmail thread as done by applying the MCP/Done label (hides from curated inbox). Also marks the thread dismissed in the curation ledger. During a triage pass, continue on to the next uncurated or stale thread."
   },
   {
     "name": "gmail_mark_thread_read",
@@ -86,6 +86,18 @@
   {
     "name": "gmail_watch_stop",
     "description": "Cancel the user's Gmail push-notification watch"
+  },
+  {
+    "name": "inbox_get_curation",
+    "description": "Read banked inbox triage from the curation ledger. Cheap: no email bodies are fetched and no reasoning is run - it returns judgments the assistant already made (bucket, importance, summary, suggested action) plus a coverage count of curated / stale / uncurated threads in the inbox. Call this FIRST for any 'what's important / triage my inbox' request. If coverage shows many uncurated or stale threads and the user wants a thorough pass, go deeper with inbox_search + inbox_save_curation; otherwise answer directly from these banked verdicts."
+  },
+  {
+    "name": "inbox_save_curation",
+    "description": "Bank your triage judgments for one or more threads into the curation ledger so they are not re-reasoned next time. Call this after reading and reasoning over threads (typically from inbox_search) - pass a batch of per-thread verdicts (bucket, importance, a short summary, suggested action, optional reasoning/confidence). Each write stamps the thread's current Gmail historyId so the verdict stays valid until the thread changes. This is what makes the next inbox_get_curation near-free."
+  },
+  {
+    "name": "inbox_search",
+    "description": "Search recent inbox threads headlessly (no UI) when doing a thorough triage pass - use this to actually look at many emails. Returns thread summaries (subject, sender, snippet, recency) each annotated with its ledger status: 'uncurated' / 'stale' threads are the delta worth reasoning about; 'curated' threads are already banked and can be skipped. Uncurated threads also carry a provisional heuristic importance_prior. Pass since_history_id (from a prior result's current_history_id) to fetch only changed threads. After reasoning over the results, bank your verdicts with inbox_save_curation."
   },
   {
     "name": "webhook_list",
