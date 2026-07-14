@@ -76,6 +76,10 @@ export function InlineComposer({
       .map((a) => ({ filename: a.filename, mime_type: a.mime_type, size: a.size, attachment_id: a.attachment_id, message_id: a.message_id })),
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // True once the user adds or removes an attachment. Until then, save/send
+  // omit the `attachments` argument so the backend preserves every existing
+  // file; after a change we send the explicit desired set so a removal sticks.
+  const attachmentsDirtyRef = useRef(false);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewBlobRef = useRef<string | null>(null);
@@ -164,6 +168,7 @@ export function InlineComposer({
       reader.onload = () => {
         const result = reader.result as string;
         const base64 = result.split(",")[1] || "";
+        attachmentsDirtyRef.current = true;
         setAttachments((prev) => [
           ...prev,
           { filename: file.name, mime_type: file.type || "application/octet-stream", data_base64: base64, size: file.size },
@@ -175,6 +180,7 @@ export function InlineComposer({
   };
 
   const removeAttachment = (index: number) => {
+    attachmentsDirtyRef.current = true;
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -235,7 +241,11 @@ export function InlineComposer({
       };
       // Preserve existing files (by reference) alongside new uploads; a bare
       // new-uploads list would replace the whole set and drop them.
-      const attachmentsArg = buildAttachmentsPayload(attachments, existingAttachments);
+      const attachmentsArg = buildAttachmentsPayload(
+        attachments,
+        existingAttachments,
+        attachmentsDirtyRef.current,
+      );
       if (attachmentsArg) args.attachments = attachmentsArg;
       await mcpApp.callServerTool({ name: "gmail_composer.save_draft", arguments: args });
       setSaveStatus({ kind: "saved", at: new Date() });
@@ -271,7 +281,11 @@ export function InlineComposer({
         body: draft.body ?? "",
       };
       // Same preservation as save_draft: keep existing files when new ones are added.
-      const attachmentsArg = buildAttachmentsPayload(attachments, existingAttachments);
+      const attachmentsArg = buildAttachmentsPayload(
+        attachments,
+        existingAttachments,
+        attachmentsDirtyRef.current,
+      );
       if (attachmentsArg) args.attachments = attachmentsArg;
       const raw = await mcpApp.callServerTool({ name: "gmail_composer.send", arguments: args });
       const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };

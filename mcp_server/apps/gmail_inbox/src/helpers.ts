@@ -125,17 +125,26 @@ export function formatFileSize(bytes: number): string {
 // Build the composer's `attachments` argument for save_draft / send.
 //
 // The backend replaces the draft's entire attachment set when `attachments`
-// is a non-empty list, and preserves existing files that are re-listed by
-// `{attachment_id}` reference (see gmail_update_draft). Sending only the new
-// uploads therefore DROPS every pre-existing attachment. When there are new
-// uploads, merge references to the existing files ahead of them; when there
-// are none, return undefined so the caller omits the argument entirely and
-// the backend's omit-means-preserve contract keeps all existing files.
+// is a non-empty list, preserving existing files that are re-listed by
+// `{attachment_id}` reference, and treats an OMITTED argument as
+// "preserve every existing file" (see gmail_update_draft).
+//
+// `changed` is whether the user has added or removed an attachment in this
+// composer session:
+//   - not changed  -> return undefined so the caller omits the argument and
+//     the backend keeps every file untouched (the common text-only-edit path,
+//     and the only safe way to preserve files that carry no referenceable id).
+//   - changed      -> return the explicit desired set: `{attachment_id}` refs
+//     for the existing files followed by the new uploads. Sending this on
+//     every save/send after a change is what lets a removal actually take
+//     effect: once a new upload has been persisted, omitting the argument
+//     would "preserve" it server-side and the removal would be lost.
 export function buildAttachmentsPayload(
   newUploads: FileAttachment[],
   existing: ExistingAttachment[],
+  changed: boolean,
 ): Array<Record<string, unknown>> | undefined {
-  if (newUploads.length === 0) return undefined;
+  if (!changed) return undefined;
   const refs = existing
     .filter((a) => a.attachment_id)
     .map((a) => ({ attachment_id: a.attachment_id }));
