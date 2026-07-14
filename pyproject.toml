@@ -209,13 +209,6 @@ exclude = [
     "tests/test_inbox_curation.py",
     "services/gmail_messages_svc.py",
     "services/gmail_svc.py",
-    # landing.ts is data-driven by design: ALL landing-page copy lives there
-    # (see landing-page/README.md), so its length is content, not code.
-    "landing-page/src/config/landing.ts",
-    # Pre-existing oversize app frontends; splits are tracked review findings,
-    # not licenses to grow. Remove each entry when its file is split.
-    "mcp_server/apps/gmail_composer/src/Composer.tsx",
-    "mcp_server/apps/gmail_inbox/src/Inbox.tsx",
 ]
 
 [tool.coverage.run]
