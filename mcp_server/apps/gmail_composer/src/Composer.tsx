@@ -59,6 +59,10 @@ export function Composer({ mcpApp }: ComposerProps) {
   const [pendingAgent, setPendingAgent] = useState<Draft | null>(null);
   const localDirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set once a send/discard is committed: the textarea stays mounted until the
+  // RPC resolves, so this stops a keystroke in that window from arming an
+  // autosave against the sent/discarded draft_id. Reset on failure.
+  const closingRef = useRef(false);
   const draftRef = useRef<Draft | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   // The last server-confirmed attachment set - the authoritative keep-list a
@@ -166,8 +170,12 @@ export function Composer({ mcpApp }: ComposerProps) {
   };
 
   const scheduleAutoSave = () => {
+    // Don't arm a save once the draft is being sent/discarded.
+    if (closingRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
+      // Belt-and-suspenders: a terminal transition between arming and firing.
+      if (closingRef.current) return;
       // Text-only save: omit attachments so existing files are preserved.
       enqueue(() => doSave()).catch(() => {});
     }, 800);
@@ -182,7 +190,7 @@ export function Composer({ mcpApp }: ComposerProps) {
   };
 
   const onSaveNow = () => {
-    if (!draftRef.current) return;
+    if (!draftRef.current || closingRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     enqueue(() => doSave()).catch(() => {});
   };
@@ -198,6 +206,9 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   const onSend = async () => {
     if (!draftRef.current) return;
+    // Committing to send: block new autosaves against this draft (reset below
+    // if the send fails and the composer stays editable).
+    closingRef.current = true;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     try {
       // Serialized after any in-flight attachment upload so the files are
@@ -217,6 +228,8 @@ export function Composer({ mcpApp }: ComposerProps) {
       const cur = draftRef.current;
       if (cur) void pushModelContext(sentContextText(cur, messageId));
     } catch (err) {
+      // Send failed: the composer stays editable, so re-enable autosaving.
+      closingRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
     }
@@ -225,6 +238,9 @@ export function Composer({ mcpApp }: ComposerProps) {
   const onDiscardConfirm = async () => {
     const cur = draftRef.current;
     if (!cur) return;
+    // Committing to discard: block new autosaves (a keystroke during the
+    // in-flight delete must not resurrect the draft). Reset on failure.
+    closingRef.current = true;
     // Cancel any queued autosave so a debounced save can't race ahead and
     // re-create a row immediately after the discard call returns.
     if (saveTimerRef.current) {
@@ -242,6 +258,8 @@ export function Composer({ mcpApp }: ComposerProps) {
       setDiscarded(true);
       void pushModelContext(discardContextText(cur));
     } catch (err) {
+      // Discard failed: the draft still exists and stays editable.
+      closingRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
     } finally {
