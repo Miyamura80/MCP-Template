@@ -246,7 +246,9 @@ export function InlineComposer({
         existingAttachments,
         attachmentsDirtyRef.current,
       );
-      if (attachmentsArg) args.attachments = attachmentsArg;
+      // `undefined` means "omit -> preserve all"; an array (including the empty
+      // clear-all list) must be sent, so test against undefined, not truthiness.
+      if (attachmentsArg !== undefined) args.attachments = attachmentsArg;
       await mcpApp.callServerTool({ name: "gmail_composer.save_draft", arguments: args });
       setSaveStatus({ kind: "saved", at: new Date() });
       const latest = draftRef.current;
@@ -286,7 +288,9 @@ export function InlineComposer({
         existingAttachments,
         attachmentsDirtyRef.current,
       );
-      if (attachmentsArg) args.attachments = attachmentsArg;
+      // `undefined` means "omit -> preserve all"; an array (including the empty
+      // clear-all list) must be sent, so test against undefined, not truthiness.
+      if (attachmentsArg !== undefined) args.attachments = attachmentsArg;
       const raw = await mcpApp.callServerTool({ name: "gmail_composer.send", arguments: args });
       const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
       const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
