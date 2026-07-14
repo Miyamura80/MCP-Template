@@ -22,7 +22,32 @@ type Globals = {
   __APP_NAME__?: string;
   __APP_HTML_B64__?: string;
   __READY__?: boolean;
+  __MODEL_CONTEXT__?: string[];
 };
+
+type ModelContextParams = { content?: { type?: string; text?: string }[] };
+
+// Render an app-initiated `ui/update-model-context` push into the host page's
+// context panel (and onto window.__MODEL_CONTEXT__ so headless smoke runs can
+// assert on it). A real host would append this to the LLM's context; showing
+// it is the whole point of previewing the send/discard flows.
+function renderModelContext(params: ModelContextParams): void {
+  const texts = (params.content ?? [])
+    .filter((c) => c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text as string);
+  if (texts.length === 0) return;
+  const g = window as unknown as Globals;
+  (g.__MODEL_CONTEXT__ ??= []).push(...texts);
+  const panel = document.getElementById("ctx");
+  const list = document.getElementById("ctx-items");
+  if (!panel || !list) return;
+  panel.style.display = "block";
+  for (const text of texts) {
+    const pre = document.createElement("pre");
+    pre.textContent = text;
+    list.appendChild(pre);
+  }
+}
 
 function requireGlobal(key: "__APP_NAME__" | "__APP_HTML_B64__"): string {
   const value = (window as unknown as Globals)[key];
@@ -65,7 +90,10 @@ async function main(): Promise<void> {
     dispatch(name, (args ?? {}) as Record<string, unknown>);
   bridge.onopenlink = async () => ({});
   bridge.onmessage = async () => ({});
-  bridge.onupdatemodelcontext = async () => ({});
+  bridge.onupdatemodelcontext = async (params) => {
+    renderModelContext(params as ModelContextParams);
+    return {};
+  };
   bridge.onrequestdisplaymode = async ({ mode }) => ({ mode });
 
   // Fit the frame to the app's content the way a real host does: the app emits

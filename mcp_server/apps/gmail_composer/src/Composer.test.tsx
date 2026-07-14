@@ -4,11 +4,15 @@ import { Composer, type Draft, type Thread } from "./Composer";
 
 function makeMcpApp(callResult: unknown = null) {
   const callServerTool = vi.fn(async () => callResult);
+  const updateModelContext = vi.fn(
+    async (_args: { content: Array<{ type: "text"; text: string }> }) => ({}),
+  );
   const app = {
     ontoolresult: undefined as ((raw: unknown) => void) | undefined,
     callServerTool,
+    updateModelContext,
   };
-  return { app, callServerTool };
+  return { app, callServerTool, updateModelContext };
 }
 
 // Installs a matchMedia stub so useIsMobile() resolves deterministically.
@@ -130,8 +134,49 @@ describe("Composer", () => {
     expect(await screen.findByText(/msg-99/)).toBeInTheDocument();
   });
 
+  it("Send pushes the final sent draft into model context", async () => {
+    const sendResult = { structuredContent: { message_id: "msg-99" } };
+    const { app, updateModelContext } = makeMcpApp(sendResult);
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    // Edit the body first: the context push must carry the user's final
+    // version, not the last agent-known draft.
+    fireEvent.change(screen.getByLabelText("Body"), {
+      target: { value: "Hi Bob - edited by hand" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => {
+      expect(updateModelContext).toHaveBeenCalledTimes(1);
+    });
+    const text = updateModelContext.mock.calls[0][0].content[0].text;
+    expect(text).toContain("clicked Send");
+    expect(text).toContain("to: bob@example.com");
+    expect(text).toContain("subject: Hello");
+    expect(text).toContain("message_id: msg-99");
+    expect(text).toContain("Hi Bob - edited by hand");
+  });
+
+  it("Send still succeeds when the host rejects the context update", async () => {
+    const sendResult = { structuredContent: { message_id: "msg-99" } };
+    const { app } = makeMcpApp(sendResult);
+    app.updateModelContext = vi
+      .fn()
+      .mockRejectedValue(new Error("unsupported"));
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByText(/msg-99/)).toBeInTheDocument();
+    expect(screen.queryByText(/save failed/i)).not.toBeInTheDocument();
+  });
+
   it("Discard with confirm calls gmail_composer.discard", async () => {
-    const { app, callServerTool } = makeMcpApp({ structuredContent: { discarded: true } });
+    const { app, callServerTool, updateModelContext } = makeMcpApp({
+      structuredContent: { discarded: true },
+    });
     render(<Composer mcpApp={app} />);
     act(() => {
       app.ontoolresult?.({ structuredContent: sampleDraft });
@@ -145,6 +190,13 @@ describe("Composer", () => {
       });
     });
     expect(await screen.findByText(/discarded\./i)).toBeInTheDocument();
+    // The agent must learn the draft is gone, or it will keep referencing it.
+    await waitFor(() => {
+      expect(updateModelContext).toHaveBeenCalledTimes(1);
+    });
+    const text = updateModelContext.mock.calls[0][0].content[0].text;
+    expect(text).toContain("Discard");
+    expect(text).toContain("d-1");
   });
 
   it("auto-save failure renders an error indicator", async () => {

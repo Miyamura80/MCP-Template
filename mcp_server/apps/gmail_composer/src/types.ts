@@ -28,6 +28,9 @@ export type Thread = {
 export type McpAppLike = {
   ontoolresult?: (result: any) => void;  // eslint-disable-line @typescript-eslint/no-explicit-any
   callServerTool: (args: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
+  updateModelContext: (args: {
+    content: Array<{ type: "text"; text: string }>;
+  }) => Promise<unknown>;
 };
 
 export type SaveStatus =

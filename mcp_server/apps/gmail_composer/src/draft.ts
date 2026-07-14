@@ -41,3 +41,23 @@ export function extractThread(raw: unknown): Thread | null {
   if (!Array.isArray((data as { messages?: unknown }).messages)) return null;
   return data as unknown as Thread;
 }
+
+// Canonical enumeration of the user-editable draft fields, normalized to the
+// empty-string wire form the server tools expect. persistDraft, onSend, and
+// sentContextText must all agree on this set - a new Draft field is added
+// here, not at each call site.
+export function draftFields(draft: Draft): {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+} {
+  return {
+    to: draft.to ?? "",
+    cc: draft.cc ?? "",
+    bcc: draft.bcc ?? "",
+    subject: draft.subject ?? "",
+    body: draft.body ?? "",
+  };
+}
