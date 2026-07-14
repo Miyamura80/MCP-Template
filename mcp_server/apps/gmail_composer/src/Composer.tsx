@@ -59,9 +59,8 @@ export function Composer({ mcpApp }: ComposerProps) {
   const [pendingAgent, setPendingAgent] = useState<Draft | null>(null);
   const localDirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Set once a send/discard is committed: the textarea stays mounted until the
-  // RPC resolves, so this stops a keystroke in that window from arming an
-  // autosave against the sent/discarded draft_id. Reset on failure.
+  // Set once a send/discard is committed (the textarea stays mounted until the
+  // RPC resolves): blocks autosave + attachment ops against the terminal draft.
   const closingRef = useRef(false);
   const draftRef = useRef<Draft | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
@@ -131,12 +130,11 @@ export function Composer({ mcpApp }: ComposerProps) {
     }
   };
 
-  // The single draft-write path. Reads the freshest text off draftRef at the
-  // moment the call is issued (never a pre-await snapshot), so a save that fires
-  // after a slow file read can't revert a concurrent edit. `attachments`
-  // undefined => omit the arg (server preserves existing files); an array =>
-  // whole-set replace. On an attachment save, the server's echoed list becomes
-  // the authoritative truth. Throws on failure so attachment callers can react.
+  // The single draft-write path. Reads the freshest text off draftRef at call
+  // time (never a pre-await snapshot), so a save issued after a slow file read
+  // can't revert a live edit. `attachments`: undefined omits the arg (preserve
+  // files); an array is a whole-set replace whose echoed result is adopted as
+  // truth. Throws on failure so attachment callers can react.
   const doSave = async (attachments?: SaveAttachment[]): Promise<Draft | null> => {
     const snapshot = draftRef.current;
     if (!snapshot) return null;
@@ -174,9 +172,9 @@ export function Composer({ mcpApp }: ComposerProps) {
     if (closingRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      // Belt-and-suspenders: a terminal transition between arming and firing.
+      // Re-check: a terminal transition may have happened since arming.
+      // Text-only save (no attachments arg) preserves existing files.
       if (closingRef.current) return;
-      // Text-only save: omit attachments so existing files are preserved.
       enqueue(() => doSave()).catch(() => {});
     }, 800);
   };
@@ -202,10 +200,12 @@ export function Composer({ mcpApp }: ComposerProps) {
     attachmentsRef,
     doSave,
     enqueue,
+    closingRef,
   });
 
   const onSend = async () => {
-    if (!draftRef.current) return;
+    // Single-flight: a repeat click while a send is in flight is a no-op.
+    if (!draftRef.current || closingRef.current) return;
     // Committing to send: block new autosaves against this draft (reset below
     // if the send fails and the composer stays editable).
     closingRef.current = true;
@@ -237,7 +237,8 @@ export function Composer({ mcpApp }: ComposerProps) {
 
   const onDiscardConfirm = async () => {
     const cur = draftRef.current;
-    if (!cur) return;
+    // Single-flight: ignore a repeat confirm while a discard is in flight.
+    if (!cur || closingRef.current) return;
     // Committing to discard: block new autosaves (a keystroke during the
     // in-flight delete must not resurrect the draft). Reset on failure.
     closingRef.current = true;

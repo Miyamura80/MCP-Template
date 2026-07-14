@@ -253,4 +253,99 @@ describe("Composer attachments", () => {
       vi.useRealTimers();
     }
   });
+
+  it("rejects a zero-byte file without calling save_draft", async () => {
+    const { app, callServerTool } = makeMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    const empty = new File([], "empty.txt", { type: "text/plain" });
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [empty] } });
+    });
+    expect(callServerTool).not.toHaveBeenCalled();
+    expect(await screen.findByText(/empty file/i)).toBeInTheDocument();
+  });
+
+  it("persists a just-dropped attachment before sending (send waits for the read)", async () => {
+    // Regression: the read used to run outside the serialized chain, so a Send
+    // clicked mid-read raced ahead and the message went out without the file.
+    const { app, calls } = makeEchoingMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: { ...sampleDraft, attachments: [] } });
+    });
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    const file = new File(["x"], "late.txt", { type: "text/plain" });
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+      fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    });
+    await waitFor(() => {
+      expect(calls.some((c) => c.name === "gmail_composer.send")).toBe(true);
+    });
+    const saveIdx = calls.findIndex((c) => c.name === "gmail_composer.save_draft");
+    const sendIdx = calls.findIndex((c) => c.name === "gmail_composer.send");
+    expect(saveIdx).toBeGreaterThanOrEqual(0);
+    expect(saveIdx).toBeLessThan(sendIdx);
+  });
+
+  it("double-clicking Send fires only one send RPC", async () => {
+    const { app, calls } = makeEchoingMcpApp();
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    const sendBtn = screen.getByRole("button", { name: /^send$/i });
+    await act(async () => {
+      fireEvent.click(sendBtn);
+      fireEvent.click(sendBtn);
+    });
+    await waitFor(() => {
+      expect(calls.filter((c) => c.name === "gmail_composer.send").length).toBe(1);
+    });
+  });
+
+  it("does not attach against a draft that is being sent", async () => {
+    let resolveSend: (v: unknown) => void = () => {};
+    const sendPromise = new Promise((r) => {
+      resolveSend = r;
+    });
+    const seen: string[] = [];
+    const callServerTool = vi.fn((a: { name: string }) => {
+      seen.push(a.name);
+      return a.name === "gmail_composer.send"
+        ? sendPromise
+        : Promise.resolve({ structuredContent: {} });
+    });
+    const app = {
+      ontoolresult: undefined as ((raw: unknown) => void) | undefined,
+      callServerTool,
+      updateModelContext: vi.fn(async () => ({})),
+    };
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    // Send is now in flight (closingRef is set); a file chosen now must not
+    // enqueue a save against the terminal draft.
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    const input = screen.getByLabelText("Attach files", {
+      selector: "input",
+    }) as HTMLInputElement;
+    const file = new File(["x"], "late.txt", { type: "text/plain" });
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } });
+    });
+    expect(seen.includes("gmail_composer.save_draft")).toBe(false);
+    await act(async () => {
+      resolveSend({ structuredContent: { message_id: "m" } });
+    });
+  });
 });

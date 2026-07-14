@@ -67,6 +67,9 @@ type UseAttachmentsArgs = {
   // the saved draft. Serialization guarantees prior ops committed first.
   doSave: (attachments?: SaveAttachment[]) => Promise<Draft | null>;
   enqueue: <T>(fn: () => Promise<T>) => Promise<T>;
+  // Set once a send/discard is committed: attachment mutations must not touch
+  // the terminal draft after that point.
+  closingRef: React.RefObject<boolean>;
 };
 
 // All attachment UI state + file handling. Kept out of Composer so the
@@ -79,6 +82,7 @@ export function useAttachments({
   attachmentsRef,
   doSave,
   enqueue,
+  closingRef,
 }: UseAttachmentsArgs) {
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [dragActive, setDragActive] = useState(false);
@@ -91,10 +95,10 @@ export function useAttachments({
     const chosen = Array.from(files);
     if (chosen.length === 0) return;
 
-    // Oversized files never leave the browser: mark them errored inline.
-    const oversized = chosen.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
-    const okFiles = chosen.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
-
+    // Classify up front. Empty (0-byte) and oversized files never leave the
+    // browser: an empty file would send an empty data_base64 the server
+    // rejects, so it's an inline error, not a save attempt.
+    const okFiles = chosen.filter((f) => f.size > 0 && f.size <= MAX_ATTACHMENT_BYTES);
     const okEntries: PendingUpload[] = okFiles.map((f) => ({
       local_id: nextUploadId(),
       filename: f.name,
@@ -102,81 +106,121 @@ export function useAttachments({
       size: f.size,
       status: "reading",
     }));
-    const oversizedEntries: PendingUpload[] = oversized.map((f) => ({
-      local_id: nextUploadId(),
-      filename: f.name,
-      mime_type: f.type || "application/octet-stream",
-      size: f.size,
-      status: "error",
-      error: `Too large (${formatBytes(f.size)}); ${formatBytes(MAX_ATTACHMENT_BYTES)} max`,
-    }));
-    setUploads((u) => [...u, ...okEntries, ...oversizedEntries]);
+    const invalidEntries: PendingUpload[] = chosen
+      .filter((f) => f.size === 0 || f.size > MAX_ATTACHMENT_BYTES)
+      .map((f) => ({
+        local_id: nextUploadId(),
+        filename: f.name,
+        mime_type: f.type || "application/octet-stream",
+        size: f.size,
+        status: "error",
+        error:
+          f.size === 0
+            ? "Empty file (0 bytes)"
+            : `Too large (${formatBytes(f.size)}); ${formatBytes(MAX_ATTACHMENT_BYTES)} max`,
+      }));
+    setUploads((u) => [...u, ...okEntries, ...invalidEntries]);
     if (okFiles.length === 0) return;
 
-    // Read each file independently: one unreadable file must not sink the whole
-    // batch, so failures are marked per-chip and the rest still upload.
-    const results = await Promise.allSettled(okFiles.map(readFileAsBase64));
-    const ready: { id: string; upload: NewUpload }[] = [];
-    const failedIds = new Set<string>();
-    results.forEach((r, i) => {
-      const entry = okEntries[i];
-      if (r.status === "fulfilled") {
-        ready.push({
-          id: entry.local_id,
-          upload: {
-            filename: entry.filename,
-            mime_type: entry.mime_type,
-            data_base64: r.value,
-          },
-        });
-      } else {
-        failedIds.add(entry.local_id);
-      }
-    });
-    if (failedIds.size > 0) {
+    const okIds = okEntries.map((e) => e.local_id);
+    const markOkError = (msg: string) =>
       setUploads((u) =>
         u.map((e) =>
-          failedIds.has(e.local_id)
-            ? { ...e, status: "error", error: "Could not read file" }
-            : e,
+          okIds.includes(e.local_id) ? { ...e, status: "error", error: msg } : e,
         ),
       );
-    }
-    if (ready.length === 0) {
-      setSaveStatus({ kind: "error", message: "Could not read the selected file(s)" });
+
+    // Once a send/discard is committed the draft is terminal - don't start a
+    // new attachment op against it.
+    if (closingRef.current) {
+      markOkError("Draft was closed");
       return;
     }
-    const readyIds = new Set(ready.map((r) => r.id));
-    setUploads((u) =>
-      u.map((e) => (readyIds.has(e.local_id) ? { ...e, status: "uploading" } : e)),
-    );
+
+    // Register the whole read + save as ONE serialized unit, synchronously,
+    // BEFORE awaiting the read. A Send/Discard clicked mid-read is enqueued
+    // AFTER this, so the message can't go out missing a just-dropped file.
     try {
-      const saved = await enqueue(() => {
-        // Build the keep-set from the authoritative server-confirmed list at run
-        // time (prior queued ops have settled), so overlapping drops that each
-        // started from the same stale draft can't drop one another's files.
+      const result = await enqueue(async () => {
+        // Cumulative preflight against the committed set: refuse a batch that
+        // would blow past Gmail's total-message limit before reading hundreds
+        // of MB of base64 into the iframe.
+        const existingBytes = attachmentsRef.current.reduce(
+          (s, a) => s + (a.size ?? 0),
+          0,
+        );
+        const incomingBytes = okFiles.reduce((s, f) => s + f.size, 0);
+        if (existingBytes + incomingBytes > MAX_ATTACHMENT_BYTES) {
+          return { kind: "too_big" as const };
+        }
+        // Read each file independently: one unreadable file must not sink the
+        // whole batch, so failures are marked per-chip and the rest upload.
+        const settled = await Promise.allSettled(okFiles.map(readFileAsBase64));
+        const ready: { id: string; upload: NewUpload }[] = [];
+        const failedIds: string[] = [];
+        settled.forEach((r, i) => {
+          const e = okEntries[i];
+          if (r.status === "fulfilled" && r.value) {
+            ready.push({
+              id: e.local_id,
+              upload: {
+                filename: e.filename,
+                mime_type: e.mime_type,
+                data_base64: r.value,
+              },
+            });
+          } else {
+            failedIds.push(e.local_id);
+          }
+        });
+        if (failedIds.length > 0) {
+          setUploads((u) =>
+            u.map((e) =>
+              failedIds.includes(e.local_id)
+                ? { ...e, status: "error", error: "Could not read file" }
+                : e,
+            ),
+          );
+        }
+        if (ready.length === 0) return { kind: "none" as const };
+        const readySet = new Set(ready.map((r) => r.id));
+        setUploads((u) =>
+          u.map((e) =>
+            readySet.has(e.local_id) ? { ...e, status: "uploading" } : e,
+          ),
+        );
+        // Keep-set from the authoritative server-confirmed list at run time, so
+        // overlapping drops can't drop one another's files.
         const keep: SaveAttachment[] = attachmentsRef.current.map((a) => ({
           attachment_id: a.attachment_id,
         }));
-        return doSave([...keep, ...ready.map((r) => r.upload)]);
+        const saved = await doSave([...keep, ...ready.map((r) => r.upload)]);
+        return { kind: "saved" as const, saved, readyIds: ready.map((r) => r.id) };
       });
+
+      if (result.kind === "too_big") {
+        markOkError(`Would exceed ${formatBytes(MAX_ATTACHMENT_BYTES)} total`);
+        return;
+      }
+      if (result.kind === "none") {
+        setSaveStatus({ kind: "error", message: "Could not read the selected file(s)" });
+        return;
+      }
       // Commit the adopted list and drop the transient chips in one batch, so
       // the just-uploaded file never renders as both a chip and a saved row.
-      const next = saved?.attachments ?? attachmentsRef.current;
+      const next = result.saved?.attachments ?? attachmentsRef.current;
+      const readySet = new Set(result.readyIds);
       setDraft((d) => (d ? { ...d, attachments: next } : d));
-      setUploads((u) => u.filter((e) => !readyIds.has(e.local_id)));
+      setUploads((u) => u.filter((e) => !readySet.has(e.local_id)));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setUploads((u) =>
-        u.map((e) =>
-          readyIds.has(e.local_id) ? { ...e, status: "error", error: msg } : e,
-        ),
-      );
+      markOkError(msg);
     }
   };
 
   const onRemoveAttachment = async (attachmentId: string) => {
-    if (!draftRef.current) return;
+    // Don't mutate a draft that is being sent/discarded.
+    if (!draftRef.current || closingRef.current) return;
     // Optimistic UI only. The authoritative keep-set is recomputed inside the
     // queued op from attachmentsRef (advanced by server responses, not by this
     // optimistic edit), so a remove that overlaps an upload can't clobber it.
