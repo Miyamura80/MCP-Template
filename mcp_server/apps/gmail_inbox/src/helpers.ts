@@ -3,6 +3,8 @@ import type {
   CuratedThread,
   CurationRecord,
   DraftAttachment,
+  ExistingAttachment,
+  FileAttachment,
   LabelChip,
 } from "./types";
 
@@ -118,6 +120,31 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Build the composer's `attachments` argument for save_draft / send.
+//
+// The backend replaces the draft's entire attachment set when `attachments`
+// is a non-empty list, and preserves existing files that are re-listed by
+// `{attachment_id}` reference (see gmail_update_draft). Sending only the new
+// uploads therefore DROPS every pre-existing attachment. When there are new
+// uploads, merge references to the existing files ahead of them; when there
+// are none, return undefined so the caller omits the argument entirely and
+// the backend's omit-means-preserve contract keeps all existing files.
+export function buildAttachmentsPayload(
+  newUploads: FileAttachment[],
+  existing: ExistingAttachment[],
+): Array<Record<string, unknown>> | undefined {
+  if (newUploads.length === 0) return undefined;
+  const refs = existing
+    .filter((a) => a.attachment_id)
+    .map((a) => ({ attachment_id: a.attachment_id }));
+  const uploads = newUploads.map(({ filename, mime_type, data_base64 }) => ({
+    filename,
+    mime_type,
+    data_base64,
+  }));
+  return [...refs, ...uploads];
 }
 
 export function isPreviewable(mime?: string): boolean {

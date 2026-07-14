@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import {
   base64ToBlobUrl,
+  buildAttachmentsPayload,
   draftFieldsEqual,
   errMsg,
   extractDraft,
@@ -232,9 +233,10 @@ export function InlineComposer({
         subject: snapshot.subject ?? "",
         body: snapshot.body ?? "",
       };
-      if (attachments.length > 0) {
-        args.attachments = attachments.map(({ filename, mime_type, data_base64 }) => ({ filename, mime_type, data_base64 }));
-      }
+      // Preserve existing files (by reference) alongside new uploads; a bare
+      // new-uploads list would replace the whole set and drop them.
+      const attachmentsArg = buildAttachmentsPayload(attachments, existingAttachments);
+      if (attachmentsArg) args.attachments = attachmentsArg;
       await mcpApp.callServerTool({ name: "gmail_composer.save_draft", arguments: args });
       setSaveStatus({ kind: "saved", at: new Date() });
       const latest = draftRef.current;
@@ -268,9 +270,9 @@ export function InlineComposer({
         subject: draft.subject ?? "",
         body: draft.body ?? "",
       };
-      if (attachments.length > 0) {
-        args.attachments = attachments.map(({ filename, mime_type, data_base64 }) => ({ filename, mime_type, data_base64 }));
-      }
+      // Same preservation as save_draft: keep existing files when new ones are added.
+      const attachmentsArg = buildAttachmentsPayload(attachments, existingAttachments);
+      if (attachmentsArg) args.attachments = attachmentsArg;
       const raw = await mcpApp.callServerTool({ name: "gmail_composer.send", arguments: args });
       const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
       const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
