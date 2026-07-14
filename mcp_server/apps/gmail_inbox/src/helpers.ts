@@ -1,9 +1,10 @@
 import type {
   ComposerDraft,
-  ComposerSaveStatus,
   CuratedThread,
   CurationRecord,
   DraftAttachment,
+  ExistingAttachment,
+  FileAttachment,
   LabelChip,
 } from "./types";
 
@@ -92,17 +93,6 @@ export function splitTextAtQuote(text: string): { main: string; quoted: string |
   return { main: text, quoted: null };
 }
 
-export function renderComposerStatus(s: ComposerSaveStatus): string {
-  switch (s.kind) {
-    case "idle": return "";
-    case "saving": return "Saving…";
-    case "saved": return `Saved at ${s.at.getHours().toString().padStart(2, "0")}:${s.at.getMinutes().toString().padStart(2, "0")}`;
-    case "error": return `Error: ${s.message}`;
-    case "sending": return "Sending…";
-    case "sent": return "Sent!";
-  }
-}
-
 export function extractStructuredContent<T>(raw: unknown): T | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
@@ -130,6 +120,40 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Build the composer's `attachments` argument for save_draft / send.
+//
+// The backend replaces the draft's entire attachment set when `attachments`
+// is a non-empty list, preserving existing files that are re-listed by
+// `{attachment_id}` reference, and treats an OMITTED argument as
+// "preserve every existing file" (see gmail_update_draft).
+//
+// `changed` is whether the user has added or removed an attachment in this
+// composer session:
+//   - not changed  -> return undefined so the caller omits the argument and
+//     the backend keeps every file untouched (the common text-only-edit path,
+//     and the only safe way to preserve files that carry no referenceable id).
+//   - changed      -> return the explicit desired set: `{attachment_id}` refs
+//     for the existing files followed by the new uploads. Sending this on
+//     every save/send after a change is what lets a removal actually take
+//     effect: once a new upload has been persisted, omitting the argument
+//     would "preserve" it server-side and the removal would be lost.
+export function buildAttachmentsPayload(
+  newUploads: FileAttachment[],
+  existing: ExistingAttachment[],
+  changed: boolean,
+): Array<Record<string, unknown>> | undefined {
+  if (!changed) return undefined;
+  const refs = existing
+    .filter((a) => a.attachment_id)
+    .map((a) => ({ attachment_id: a.attachment_id }));
+  const uploads = newUploads.map(({ filename, mime_type, data_base64 }) => ({
+    filename,
+    mime_type,
+    data_base64,
+  }));
+  return [...refs, ...uploads];
 }
 
 export function isPreviewable(mime?: string): boolean {
@@ -164,10 +188,4 @@ export function formatDate(iso: string | undefined): string {
   const dt = new Date(iso);
   if (Number.isNaN(dt.getTime())) return iso;
   return dt.toLocaleString();
-}
-
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

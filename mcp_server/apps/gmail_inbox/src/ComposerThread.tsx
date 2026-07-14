@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { sanitizeHtml } from "./sanitize";
-import type { Thread, ThreadMessage } from "./types";
-import { relativeTime, splitHtmlAtQuote, splitTextAtQuote } from "./model";
-import { SenderAvatar } from "./shared";
+import type { ComposerSaveStatus, Thread, ThreadMessage } from "./types";
+import { relativeTime, splitHtmlAtQuote, splitTextAtQuote } from "./helpers";
+import { SenderAvatar } from "./MessageComponents";
 import {
   composerBodyHtmlStyle,
   composerBodyTextStyle,
@@ -89,4 +89,15 @@ function ComposerMsgBody({ message }: { message: ThreadMessage }) {
     );
   }
   return <div style={{ color: "#5f6368", fontSize: 13 }}>(no body)</div>;
+}
+
+export function renderComposerStatus(s: ComposerSaveStatus): string {
+  switch (s.kind) {
+    case "idle": return "";
+    case "saving": return "Saving…";
+    case "saved": return `Saved at ${s.at.getHours().toString().padStart(2, "0")}:${s.at.getMinutes().toString().padStart(2, "0")}`;
+    case "error": return `Error: ${s.message}`;
+    case "sending": return "Sending…";
+    case "sent": return "Sent!";
+  }
 }

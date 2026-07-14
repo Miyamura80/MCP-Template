@@ -4,46 +4,15 @@ import { Composer, type Draft, type Thread } from "./Composer";
 
 function makeMcpApp(callResult: unknown = null) {
   const callServerTool = vi.fn(async () => callResult);
-  const app = {
-    ontoolresult: undefined as ((raw: unknown) => void) | undefined,
-    callServerTool,
-  };
-  return { app, callServerTool };
-}
-
-// A save_draft mock that echoes the attachment set it was given back as
-// persisted rows (uploads -> a minted server id, refs -> preserved), so the
-// component's attachmentsRef tracks committed server state across serialized
-// ops - the exact thing the concurrency tests need to exercise.
-function makeEchoingMcpApp() {
-  const calls: { name: string; args: Record<string, any> }[] = []; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const callServerTool = vi.fn(
-    async ({ name, arguments: args }: { name: string; arguments: Record<string, any> }) => {   // eslint-disable-line @typescript-eslint/no-explicit-any
-      calls.push({ name, args });
-      if (name === "gmail_composer.save_draft") {
-        const atts = ((args.attachments as any[]) ?? []).map((a) =>   // eslint-disable-line @typescript-eslint/no-explicit-any
-          a.data_base64 !== undefined
-            ? { attachment_id: `srv-${a.filename}`, filename: a.filename, mime_type: a.mime_type, size: 1 }
-            : { attachment_id: a.attachment_id, filename: String(a.attachment_id).replace(/^srv-/, ""), size: 1 },
-        );
-        return {
-          structuredContent: {
-            draft_id: args.draft_id,
-            to: args.to,
-            subject: args.subject,
-            body: args.body,
-            attachments: atts,
-          },
-        };
-      }
-      return { structuredContent: {} };
-    },
+  const updateModelContext = vi.fn(
+    async (_args: { content: Array<{ type: "text"; text: string }> }) => ({}),
   );
   const app = {
     ontoolresult: undefined as ((raw: unknown) => void) | undefined,
     callServerTool,
+    updateModelContext,
   };
-  return { app, callServerTool, calls };
+  return { app, callServerTool, updateModelContext };
 }
 
 // Installs a matchMedia stub so useIsMobile() resolves deterministically.
@@ -165,8 +134,49 @@ describe("Composer", () => {
     expect(await screen.findByText(/msg-99/)).toBeInTheDocument();
   });
 
+  it("Send pushes the final sent draft into model context", async () => {
+    const sendResult = { structuredContent: { message_id: "msg-99" } };
+    const { app, updateModelContext } = makeMcpApp(sendResult);
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    // Edit the body first: the context push must carry the user's final
+    // version, not the last agent-known draft.
+    fireEvent.change(screen.getByLabelText("Body"), {
+      target: { value: "Hi Bob - edited by hand" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => {
+      expect(updateModelContext).toHaveBeenCalledTimes(1);
+    });
+    const text = updateModelContext.mock.calls[0][0].content[0].text;
+    expect(text).toContain("clicked Send");
+    expect(text).toContain("to: bob@example.com");
+    expect(text).toContain("subject: Hello");
+    expect(text).toContain("message_id: msg-99");
+    expect(text).toContain("Hi Bob - edited by hand");
+  });
+
+  it("Send still succeeds when the host rejects the context update", async () => {
+    const sendResult = { structuredContent: { message_id: "msg-99" } };
+    const { app } = makeMcpApp(sendResult);
+    app.updateModelContext = vi
+      .fn()
+      .mockRejectedValue(new Error("unsupported"));
+    render(<Composer mcpApp={app} />);
+    act(() => {
+      app.ontoolresult?.({ structuredContent: sampleDraft });
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    expect(await screen.findByText(/msg-99/)).toBeInTheDocument();
+    expect(screen.queryByText(/save failed/i)).not.toBeInTheDocument();
+  });
+
   it("Discard with confirm calls gmail_composer.discard", async () => {
-    const { app, callServerTool } = makeMcpApp({ structuredContent: { discarded: true } });
+    const { app, callServerTool, updateModelContext } = makeMcpApp({
+      structuredContent: { discarded: true },
+    });
     render(<Composer mcpApp={app} />);
     act(() => {
       app.ontoolresult?.({ structuredContent: sampleDraft });
@@ -180,6 +190,13 @@ describe("Composer", () => {
       });
     });
     expect(await screen.findByText(/discarded\./i)).toBeInTheDocument();
+    // The agent must learn the draft is gone, or it will keep referencing it.
+    await waitFor(() => {
+      expect(updateModelContext).toHaveBeenCalledTimes(1);
+    });
+    const text = updateModelContext.mock.calls[0][0].content[0].text;
+    expect(text).toContain("Discard");
+    expect(text).toContain("d-1");
   });
 
   it("auto-save failure renders an error indicator", async () => {
@@ -250,184 +267,6 @@ describe("Composer", () => {
       screen.getByRole("button", { name: /conversation/i }).textContent,
     ).toContain("▼");
     expect(await screen.findByText("Second message")).toBeInTheDocument();
-  });
-
-  it("renders existing draft attachments with a remove control", () => {
-    const { app } = makeMcpApp();
-    render(<Composer mcpApp={app} />);
-    act(() => {
-      app.ontoolresult?.({
-        structuredContent: {
-          ...sampleDraft,
-          attachments: [
-            {
-              attachment_id: "att-1",
-              filename: "report.pdf",
-              mime_type: "application/pdf",
-              size: 2048,
-            },
-          ],
-        },
-      });
-    });
-    expect(screen.getByText("report.pdf")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /remove report\.pdf/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("uploads a chosen file via save_draft with base64 and keeps existing refs", async () => {
-    const savedDraft = {
-      structuredContent: {
-        draft_id: "d-1",
-        to: "bob@example.com",
-        subject: "Hello",
-        body: "Hi Bob",
-        attachments: [
-          { attachment_id: "att-existing", filename: "old.pdf", size: 10 },
-          { attachment_id: "att-new", filename: "hello.txt", size: 5 },
-        ],
-      },
-    };
-    const { app, callServerTool } = makeMcpApp(savedDraft);
-    render(<Composer mcpApp={app} />);
-    act(() => {
-      app.ontoolresult?.({
-        structuredContent: {
-          ...sampleDraft,
-          attachments: [
-            { attachment_id: "att-existing", filename: "old.pdf", size: 10 },
-          ],
-        },
-      });
-    });
-    const file = new File(["hello"], "hello.txt", { type: "text/plain" });
-    const input = screen.getByLabelText("Attach files", {
-      selector: "input",
-    }) as HTMLInputElement;
-    await act(async () => {
-      fireEvent.change(input, { target: { files: [file] } });
-    });
-    await waitFor(() => {
-      expect(callServerTool).toHaveBeenCalledWith({
-        name: "gmail_composer.save_draft",
-        arguments: expect.objectContaining({
-          draft_id: "d-1",
-          // Existing file preserved by reference; new file uploaded as base64
-          // ("hello" -> aGVsbG8=).
-          attachments: [
-            { attachment_id: "att-existing" },
-            {
-              filename: "hello.txt",
-              mime_type: "text/plain",
-              data_base64: "aGVsbG8=",
-            },
-          ],
-        }),
-      });
-    });
-    // The save_draft response echoes both files; the transient chip is replaced
-    // by the persisted attachment.
-    expect(await screen.findByText("hello.txt")).toBeInTheDocument();
-  });
-
-  it("rejects an oversized file without calling save_draft", async () => {
-    const { app, callServerTool } = makeMcpApp();
-    render(<Composer mcpApp={app} />);
-    act(() => {
-      app.ontoolresult?.({ structuredContent: sampleDraft });
-    });
-    const big = new File(["x"], "big.zip", { type: "application/zip" });
-    Object.defineProperty(big, "size", { value: 26 * 1024 * 1024 });
-    const input = screen.getByLabelText("Attach files", {
-      selector: "input",
-    }) as HTMLInputElement;
-    await act(async () => {
-      fireEvent.change(input, { target: { files: [big] } });
-    });
-    expect(callServerTool).not.toHaveBeenCalled();
-    expect(await screen.findByText(/too large/i)).toBeInTheDocument();
-  });
-
-  it("removes an existing attachment via save_draft without its id", async () => {
-    const savedDraft = { structuredContent: { ...sampleDraft, attachments: [] } };
-    const { app, callServerTool } = makeMcpApp(savedDraft);
-    render(<Composer mcpApp={app} />);
-    act(() => {
-      app.ontoolresult?.({
-        structuredContent: {
-          ...sampleDraft,
-          attachments: [
-            { attachment_id: "att-1", filename: "keep.pdf" },
-            { attachment_id: "att-2", filename: "drop.pdf" },
-          ],
-        },
-      });
-    });
-    fireEvent.click(screen.getByRole("button", { name: /remove drop\.pdf/i }));
-    await waitFor(() => {
-      expect(callServerTool).toHaveBeenCalledWith({
-        name: "gmail_composer.save_draft",
-        arguments: expect.objectContaining({
-          draft_id: "d-1",
-          attachments: [{ attachment_id: "att-1" }],
-        }),
-      });
-    });
-  });
-
-  it("an attachment save uses the latest body, not a pre-read snapshot", async () => {
-    // Regression: the attachment path used to send the text it snapshotted
-    // before the async file read, reverting an edit made during the read.
-    const { app, calls } = makeEchoingMcpApp();
-    render(<Composer mcpApp={app} />);
-    act(() => {
-      app.ontoolresult?.({ structuredContent: sampleDraft }); // body "Hi Bob"
-    });
-    fireEvent.change(screen.getByLabelText("Body"), {
-      target: { value: "Hi Bob EDITED" },
-    });
-    const input = screen.getByLabelText("Attach files", {
-      selector: "input",
-    }) as HTMLInputElement;
-    const file = new File(["x"], "note.txt", { type: "text/plain" });
-    await act(async () => {
-      fireEvent.change(input, { target: { files: [file] } });
-    });
-    await waitFor(() => {
-      const save = calls.find((c) => c.name === "gmail_composer.save_draft");
-      expect(save?.args.body).toBe("Hi Bob EDITED");
-    });
-  });
-
-  it("serializes concurrent uploads so neither file is dropped", async () => {
-    // Regression: two quick drops each built their whole-set-replace from the
-    // same stale draft, so the second clobbered the first's file.
-    const { app, calls } = makeEchoingMcpApp();
-    render(<Composer mcpApp={app} />);
-    act(() => {
-      app.ontoolresult?.({ structuredContent: { ...sampleDraft, attachments: [] } });
-    });
-    const input = screen.getByLabelText("Attach files", {
-      selector: "input",
-    }) as HTMLInputElement;
-    const fileA = new File(["AAA"], "a.txt", { type: "text/plain" });
-    const fileB = new File(["BBB"], "b.txt", { type: "text/plain" });
-    await act(async () => {
-      fireEvent.change(input, { target: { files: [fileA] } });
-      fireEvent.change(input, { target: { files: [fileB] } });
-    });
-    await waitFor(() => {
-      const saves = calls.filter((c) => c.name === "gmail_composer.save_draft");
-      expect(saves.length).toBe(2);
-      // The second save carries BOTH files (a ref to the first + the second),
-      // proving it built on the committed result of the first, not a stale draft.
-      expect(saves[saves.length - 1].args.attachments).toHaveLength(2);
-    });
-    await waitFor(() => {
-      expect(screen.getByText("a.txt")).toBeInTheDocument();
-      expect(screen.getByText("b.txt")).toBeInTheDocument();
-    });
   });
 
   it("expands the conversation by default on desktop", async () => {

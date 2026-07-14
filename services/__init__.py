@@ -17,6 +17,32 @@ class ServiceEntry:
     mutating: bool = False
 
 
+class ConnectRequiredError(Exception):
+    """A service call requires the user to first complete an external connect flow.
+
+    Transport-agnostic contract: each integration that links a third-party
+    account (Gmail today; any future OAuth-backed service) raises its own
+    subclass so transports can offer a recovery affordance without importing
+    the feature - the MCP layer converts this into a SEP-1036 URL elicitation
+    carrying ``build_auth_url()``. Two obligations on subclasses:
+
+    - ``message`` must itself be a self-recovering script (what tool to call,
+      what to do with the URL, then retry), because for hosts with no native
+      affordance the exception text is the only channel that reaches them.
+    - ``build_auth_url()`` returns the URL where the user completes the flow,
+      or None when the flow is unconfigured in this deployment.
+    """
+
+    def __init__(self, user_id: str, message: str, *, elicitation_message: str) -> None:
+        self.user_id = user_id
+        self.elicitation_message = elicitation_message
+        super().__init__(message)
+
+    def build_auth_url(self) -> str | None:
+        """Return the connect-flow URL for this user, or None if unconfigured."""
+        raise NotImplementedError
+
+
 _registry: list[ServiceEntry] = []
 _discovered: bool = False
 

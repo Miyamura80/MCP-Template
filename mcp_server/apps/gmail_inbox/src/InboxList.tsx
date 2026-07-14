@@ -1,54 +1,42 @@
 import { ArrowCounterClockwise } from "@phosphor-icons/react";
 import type { Coverage, CuratedThread } from "./types";
-import { relativeTime } from "./model";
-import { MarkDoneButton, SenderAvatar } from "./shared";
+import { ThreadRow } from "./ThreadRow";
 import {
-  chipStyle,
-  draftChipStyle,
-  draftDiscardBtnStyle,
   iconBtnStyle,
-  labelChipBaseStyle,
-  labelChipsRowStyle,
   listHeaderStyle,
   listPaneNarrowStyle,
   listPaneStyle,
   listStyle,
   listStyleNarrow,
   mutedStyle,
-  reasonChipStyle,
-  rowFootStyle,
-  rowMidStyle,
-  rowSnippetStyle,
-  rowStyle,
-  rowTopStyle,
 } from "./styles";
 
+// The curated-inbox list pane: header, coverage banner, and the thread rows.
 export function InboxList({
-  threads,
-  coverage,
-  selectedId,
-  showScores,
-  unreadRemoved,
   narrow,
+  showScores,
   onToggleScores,
+  coverage,
+  threads,
+  selectedId,
+  unreadRemoved,
   onRefresh,
   onOpenThread,
   onMarkDone,
   onDiscardDraft,
 }: {
-  threads: CuratedThread[] | null;
-  coverage: Coverage | null;
-  selectedId: string | null;
-  showScores: boolean;
-  unreadRemoved: Set<string>;
   narrow: boolean;
+  showScores: boolean;
   onToggleScores: () => void;
+  coverage: Coverage | null;
+  threads: CuratedThread[] | null;
+  selectedId: string | null;
+  unreadRemoved: Set<string>;
   onRefresh: () => void;
-  onOpenThread: (thread_id: string) => void;
-  onMarkDone: (thread_id: string) => void;
+  onOpenThread: (threadId: string) => void;
+  onMarkDone: (threadId: string) => void;
   onDiscardDraft: (threadId: string, draftId: string, e: React.MouseEvent) => void;
 }) {
-  const visibleThreads = threads;
   return (
     <aside style={narrow ? listPaneNarrowStyle : listPaneStyle}>
       <header style={listHeaderStyle}>
@@ -89,88 +77,27 @@ export function InboxList({
           )}
         </div>
       )}
-      {visibleThreads === null ? (
+      {threads === null ? (
         <div style={mutedStyle}>Loading inbox…</div>
-      ) : visibleThreads.length === 0 ? (
+      ) : threads.length === 0 ? (
         <div style={mutedStyle}>No threads.</div>
       ) : (
         <ul style={narrow ? listStyleNarrow : listStyle}>
-          {visibleThreads.map((t) => {
-            const isSelected = t.thread_id === selectedId;
+          {threads.map((t) => {
             const showUnread =
               t.reasons.some((r) => r.toLowerCase().includes("unread")) &&
               !unreadRemoved.has(t.thread_id);
             return (
-              <li
+              <ThreadRow
                 key={t.thread_id}
-                onClick={() => onOpenThread(t.thread_id)}
-                style={{
-                  ...rowStyle,
-                  background: isSelected ? "#e8f0fe" : "transparent",
-                }}
-                data-testid={`row-${t.thread_id}`}
-              >
-                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <SenderAvatar from={t.from} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={rowTopStyle}>
-                      <span
-                        style={{
-                          fontWeight: showUnread ? 700 : 500,
-                          flex: 1,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {t.subject || "(no subject)"}
-                      </span>
-                      <MarkDoneButton onClick={(e) => { e.stopPropagation(); onMarkDone(t.thread_id); }} size="row" />
-                      {showScores && (
-                        <span style={chipStyle} title={t.reasons.join(", ")}>
-                          {t.importance_score.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                    {((t.labels && t.labels.length > 0) || t.reasons.length > 0 || t.has_draft) && (
-                      <div style={labelChipsRowStyle}>
-                        {t.has_draft && (
-                          <span style={draftChipStyle}>
-                            Draft
-                            {t.draft_id && (
-                              <button
-                                onClick={(e) => onDiscardDraft(t.thread_id, t.draft_id!, e)}
-                                style={draftDiscardBtnStyle}
-                                title="Discard draft"
-                              >
-                                ×
-                              </button>
-                            )}
-                          </span>
-                        )}
-                        {t.labels?.map((l) => (
-                          <span
-                            key={l.name}
-                            style={{
-                              ...labelChipBaseStyle,
-                              background: l.bg_color,
-                              color: l.text_color,
-                            }}
-                          >
-                            {l.name}
-                          </span>
-                        ))}
-                        {t.reasons.map((r) => (
-                          <span key={r} style={reasonChipStyle}>{r}</span>
-                        ))}
-                      </div>
-                    )}
-                    <div style={rowMidStyle}>{t.from || "(unknown)"}</div>
-                    <div style={rowSnippetStyle}>{t.snippet || ""}</div>
-                    <div style={rowFootStyle}>{relativeTime(t.last_message_at)}</div>
-                  </div>
-                </div>
-              </li>
+                thread={t}
+                isSelected={t.thread_id === selectedId}
+                showUnread={showUnread}
+                showScores={showScores}
+                onOpen={() => onOpenThread(t.thread_id)}
+                onMarkDone={(e) => { e.stopPropagation(); onMarkDone(t.thread_id); }}
+                onDiscardDraft={(e) => onDiscardDraft(t.thread_id, t.draft_id!, e)}
+              />
             );
           })}
         </ul>

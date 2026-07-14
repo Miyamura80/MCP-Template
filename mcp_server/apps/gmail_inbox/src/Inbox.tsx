@@ -2,21 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import { CaretLeft } from "@phosphor-icons/react";
 import type {
   Coverage,
-  ComposerDraft,
   CurateResult,
+  CuratedThread,
+  ComposerDraft,
   GetCurationResult,
-  McpAppLike,
   Thread,
   ThreadMessage,
-  CuratedThread,
 } from "./types";
-import { curationToThreads, errMsg, extractDraft, extractStructuredContent } from "./model";
-import { useIsNarrow } from "./shared";
-import { InboxList } from "./InboxList";
-import { InlineComposer } from "./InlineComposer";
-import { ThreadReader } from "./ThreadReader";
 import {
-  AI_REPLY_STYLES,
+  curationToThreads,
+  errMsg,
+  extractDraft,
+  extractStructuredContent,
+} from "./helpers";
+import { useIsNarrow } from "./hooks";
+import { ThreadReader } from "./ThreadReader";
+import { InlineComposer } from "./InlineComposer";
+import { InboxList } from "./InboxList";
+import {
+  aiReplyStyles,
   appStyle,
   appStyleNarrow,
   errorStyle,
@@ -28,26 +32,24 @@ import {
   statusStyle,
 } from "./styles";
 
-// Public re-exports: preserve the import surface that tests and main.tsx rely
-// on after the split into sibling modules.
+// Re-exported so consumers (and tests) keep importing types from "./Inbox".
 export type {
-  LabelChip,
-  CuratedThread,
   Attachment,
-  ThreadMessage,
-  DraftAttachment,
-  Draft,
-  Thread,
-  CurateResult,
-  Coverage,
-  CurationRecord,
-  GetCurationResult,
-  McpAppLike,
   ComposerDraft,
+  Coverage,
+  CurateResult,
+  CuratedThread,
+  CurationRecord,
+  Draft,
+  DraftAttachment,
+  GetCurationResult,
+  LabelChip,
+  McpAppLike,
+  Thread,
+  ThreadMessage,
 } from "./types";
-export { curationToThreads } from "./model";
 
-type InboxProps = { mcpApp: McpAppLike };
+type InboxProps = { mcpApp: import("./types").McpAppLike };
 
 export function Inbox({ mcpApp }: InboxProps) {
   const narrow = useIsNarrow();
@@ -369,6 +371,8 @@ export function Inbox({ mcpApp }: InboxProps) {
     }
   };
 
+  const visibleThreads = threads;
+
   const readerContent = (
     <>
       {composerDraft ? (
@@ -440,7 +444,7 @@ export function Inbox({ mcpApp }: InboxProps) {
   if (viewMode === "reader") {
     return (
       <div style={{ ...(narrow ? appStyleNarrow : appStyle), flexDirection: "column" }}>
-        <style>{AI_REPLY_STYLES}</style>
+        <style>{aiReplyStyles}</style>
         {threads && threads.length > 0 && (
           <div style={readerTopBarStyle}>
             <button
@@ -460,15 +464,15 @@ export function Inbox({ mcpApp }: InboxProps) {
 
   return (
     <div style={narrow ? appStyleNarrow : appStyle}>
-      <style>{AI_REPLY_STYLES}</style>
+      <style>{aiReplyStyles}</style>
       <InboxList
-        threads={threads}
-        coverage={coverage}
-        selectedId={selectedId}
-        showScores={showScores}
-        unreadRemoved={unreadRemoved}
         narrow={narrow}
+        showScores={showScores}
         onToggleScores={() => setShowScores((v) => !v)}
+        coverage={coverage}
+        threads={visibleThreads}
+        selectedId={selectedId}
+        unreadRemoved={unreadRemoved}
         onRefresh={refresh}
         onOpenThread={(id) => { setViewMode(narrow ? "reader" : "inbox"); openThread(id); }}
         onMarkDone={(id) => markDone(id)}

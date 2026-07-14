@@ -1,4 +1,5 @@
-import type * as React from "react";
+// Styles for the inline composer (Gmail Material-3 compose card + threaded
+// conversation panel).
 import type { ComposerSaveStatus } from "./types";
 
 export const composerBackBtnStyle: React.CSSProperties = {
@@ -215,92 +216,6 @@ export const attachmentRemoveBtn: React.CSSProperties = {
   fontSize: 14,
   lineHeight: 1,
   borderRadius: "50%",
-};
-
-export const previewOverlayStyle: React.CSSProperties = {
-  position: "fixed",
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  background: "rgba(0,0,0,0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
-};
-
-export const previewModalStyle: React.CSSProperties = {
-  background: "#fff",
-  borderRadius: 12,
-  width: "90%",
-  maxWidth: 800,
-  height: "80%",
-  maxHeight: 600,
-  display: "flex",
-  flexDirection: "column",
-  overflow: "hidden",
-  boxShadow: "0 8px 32px rgba(0,0,0,0.24)",
-};
-
-export const previewHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "12px 16px",
-  borderBottom: "1px solid #e0e0e0",
-  fontFamily: "'Google Sans', Roboto, Arial, sans-serif",
-};
-
-export const previewCloseBtn: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  fontSize: 20,
-  cursor: "pointer",
-  color: "#5f6368",
-  padding: "4px 8px",
-  borderRadius: "50%",
-  lineHeight: 1,
-};
-
-export const previewBodyStyle: React.CSSProperties = {
-  flex: 1,
-  overflow: "auto",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: "#f8f9fa",
-};
-
-export const composerConfirmDiscardRow: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  fontSize: 12,
-  color: "#5f6368",
-  fontFamily: "'Google Sans', Roboto, sans-serif",
-};
-
-export const composerConfirmYesBtn: React.CSSProperties = {
-  background: "#d93025",
-  color: "#fff",
-  border: "none",
-  borderRadius: 12,
-  padding: "3px 12px",
-  fontSize: 11,
-  fontWeight: 500,
-  cursor: "pointer",
-};
-
-export const composerConfirmNoBtn: React.CSSProperties = {
-  background: "none",
-  color: "#5f6368",
-  border: "1px solid #dadce0",
-  borderRadius: 12,
-  padding: "3px 12px",
-  fontSize: 11,
-  fontWeight: 500,
-  cursor: "pointer",
 };
 
 export const composerCollapsedMsgStyle: React.CSSProperties = {

@@ -1,64 +1,5 @@
-import type * as React from "react";
-
-export const AI_REPLY_STYLES = `
-    .fast-reply-btn {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      flex: 1; padding: 12px 16px; border: 1px solid rgba(6,182,212,0.3); border-radius: 10px;
-      color: #0e7490; font-size: 14px; font-weight: 600; cursor: pointer;
-      background: linear-gradient(135deg, #ecfeff, #cffafe);
-      position: relative; overflow: hidden;
-      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-    }
-    .fast-reply-btn:hover {
-      transform: translateY(-1px);
-      border-color: rgba(6,182,212,0.5);
-      box-shadow: 0 2px 12px rgba(6,182,212,0.2);
-    }
-    .fast-reply-btn::before {
-      content: ""; position: absolute; top: 0; left: -100%; width: 200%; height: 100%;
-      background: linear-gradient(90deg, transparent 0%, rgba(6,182,212,0.08) 50%, transparent 100%);
-      animation: ai-shimmer 3s ease-in-out infinite;
-    }
-    .fast-sparkle { color: #06b6d4; animation: ai-twinkle 2.2s ease-in-out infinite; }
-    .ai-reply-btn {
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      flex: 1.2; padding: 12px 16px; border: none; border-radius: 10px;
-      color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
-      position: relative; overflow: hidden;
-      background: linear-gradient(135deg, #0891b2, #06b6d4, #22d3ee);
-      box-shadow: 0 2px 12px rgba(6,182,212,0.4);
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .ai-reply-btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 20px rgba(6,182,212,0.55);
-    }
-    .ai-reply-btn::before {
-      content: ""; position: absolute; top: 0; left: -100%; width: 200%; height: 100%;
-      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 50%, transparent 100%);
-      animation: ai-shimmer 2.5s ease-in-out infinite;
-    }
-    @keyframes ai-shimmer {
-      0% { left: -100%; }
-      100% { left: 100%; }
-    }
-    .ai-sparkle { animation: ai-twinkle 1.8s ease-in-out infinite; }
-    .ai-sparkle-sm { animation-delay: 0.6s; }
-    @keyframes ai-twinkle {
-      0%, 100% { opacity: 0.7; transform: scale(1) rotate(0deg); }
-      50% { opacity: 1; transform: scale(1.2) rotate(15deg); }
-    }
-  `;
-
-export const pdfNavBtn: React.CSSProperties = {
-  background: "none",
-  border: "1px solid #dadce0",
-  borderRadius: 4,
-  padding: "4px 8px",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-};
+// Shell, list, and reader-frame styles. Message/attachment styles live in
+// messageStyles.ts; composer styles in composerStyles.ts.
 
 export const appStyle: React.CSSProperties = {
   fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -289,16 +230,6 @@ export const actionsStyle: React.CSSProperties = {
   marginBottom: 8,
 };
 
-export const smallBtnStyle: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #dadce0",
-  color: "#202124",
-  padding: "4px 10px",
-  borderRadius: 6,
-  cursor: "pointer",
-  fontSize: 12,
-};
-
 export const iconBtnStyle: React.CSSProperties = {
   background: "#fff",
   border: "1px solid #dadce0",
@@ -310,157 +241,6 @@ export const iconBtnStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   lineHeight: 1,
-};
-
-export const primaryIconBtnStyle: React.CSSProperties = {
-  ...iconBtnStyle,
-  background: "#1a73e8",
-  borderColor: "#1a73e8",
-  color: "#fff",
-};
-
-
-export const primaryBtnStyle: React.CSSProperties = {
-  ...smallBtnStyle,
-  background: "#1a73e8",
-  borderColor: "#1a73e8",
-  color: "#fff",
-};
-
-export const collapsedMessageStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  border: "1px solid #eee",
-  borderRadius: 6,
-  padding: "8px 12px",
-  marginBottom: 4,
-  background: "#f8f9fa",
-  cursor: "pointer",
-  color: "#202124",
-};
-
-export const collapsedReplyBtnStyle: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  color: "#666",
-  cursor: "pointer",
-  padding: 4,
-  borderRadius: 4,
-  display: "inline-flex",
-  alignItems: "center",
-  flexShrink: 0,
-};
-
-export const messageStyle: React.CSSProperties = {
-  border: "1px solid #eee",
-  borderRadius: 6,
-  padding: 12,
-  marginBottom: 10,
-  background: "#fafbfc",
-  color: "#202124",
-};
-
-export const messageHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  marginBottom: 8,
-  fontSize: 13,
-};
-
-export const messageActionsStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  marginTop: 10,
-  paddingTop: 8,
-  borderTop: "1px solid #eee",
-};
-
-export const messageActionBtnStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 4,
-  background: "#fff",
-  border: "1px solid #dadce0",
-  borderRadius: 16,
-  padding: "5px 14px",
-  fontSize: 12,
-  color: "#444",
-  cursor: "pointer",
-};
-
-export const bodyTextStyle: React.CSSProperties = {
-  whiteSpace: "pre-wrap",
-  fontFamily: "inherit",
-  margin: 0,
-  fontSize: 13,
-  color: "#222",
-};
-
-export const bodyHtmlStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: "#222",
-  overflowX: "auto",
-  lineHeight: 1.5,
-  wordBreak: "break-word",
-};
-
-export const quoteToggleStyle: React.CSSProperties = {
-  display: "block",
-  background: "#f1f3f4",
-  border: "none",
-  borderRadius: 4,
-  padding: "2px 12px",
-  fontSize: 14,
-  color: "#5f6368",
-  cursor: "pointer",
-  marginTop: 6,
-  letterSpacing: 2,
-  fontWeight: 700,
-  lineHeight: 1,
-};
-
-export const draftCardStyle: React.CSSProperties = {
-  border: "2px dashed #c5221f",
-  borderRadius: 6,
-  padding: 12,
-  marginBottom: 10,
-  background: "#fef7f6",
-  color: "#202124",
-};
-
-export const draftBodyStyle: React.CSSProperties = {
-  whiteSpace: "pre-wrap",
-  fontFamily: "inherit",
-  margin: 0,
-  fontSize: 13,
-  color: "#444",
-};
-
-export const imageAttachmentStyle: React.CSSProperties = {
-  background: "#f8f9fa",
-  border: "1px solid #e0e0e0",
-  borderRadius: 8,
-  padding: "8px 12px",
-  minWidth: 120,
-};
-
-export const attachmentsRowStyle: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-  marginTop: 10,
-};
-
-export const attachmentChipStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  background: "#f1f3f4",
-  border: "1px solid #dadce0",
-  borderRadius: 16,
-  padding: "4px 10px",
-  fontSize: 12,
-  color: "#3c4043",
 };
 
 export const mutedStyle: React.CSSProperties = {
@@ -488,3 +268,56 @@ export const errorStyle: React.CSSProperties = {
   color: "#b3261e",
   fontSize: 12,
 };
+
+// Scoped CSS for the animated "Quick reply" / "Deep context reply" buttons in
+// the reader. Injected via a <style> tag because it needs pseudo-elements and
+// keyframes that inline styles can't express.
+export const aiReplyStyles = `
+    .fast-reply-btn {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      flex: 1; padding: 12px 16px; border: 1px solid rgba(6,182,212,0.3); border-radius: 10px;
+      color: #0e7490; font-size: 14px; font-weight: 600; cursor: pointer;
+      background: linear-gradient(135deg, #ecfeff, #cffafe);
+      position: relative; overflow: hidden;
+      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+    }
+    .fast-reply-btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(6,182,212,0.5);
+      box-shadow: 0 2px 12px rgba(6,182,212,0.2);
+    }
+    .fast-reply-btn::before {
+      content: ""; position: absolute; top: 0; left: -100%; width: 200%; height: 100%;
+      background: linear-gradient(90deg, transparent 0%, rgba(6,182,212,0.08) 50%, transparent 100%);
+      animation: ai-shimmer 3s ease-in-out infinite;
+    }
+    .fast-sparkle { color: #06b6d4; animation: ai-twinkle 2.2s ease-in-out infinite; }
+    .ai-reply-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      flex: 1.2; padding: 12px 16px; border: none; border-radius: 10px;
+      color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+      position: relative; overflow: hidden;
+      background: linear-gradient(135deg, #0891b2, #06b6d4, #22d3ee);
+      box-shadow: 0 2px 12px rgba(6,182,212,0.4);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .ai-reply-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(6,182,212,0.55);
+    }
+    .ai-reply-btn::before {
+      content: ""; position: absolute; top: 0; left: -100%; width: 200%; height: 100%;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.2) 50%, transparent 100%);
+      animation: ai-shimmer 2.5s ease-in-out infinite;
+    }
+    @keyframes ai-shimmer {
+      0% { left: -100%; }
+      100% { left: 100%; }
+    }
+    .ai-sparkle { animation: ai-twinkle 1.8s ease-in-out infinite; }
+    .ai-sparkle-sm { animation-delay: 0.6s; }
+    @keyframes ai-twinkle {
+      0%, 100% { opacity: 0.7; transform: scale(1) rotate(0deg); }
+      50% { opacity: 1; transform: scale(1.2) rotate(15deg); }
+    }
+  `;

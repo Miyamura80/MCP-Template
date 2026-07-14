@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ArrowBendUpLeft,
   ArrowBendUpRight,
+  CheckCircle,
   PaperclipHorizontal,
 } from "@phosphor-icons/react";
 import { sanitizeHtml } from "./sanitize";
@@ -9,13 +10,12 @@ import type { Draft, McpAppLike, ThreadMessage } from "./types";
 import {
   formatDate,
   formatFileSize,
-  formatSize,
   isPreviewable,
   relativeTime,
   splitHtmlAtQuote,
   splitTextAtQuote,
-} from "./model";
-import { SenderAvatar } from "./shared";
+} from "./helpers";
+import { draftChipStyle, iconBtnStyle, mutedStyle } from "./styles";
 import {
   attachmentChipStyle,
   attachmentsRowStyle,
@@ -25,15 +25,96 @@ import {
   collapsedReplyBtnStyle,
   draftBodyStyle,
   draftCardStyle,
-  draftChipStyle,
   imageAttachmentStyle,
   messageActionBtnStyle,
   messageActionsStyle,
   messageHeaderStyle,
   messageStyle,
-  mutedStyle,
   quoteToggleStyle,
-} from "./styles";
+} from "./messageStyles";
+
+export type PreviewAttachment = {
+  filename?: string;
+  mime_type?: string;
+  attachment_id?: string;
+  message_id?: string;
+  data?: string;
+};
+
+export function MarkDoneButton({ onClick, size = "row" }: { onClick: (e: React.MouseEvent) => void; size?: "row" | "action" }) {
+  const [hovered, setHovered] = useState(false);
+  const isAction = size === "action";
+  const baseStyle: React.CSSProperties = isAction
+    ? {
+        ...iconBtnStyle,
+        background: hovered ? "#e6f4ea" : "#fff",
+        borderColor: hovered ? "#34a853" : "#dadce0",
+        color: hovered ? "#137333" : "#5f6368",
+        transform: hovered ? "scale(1.15)" : "scale(1)",
+        transition: "all 0.15s ease",
+      }
+    : {
+        background: "none",
+        border: "none",
+        color: hovered ? "#137333" : "#aaa",
+        padding: 2,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        flexShrink: 0,
+        borderRadius: 4,
+        transform: hovered ? "scale(1.3)" : "scale(1)",
+        transition: "all 0.15s ease",
+        backgroundColor: hovered ? "#e6f4ea" : "transparent",
+      };
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={baseStyle}
+      title="Mark done"
+    >
+      <CheckCircle size={isAction ? 16 : 14} weight={hovered ? "fill" : "regular"} />
+    </button>
+  );
+}
+
+export function SenderAvatar({ from }: { from: string | undefined }) {
+  const name = from || "";
+  const match = name.match(/^([^<]*)/);
+  const display = (match?.[1] || name).trim();
+  const initials = display
+    ? display
+        .split(/[\s.]+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0].toUpperCase())
+        .join("")
+    : "?";
+  const hue = [...(display || "?")].reduce((h, c) => h + c.charCodeAt(0), 0) % 360;
+  return (
+    <div
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        background: `hsl(${hue}, 55%, 55%)`,
+        color: "#fff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 12,
+        fontWeight: 600,
+        flexShrink: 0,
+        letterSpacing: 0.5,
+      }}
+      title={from || "(unknown)"}
+    >
+      {initials}
+    </div>
+  );
+}
 
 export function CollapsibleMessage({
   message,
@@ -47,7 +128,7 @@ export function CollapsibleMessage({
   mcpApp: McpAppLike;
   onReply: () => void;
   onForward: () => void;
-  onPreview: (att: { filename?: string; mime_type?: string; attachment_id?: string; message_id?: string; data?: string }) => void;
+  onPreview: (att: PreviewAttachment) => void;
   defaultExpanded: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -90,7 +171,7 @@ export function CollapsibleMessage({
   );
 }
 
-function MessageView({
+export function MessageView({
   message,
   mcpApp,
   onReply,
@@ -102,7 +183,7 @@ function MessageView({
   mcpApp: McpAppLike;
   onReply: () => void;
   onForward: () => void;
-  onPreview: (att: { filename?: string; mime_type?: string; attachment_id?: string; message_id?: string; data?: string }) => void;
+  onPreview: (att: PreviewAttachment) => void;
   onCollapse?: () => void;
 }) {
   // Non-inline image attachments (inline ones are already in the HTML via data URIs)
@@ -161,7 +242,7 @@ function MessageView({
                     {a.filename || "image"}
                   </div>
                   <div style={{ fontSize: 11, color: "#999" }}>
-                    {a.mime_type}{typeof a.size === "number" && ` · ${formatSize(a.size)}`}
+                    {a.mime_type}{typeof a.size === "number" && ` · ${formatFileSize(a.size)}`}
                   </div>
                 </div>
               )}
@@ -182,7 +263,7 @@ function MessageView({
               {a.filename || "(file)"}
               {typeof a.size === "number" && (
                 <span style={{ color: "#888", marginLeft: 6 }}>
-                  {formatSize(a.size)}
+                  {formatFileSize(a.size)}
                 </span>
               )}
             </span>

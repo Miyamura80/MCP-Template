@@ -1,46 +1,40 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  MAX_ATTACHMENT_BYTES,
-  extractDraft,
-  fieldsEqual,
-  formatBytes,
-  readFileAsBase64,
-  type Draft,
-  type DraftAttachment,
-  type McpAppLike,
-  type NewUpload,
-  type PendingUpload,
-  type SaveStatus,
-  type Thread,
-} from "./draftModel";
+import type { Draft, McpAppLike, SaveStatus, SentState, Thread } from "./types";
+import { draftFields, extractDraft, extractThread, fieldsEqual } from "./draft";
+import { discardContextText, sentContextText } from "./modelContext";
 import { useAutoGrow, useIsMobile } from "./hooks";
-import { ThreadPanel, extractThread } from "./thread";
-import { RecipientFields } from "./fields";
-import { AttachmentsSection } from "./attachments";
-import { ComposerFooter } from "./footer";
+import { ThreadPanel } from "./ThreadPanel";
 import {
   agentBannerStyle,
+  buttonRowStyle,
+  confirmRowStyle,
   containerStyle,
+  destructiveButtonStyle,
   headerStyle,
+  inputStyle,
+  labelStyle,
+  linkButtonStyle,
+  mobileTextareaStyle,
   mobileThreadMessagesContainer,
   mutedStyle,
-  renderStatus,
+  primaryButtonStyle,
+  readOnlyStyle,
+  rowStyle,
+  secondaryButtonStyle,
   smallPrimaryStyle,
   smallSecondaryStyle,
   statusStyle,
   successStyle,
+  textareaStyle,
   threadMessagesContainer,
 } from "./styles";
 
-// Preserve the public import surface: consumers import these types from
-// "./Composer" (Composer.test.tsx, appContract.test.ts, main.tsx).
-export type { Draft, DraftAttachment, Thread, ThreadMessage, McpAppLike } from "./draftModel";
+// Re-exported so consumers (and tests) keep importing types from "./Composer".
+export type { Draft, McpAppLike, Thread, ThreadMessage } from "./types";
 
 type ComposerProps = {
   mcpApp: McpAppLike;
 };
-
-type SentState = { message_id: string };
 
 export function Composer({ mcpApp }: ComposerProps) {
   const isMobile = useIsMobile();
@@ -51,31 +45,10 @@ export function Composer({ mcpApp }: ComposerProps) {
   const [discarded, setDiscarded] = useState(false);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const [pendingAgent, setPendingAgent] = useState<Draft | null>(null);
-  const [uploads, setUploads] = useState<PendingUpload[]>([]);
-  const [dragActive, setDragActive] = useState(false);
   const localDirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef<Draft | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const uploadSeqRef = useRef(0);
-  const nextUploadId = () => `u${(uploadSeqRef.current += 1)}`;
-  // The last server-confirmed attachment set - the authoritative keep-list a
-  // whole-set-replace save must echo back. Advanced only by server responses
-  // (never by optimistic UI), so concurrent mutations build on committed state.
-  const attachmentsRef = useRef<DraftAttachment[]>([]);
-  // Serializes every draft write (text autosave, attachment add/remove, send)
-  // into one chain, so a whole-set-replace save can't interleave with another
-  // and drop a file, and a slow save can't land after a newer one.
-  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const enqueue = <T,>(fn: () => Promise<T>): Promise<T> => {
-    const run = saveChainRef.current.then(fn, fn);
-    saveChainRef.current = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
-  };
 
   useEffect(() => {
     draftRef.current = draft;
@@ -93,7 +66,6 @@ export function Composer({ mcpApp }: ComposerProps) {
       const current = draftRef.current;
       if (!current) {
         setDraft(incoming);
-        attachmentsRef.current = incoming.attachments ?? [];
         localDirtyRef.current = false;
         return;
       }
@@ -102,7 +74,6 @@ export function Composer({ mcpApp }: ComposerProps) {
         return;
       }
       setDraft(incoming);
-      attachmentsRef.current = incoming.attachments ?? [];
       localDirtyRef.current = false;
     };
     mcpApp.ontoolresult = handler;
@@ -113,62 +84,46 @@ export function Composer({ mcpApp }: ComposerProps) {
     };
   }, [mcpApp]);
 
-  // The single draft-write path. Reads the freshest text off draftRef at the
-  // moment the call is issued (never a pre-await snapshot), so a save that fires
-  // after a slow file read can't revert a concurrent edit. `attachments`
-  // undefined => omit the arg entirely (server preserves existing files); an
-  // array => whole-set replace. On success, when an attachment set was sent, the
-  // server's echoed list becomes the authoritative truth. Throws on failure.
-  const doSave = async (
-    attachments?: (
-      | { attachment_id: string }
-      | { filename: string; mime_type: string; data_base64: string }
-    )[],
-  ): Promise<Draft | null> => {
-    const snapshot = draftRef.current;
-    if (!snapshot) return null;
-    setSaveStatus({ kind: "saving" });
-    const args: Record<string, unknown> = {
-      draft_id: snapshot.draft_id,
-      to: snapshot.to ?? "",
-      cc: snapshot.cc ?? "",
-      bcc: snapshot.bcc ?? "",
-      subject: snapshot.subject ?? "",
-      body: snapshot.body ?? "",
-    };
-    if (attachments !== undefined) args.attachments = attachments;
+  // Best-effort: host support for `ui/update-model-context` varies (the MCP
+  // Apps extension is young), and the send/discard that triggered the push
+  // already succeeded - a failure here must never surface in the UI. Call
+  // sites use `void pushModelContext(...)` (never `await`) so a surrounding
+  // try/catch structurally cannot repurpose a push failure into an error UI.
+  const pushModelContext = async (text: string) => {
     try {
-      const raw = await mcpApp.callServerTool({
+      await mcpApp.updateModelContext({ content: [{ type: "text", text }] });
+    } catch {
+      // Host rejected or doesn't implement context updates; nothing to do.
+    }
+  };
+
+  const scheduleAutoSave = (next: Draft) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      void persistDraft(next);
+    }, 800);
+  };
+
+  const persistDraft = async (next: Draft) => {
+    setSaveStatus({ kind: "saving" });
+    // Snapshot what we're saving so a save that completes after a newer
+    // edit doesn't falsely clear the dirty flag and lose the unsaved diff.
+    const snapshot = next;
+    try {
+      await mcpApp.callServerTool({
         name: "gmail_composer.save_draft",
-        arguments: args,
+        arguments: { draft_id: snapshot.draft_id, ...draftFields(snapshot) },
       });
-      const saved = extractDraft(raw);
-      if (attachments !== undefined) {
-        // Advance the authoritative set synchronously; the caller commits the
-        // matching React state (draft.attachments + upload chips) together so
-        // there is no frame where a file shows as both a chip and a saved row.
-        attachmentsRef.current = saved?.attachments ?? [];
-      }
       setSaveStatus({ kind: "saved", at: new Date() });
-      // Clear dirty only if nothing newer was typed than the text we just sent.
+      // Only clear dirty if the user hasn't typed anything newer.
       const latest = draftRef.current;
       if (latest && fieldsEqual(latest, snapshot)) {
         localDirtyRef.current = false;
       }
-      return saved;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
-      throw err;
     }
-  };
-
-  const scheduleAutoSave = () => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      // Text-only save: omit attachments so existing files are preserved.
-      enqueue(() => doSave()).catch(() => {});
-    }, 800);
   };
 
   const updateField = (key: keyof Draft, value: string) => {
@@ -176,40 +131,28 @@ export function Composer({ mcpApp }: ComposerProps) {
     const next: Draft = { ...draft, [key]: value };
     setDraft(next);
     localDirtyRef.current = true;
-    scheduleAutoSave();
+    scheduleAutoSave(next);
   };
 
   const onSaveNow = () => {
-    if (!draftRef.current) return;
+    if (!draft) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    enqueue(() => doSave()).catch(() => {});
+    void persistDraft(draft);
   };
 
   const onSend = async () => {
-    if (!draftRef.current) return;
+    if (!draft) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     try {
-      // Serialized after any in-flight attachment upload so the files are
-      // persisted before we send; reads the freshest text at issue time.
-      const raw = await enqueue(() => {
-        const cur = draftRef.current;
-        if (!cur) throw new Error("no draft to send");
-        return mcpApp.callServerTool({
-          name: "gmail_composer.send",
-          arguments: {
-            draft_id: cur.draft_id,
-            to: cur.to ?? "",
-            cc: cur.cc ?? "",
-            bcc: cur.bcc ?? "",
-            subject: cur.subject ?? "",
-            body: cur.body ?? "",
-          },
-        });
+      const raw = await mcpApp.callServerTool({
+        name: "gmail_composer.send",
+        arguments: { draft_id: draft.draft_id, ...draftFields(draft) },
       });
       const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
       const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
       const messageId = (inner as { message_id?: string })?.message_id ?? "";
       setSent({ message_id: messageId });
+      void pushModelContext(sentContextText(draft, messageId));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
@@ -230,6 +173,7 @@ export function Composer({ mcpApp }: ComposerProps) {
         arguments: { draft_id: draft.draft_id },
       });
       setDiscarded(true);
+      void pushModelContext(discardContextText(draft));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
@@ -245,138 +189,11 @@ export function Composer({ mcpApp }: ComposerProps) {
       saveTimerRef.current = null;
     }
     setDraft(pendingAgent);
-    attachmentsRef.current = pendingAgent.attachments ?? [];
     setPendingAgent(null);
     localDirtyRef.current = false;
   };
 
   const keepLocal = () => setPendingAgent(null);
-
-  const onFilesChosen = async (files: FileList | File[] | null) => {
-    if (!draftRef.current || !files) return;
-    const chosen = Array.from(files);
-    if (chosen.length === 0) return;
-
-    // Oversized files never leave the browser: mark them errored inline so the
-    // user sees why, and don't include them in the upload call.
-    const oversized = chosen.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
-    const okFiles = chosen.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
-
-    const okEntries: PendingUpload[] = okFiles.map((f) => ({
-      local_id: nextUploadId(),
-      filename: f.name,
-      mime_type: f.type || "application/octet-stream",
-      size: f.size,
-      status: "reading",
-    }));
-    const oversizedEntries: PendingUpload[] = oversized.map((f) => ({
-      local_id: nextUploadId(),
-      filename: f.name,
-      mime_type: f.type || "application/octet-stream",
-      size: f.size,
-      status: "error",
-      error: `Too large (${formatBytes(f.size)}); ${formatBytes(MAX_ATTACHMENT_BYTES)} max`,
-    }));
-    setUploads((u) => [...u, ...okEntries, ...oversizedEntries]);
-    if (okFiles.length === 0) return;
-
-    // Read each file independently: one unreadable file must not sink the whole
-    // batch, so failures are marked per-chip and the rest still upload.
-    const results = await Promise.allSettled(okFiles.map(readFileAsBase64));
-    const ready: { id: string; upload: NewUpload }[] = [];
-    const failedIds = new Set<string>();
-    results.forEach((r, i) => {
-      const entry = okEntries[i];
-      if (r.status === "fulfilled") {
-        ready.push({
-          id: entry.local_id,
-          upload: {
-            filename: entry.filename,
-            mime_type: entry.mime_type,
-            data_base64: r.value,
-          },
-        });
-      } else {
-        failedIds.add(entry.local_id);
-      }
-    });
-    if (failedIds.size > 0) {
-      setUploads((u) =>
-        u.map((e) =>
-          failedIds.has(e.local_id)
-            ? { ...e, status: "error", error: "Could not read file" }
-            : e,
-        ),
-      );
-    }
-    if (ready.length === 0) {
-      setSaveStatus({ kind: "error", message: "Could not read the selected file(s)" });
-      return;
-    }
-    const readyIds = new Set(ready.map((r) => r.id));
-    setUploads((u) =>
-      u.map((e) => (readyIds.has(e.local_id) ? { ...e, status: "uploading" } : e)),
-    );
-    try {
-      const saved = await enqueue(() => {
-        // Build the keep-set from the authoritative server-confirmed list at run
-        // time (prior queued ops have settled), so overlapping drops that each
-        // started from the same stale draft can't drop one another's files.
-        const keep = attachmentsRef.current.map((a) => ({
-          attachment_id: a.attachment_id,
-        }));
-        return doSave([...keep, ...ready.map((r) => r.upload)]);
-      });
-      // Commit the adopted list and drop the transient chips in one batch, so
-      // the just-uploaded file never renders as both a chip and a saved row.
-      const next = saved?.attachments ?? attachmentsRef.current;
-      setDraft((d) => (d ? { ...d, attachments: next } : d));
-      setUploads((u) => u.filter((e) => !readyIds.has(e.local_id)));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setUploads((u) =>
-        u.map((e) =>
-          readyIds.has(e.local_id) ? { ...e, status: "error", error: msg } : e,
-        ),
-      );
-    }
-  };
-
-  const onRemoveAttachment = async (attachmentId: string) => {
-    if (!draftRef.current) return;
-    // Optimistic UI only. The authoritative keep-set is recomputed inside the
-    // queued op from attachmentsRef (advanced by server responses, not by this
-    // optimistic edit), so a remove that overlaps an upload can't clobber it.
-    setDraft((d) =>
-      d
-        ? { ...d, attachments: (d.attachments ?? []).filter((a) => a.attachment_id !== attachmentId) }
-        : d,
-    );
-    try {
-      const saved = await enqueue(() => {
-        const keep = attachmentsRef.current
-          .filter((a) => a.attachment_id !== attachmentId)
-          .map((a) => ({ attachment_id: a.attachment_id }));
-        return doSave(keep);
-      });
-      // Reconcile the optimistic UI with the server's confirmed list.
-      const next = saved?.attachments ?? attachmentsRef.current;
-      setDraft((d) => (d ? { ...d, attachments: next } : d));
-    } catch {
-      // doSave only advances attachmentsRef on success, so it still holds the
-      // pre-remove set: revert the optimistic UI to it.
-      setDraft((d) => (d ? { ...d, attachments: attachmentsRef.current } : d));
-    }
-  };
-
-  const dismissUpload = (localId: string) =>
-    setUploads((u) => u.filter((e) => e.local_id !== localId));
-
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragActive(false);
-    void onFilesChosen(e.dataTransfer?.files ?? null);
-  };
 
   // Thread context: fetch when draft has a thread_id
   const [thread, setThread] = useState<Thread | null>(null);
@@ -462,34 +279,122 @@ export function Composer({ mcpApp }: ComposerProps) {
         </div>
       )}
 
-      <RecipientFields
-        draft={draft}
-        updateField={updateField}
-        showCcBcc={showCcBcc}
-        setShowCcBcc={setShowCcBcc}
-        isMobile={isMobile}
-        bodyRef={bodyRef}
+      <Row label="From">
+        <div style={readOnlyStyle}>{draft.from ?? "(connected account)"}</div>
+      </Row>
+
+      <Row label="To">
+        <input
+          type="text"
+          value={draft.to ?? ""}
+          onChange={(e) => updateField("to", e.target.value)}
+          style={inputStyle}
+          aria-label="To"
+        />
+      </Row>
+
+      {!showCcBcc ? (
+        <div style={{ marginBottom: 8 }}>
+          <button onClick={() => setShowCcBcc(true)} style={linkButtonStyle}>
+            Show Cc/Bcc
+          </button>
+        </div>
+      ) : (
+        <>
+          <Row label="Cc">
+            <input
+              type="text"
+              value={draft.cc ?? ""}
+              onChange={(e) => updateField("cc", e.target.value)}
+              style={inputStyle}
+              aria-label="Cc"
+            />
+          </Row>
+          <Row label="Bcc">
+            <input
+              type="text"
+              value={draft.bcc ?? ""}
+              onChange={(e) => updateField("bcc", e.target.value)}
+              style={inputStyle}
+              aria-label="Bcc"
+            />
+          </Row>
+        </>
+      )}
+
+      <Row label="Subject">
+        <input
+          type="text"
+          value={draft.subject ?? ""}
+          onChange={(e) => updateField("subject", e.target.value)}
+          style={inputStyle}
+          aria-label="Subject"
+        />
+      </Row>
+
+      <textarea
+        ref={bodyRef}
+        value={draft.body ?? ""}
+        onChange={(e) => updateField("body", e.target.value)}
+        rows={14}
+        style={isMobile ? mobileTextareaStyle : textareaStyle}
+        aria-label="Body"
       />
 
-      <AttachmentsSection
-        draft={draft}
-        uploads={uploads}
-        dragActive={dragActive}
-        setDragActive={setDragActive}
-        fileInputRef={fileInputRef}
-        onFilesChosen={onFilesChosen}
-        onDrop={onDrop}
-        onRemoveAttachment={onRemoveAttachment}
-        dismissUpload={dismissUpload}
-      />
-
-      <ComposerFooter
-        onSend={onSend}
-        onSaveNow={onSaveNow}
-        confirmingDiscard={confirmingDiscard}
-        setConfirmingDiscard={setConfirmingDiscard}
-        onDiscardConfirm={onDiscardConfirm}
-      />
+      <div style={buttonRowStyle}>
+        <button onClick={onSend} style={primaryButtonStyle}>
+          Send
+        </button>
+        <button onClick={onSaveNow} style={secondaryButtonStyle}>
+          Save draft
+        </button>
+        {!confirmingDiscard ? (
+          <button
+            onClick={() => setConfirmingDiscard(true)}
+            style={destructiveButtonStyle}
+          >
+            Discard
+          </button>
+        ) : (
+          <span style={confirmRowStyle}>
+            Discard?
+            <button onClick={onDiscardConfirm} style={destructiveButtonStyle}>
+              Yes, discard
+            </button>
+            <button
+              onClick={() => setConfirmingDiscard(false)}
+              style={secondaryButtonStyle}
+            >
+              Cancel
+            </button>
+          </span>
+        )}
+      </div>
     </div>
   );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={rowStyle}>
+      <div style={labelStyle}>{label}</div>
+      <div style={{ flex: 1 }}>{children}</div>
+    </div>
+  );
+}
+
+function renderStatus(s: SaveStatus): string {
+  switch (s.kind) {
+    case "idle":
+      return "";
+    case "saving":
+      return "Saving…";
+    case "saved":
+      return `Saved at ${s.at.getHours().toString().padStart(2, "0")}:${s.at
+        .getMinutes()
+        .toString()
+        .padStart(2, "0")}`;
+    case "error":
+      return `Save failed: ${s.message}`;
+  }
 }

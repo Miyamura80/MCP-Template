@@ -1,18 +1,22 @@
+"""Enforce a max line count on source files.
+
+The single source of truth for the source-file line-length limit, shared by
+`make ci` (file_len_check), the Lint GitHub workflow, and prek. Scans the whole
+tree for .py/.ts/.tsx; the limit and per-file exclusions come from
+[tool.file_length] in pyproject.toml.
+"""
+
 from __future__ import annotations
 
+import os
 import pathlib
 import tomllib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-
-# Extensions that count as first-party source. `.ts`/`.tsx` cover the MCP App
-# frontends (mcp_server/apps/*/src) and the docs/landing-page sub-projects.
-SOURCE_GLOBS = ("*.py", "*.ts", "*.tsx")
-
-# Directory names skipped at ANY depth. Vendored deps and build output live
-# *inside* first-party trees (e.g. mcp_server/apps/x/node_modules,
-# apps/x/dist), so a root-only skip would miss them and the scan would drown
-# in third-party `.ts`. Matching on any path segment catches every nesting.
+SOURCE_SUFFIXES = (".py", ".ts", ".tsx")
+# Directory names skipped wherever they appear in the tree. TypeScript sources
+# live beside deep, per-package `node_modules` / `dist` / `.next` folders, so a
+# top-level-only skip is not enough - match these at any depth.
 SKIP_DIRS = {
     ".git",
     ".venv",
@@ -22,12 +26,9 @@ SKIP_DIRS = {
     ".uv-tools",
     ".cache",
     "node_modules",
+    ".next",
     "dist",
     "build",
-    ".next",
-    ".astro",
-    ".source",
-    "coverage",
     "__pycache__",
     ".pytest_cache",
 }
@@ -46,16 +47,17 @@ def load_config() -> tuple[int, set[str]]:
 def main() -> int:
     max_lines, exclude = load_config()
     violations: list[tuple[pathlib.Path, int]] = []
-    seen: set[pathlib.Path] = set()
 
-    for glob in SOURCE_GLOBS:
-        for path in REPO_ROOT.rglob(glob):
+    # Prune skipped directories in place so os.walk never descends into
+    # node_modules/.venv/etc. - the TypeScript trees hold tens of thousands of
+    # files we would otherwise stat only to discard.
+    for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for name in filenames:
+            if not name.endswith(SOURCE_SUFFIXES):
+                continue
+            path = pathlib.Path(dirpath) / name
             rel = path.relative_to(REPO_ROOT)
-            if rel in seen:
-                continue
-            seen.add(rel)
-            if any(part in SKIP_DIRS for part in rel.parts[:-1]):
-                continue
             if rel.as_posix() in exclude:
                 continue
             try:

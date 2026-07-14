@@ -1,5 +1,4 @@
-import type React from "react";
-import type { SaveStatus } from "./draftModel";
+import type { SaveStatus } from "./types";
 
 export const containerStyle: React.CSSProperties = {
   fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
@@ -65,83 +64,6 @@ export const mobileTextareaStyle: React.CSSProperties = {
   resize: "none",
   fontSize: 16, // prevents iOS Safari from zooming in on focus
   touchAction: "manipulation",
-};
-
-export const dropZoneStyle: React.CSSProperties = {
-  marginTop: 10,
-  padding: 10,
-  border: "1px dashed #d1d5db",
-  borderRadius: 6,
-  background: "#fafafa",
-  transition: "background 0.12s, border-color 0.12s",
-};
-
-export const dropZoneActiveStyle: React.CSSProperties = {
-  ...dropZoneStyle,
-  borderColor: "#3b82f6",
-  background: "#eff6ff",
-};
-
-export const dropHintStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  flexWrap: "wrap",
-};
-
-export const attachmentListStyle: React.CSSProperties = {
-  listStyle: "none",
-  margin: "10px 0 0",
-  padding: 0,
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-};
-
-export const attachmentItemStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "4px 8px",
-  borderRadius: 4,
-  background: "#fff",
-  border: "1px solid #eee",
-  fontSize: 13,
-};
-
-export const attachmentErrorItemStyle: React.CSSProperties = {
-  background: "#fef2f2",
-  border: "1px solid #fecaca",
-};
-
-export const attachmentIconStyle: React.CSSProperties = {
-  flexShrink: 0,
-  fontSize: 13,
-};
-
-export const attachmentNameStyle: React.CSSProperties = {
-  flex: 1,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "#111",
-};
-
-export const attachmentMetaStyle: React.CSSProperties = {
-  flexShrink: 0,
-  color: "#888",
-  fontSize: 12,
-};
-
-export const attachmentRemoveStyle: React.CSSProperties = {
-  flexShrink: 0,
-  background: "transparent",
-  border: "none",
-  color: "#991b1b",
-  cursor: "pointer",
-  fontSize: 13,
-  lineHeight: 1,
-  padding: 2,
 };
 
 export const buttonRowStyle: React.CSSProperties = {
@@ -319,20 +241,4 @@ export function statusStyle(s: SaveStatus): React.CSSProperties {
   if (s.kind === "error") return { color: "#991b1b", fontSize: 12 };
   if (s.kind === "saved") return { color: "#059669", fontSize: 12 };
   return { color: "#666", fontSize: 12 };
-}
-
-export function renderStatus(s: SaveStatus): string {
-  switch (s.kind) {
-    case "idle":
-      return "";
-    case "saving":
-      return "Saving…";
-    case "saved":
-      return `Saved at ${s.at.getHours().toString().padStart(2, "0")}:${s.at
-        .getMinutes()
-        .toString()
-        .padStart(2, "0")}`;
-    case "error":
-      return `Save failed: ${s.message}`;
-  }
 }

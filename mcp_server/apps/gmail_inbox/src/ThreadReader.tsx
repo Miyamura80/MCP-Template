@@ -1,22 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
   ArrowCounterClockwise,
   EnvelopeOpen,
-  Archive,
   Sparkle,
 } from "@phosphor-icons/react";
 import type { Draft, McpAppLike, Thread, ThreadMessage } from "./types";
-import { base64ToBlobUrl, extractStructuredContent, isPreviewable } from "./model";
-import { MarkDoneButton, PdfViewer } from "./shared";
-import { CollapsibleMessage, DraftCard } from "./MessageView";
-import { actionsStyle, iconBtnStyle, mutedStyle, replyContextInputStyle } from "./styles";
+import { base64ToBlobUrl, extractStructuredContent, isPreviewable } from "./helpers";
 import {
-  previewBodyStyle,
-  previewCloseBtn,
-  previewHeaderStyle,
-  previewModalStyle,
-  previewOverlayStyle,
-} from "./composerStyles";
+  CollapsibleMessage,
+  DraftCard,
+  MarkDoneButton,
+  type PreviewAttachment,
+} from "./MessageComponents";
+import { PreviewModal, type PreviewData } from "./AttachmentPreview";
+import { actionsStyle, iconBtnStyle, mutedStyle, replyContextInputStyle } from "./styles";
 
 export function ThreadReader({
   thread,
@@ -42,7 +40,7 @@ export function ThreadReader({
   onEditDraft: (draft: Draft) => void;
 }) {
   const [replyContext, setReplyContext] = useState("");
-  const [previewData, setPreviewData] = useState<{ url: string; filename: string; mime_type: string } | null>(null);
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewBlobRef = useRef<string | null>(null);
 
@@ -70,7 +68,7 @@ export function ThreadReader({
     setPreviewData({ url, filename, mime_type: mime });
   };
 
-  const previewAttachment = async (att: { filename?: string; mime_type?: string; attachment_id?: string; message_id?: string; data?: string }) => {
+  const previewAttachment = async (att: PreviewAttachment) => {
     const mime = att.mime_type || "application/octet-stream";
     if (!isPreviewable(mime)) return;
     if (att.data) {
@@ -154,33 +152,7 @@ export function ThreadReader({
           Loading preview…
         </div>
       )}
-      {previewData && (
-        <div style={previewOverlayStyle} onClick={closePreview}>
-          <div style={previewModalStyle} onClick={(e) => e.stopPropagation()}>
-            <div style={previewHeaderStyle}>
-              <span style={{ fontSize: 14, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {previewData.filename}
-              </span>
-              <button onClick={closePreview} style={previewCloseBtn}>×</button>
-            </div>
-            <div style={previewBodyStyle}>
-              {previewData.mime_type === "application/pdf" ? (
-                <PdfViewer url={previewData.url} />
-              ) : previewData.mime_type.startsWith("image/") ? (
-                <img
-                  src={previewData.url}
-                  alt={previewData.filename}
-                  style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-                />
-              ) : (
-                <div style={{ padding: 32, textAlign: "center", color: "#5f6368" }}>
-                  Preview not available for this file type.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {previewData && <PreviewModal preview={previewData} onClose={closePreview} />}
     </>
   );
 }
