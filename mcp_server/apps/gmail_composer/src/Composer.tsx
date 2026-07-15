@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import type { Draft, McpAppLike, SaveStatus, SentState, Thread } from "./types";
+import type {
+  Draft,
+  DraftAttachment,
+  McpAppLike,
+  SaveStatus,
+  SentState,
+  Thread,
+} from "./types";
 import { draftFields, extractDraft, extractThread, fieldsEqual } from "./draft";
 import { discardContextText, sentContextText } from "./modelContext";
 import { useAutoGrow, useIsMobile } from "./hooks";
 import { ThreadPanel } from "./ThreadPanel";
+import {
+  AttachmentsSection,
+  useAttachments,
+  type SaveAttachment,
+} from "./attachments";
 import {
   agentBannerStyle,
   buttonRowStyle,
@@ -47,8 +59,27 @@ export function Composer({ mcpApp }: ComposerProps) {
   const [pendingAgent, setPendingAgent] = useState<Draft | null>(null);
   const localDirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set once a send/discard is committed (the textarea stays mounted until the
+  // RPC resolves): blocks autosave + attachment ops against the terminal draft.
+  const closingRef = useRef(false);
   const draftRef = useRef<Draft | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  // The last server-confirmed attachment set - the authoritative keep-list a
+  // whole-set-replace save must echo back. Advanced only by server responses
+  // (never by optimistic UI), so concurrent mutations build on committed state.
+  const attachmentsRef = useRef<DraftAttachment[]>([]);
+  // Serializes every draft write (text autosave, attachment add/remove, send)
+  // into one chain, so a whole-set-replace save can't interleave with another
+  // and drop a file, and a slow save can't land after a newer one.
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = saveChainRef.current.then(fn, fn);
+    saveChainRef.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
 
   useEffect(() => {
     draftRef.current = draft;
@@ -66,6 +97,7 @@ export function Composer({ mcpApp }: ComposerProps) {
       const current = draftRef.current;
       if (!current) {
         setDraft(incoming);
+        attachmentsRef.current = incoming.attachments ?? [];
         localDirtyRef.current = false;
         return;
       }
@@ -74,6 +106,7 @@ export function Composer({ mcpApp }: ComposerProps) {
         return;
       }
       setDraft(incoming);
+      attachmentsRef.current = incoming.attachments ?? [];
       localDirtyRef.current = false;
     };
     mcpApp.ontoolresult = handler;
@@ -97,33 +130,53 @@ export function Composer({ mcpApp }: ComposerProps) {
     }
   };
 
-  const scheduleAutoSave = (next: Draft) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      void persistDraft(next);
-    }, 800);
-  };
-
-  const persistDraft = async (next: Draft) => {
+  // The single draft-write path. Reads the freshest text off draftRef at call
+  // time (never a pre-await snapshot), so a save issued after a slow file read
+  // can't revert a live edit. `attachments`: undefined omits the arg (preserve
+  // files); an array is a whole-set replace whose echoed result is adopted as
+  // truth. Throws on failure so attachment callers can react.
+  const doSave = async (attachments?: SaveAttachment[]): Promise<Draft | null> => {
+    const snapshot = draftRef.current;
+    if (!snapshot) return null;
     setSaveStatus({ kind: "saving" });
-    // Snapshot what we're saving so a save that completes after a newer
-    // edit doesn't falsely clear the dirty flag and lose the unsaved diff.
-    const snapshot = next;
+    const args: Record<string, unknown> = {
+      draft_id: snapshot.draft_id,
+      ...draftFields(snapshot),
+    };
+    if (attachments !== undefined) args.attachments = attachments;
     try {
-      await mcpApp.callServerTool({
+      const raw = await mcpApp.callServerTool({
         name: "gmail_composer.save_draft",
-        arguments: { draft_id: snapshot.draft_id, ...draftFields(snapshot) },
+        arguments: args,
       });
+      const saved = extractDraft(raw);
+      if (attachments !== undefined) {
+        attachmentsRef.current = saved?.attachments ?? [];
+      }
       setSaveStatus({ kind: "saved", at: new Date() });
-      // Only clear dirty if the user hasn't typed anything newer.
+      // Clear dirty only if nothing newer was typed than the text we just sent.
       const latest = draftRef.current;
       if (latest && fieldsEqual(latest, snapshot)) {
         localDirtyRef.current = false;
       }
+      return saved;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
+      throw err;
     }
+  };
+
+  const scheduleAutoSave = () => {
+    // Don't arm a save once the draft is being sent/discarded.
+    if (closingRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      // Re-check: a terminal transition may have happened since arming.
+      // Text-only save (no attachments arg) preserves existing files.
+      if (closingRef.current) return;
+      enqueue(() => doSave()).catch(() => {});
+    }, 800);
   };
 
   const updateField = (key: keyof Draft, value: string) => {
@@ -131,36 +184,64 @@ export function Composer({ mcpApp }: ComposerProps) {
     const next: Draft = { ...draft, [key]: value };
     setDraft(next);
     localDirtyRef.current = true;
-    scheduleAutoSave(next);
+    scheduleAutoSave();
   };
 
   const onSaveNow = () => {
-    if (!draft) return;
+    if (!draftRef.current || closingRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    void persistDraft(draft);
+    enqueue(() => doSave()).catch(() => {});
   };
 
+  const attachmentApi = useAttachments({
+    draftRef,
+    setDraft,
+    setSaveStatus,
+    attachmentsRef,
+    doSave,
+    enqueue,
+    closingRef,
+  });
+
   const onSend = async () => {
-    if (!draft) return;
+    // Single-flight: a repeat click while a send is in flight is a no-op.
+    if (!draftRef.current || closingRef.current) return;
+    // Committing to send: block new autosaves against this draft (reset below
+    // if the send fails and the composer stays editable).
+    closingRef.current = true;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     try {
-      const raw = await mcpApp.callServerTool({
-        name: "gmail_composer.send",
-        arguments: { draft_id: draft.draft_id, ...draftFields(draft) },
+      // Serialized after any in-flight attachment upload so the files are
+      // persisted before we send; reads the freshest text at issue time.
+      const raw = await enqueue(() => {
+        const cur = draftRef.current;
+        if (!cur) throw new Error("no draft to send");
+        return mcpApp.callServerTool({
+          name: "gmail_composer.send",
+          arguments: { draft_id: cur.draft_id, ...draftFields(cur) },
+        });
       });
       const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
       const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
       const messageId = (inner as { message_id?: string })?.message_id ?? "";
       setSent({ message_id: messageId });
-      void pushModelContext(sentContextText(draft, messageId));
+      const cur = draftRef.current;
+      if (cur) void pushModelContext(sentContextText(cur, messageId));
     } catch (err) {
+      // Send failed: the composer stays editable, so re-enable autosaving.
+      closingRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
     }
   };
 
   const onDiscardConfirm = async () => {
-    if (!draft) return;
+    const cur = draftRef.current;
+    // Single-flight: ignore a repeat confirm while a discard is in flight.
+    if (!cur || closingRef.current) return;
+    // Committing to discard: block new autosaves (a keystroke during the
+    // in-flight delete must not resurrect the draft). Reset on failure.
+    closingRef.current = true;
     // Cancel any queued autosave so a debounced save can't race ahead and
     // re-create a row immediately after the discard call returns.
     if (saveTimerRef.current) {
@@ -168,13 +249,18 @@ export function Composer({ mcpApp }: ComposerProps) {
       saveTimerRef.current = null;
     }
     try {
-      await mcpApp.callServerTool({
-        name: "gmail_composer.discard",
-        arguments: { draft_id: draft.draft_id },
-      });
+      // Serialized so it runs after any in-flight save rather than racing it.
+      await enqueue(() =>
+        mcpApp.callServerTool({
+          name: "gmail_composer.discard",
+          arguments: { draft_id: cur.draft_id },
+        }),
+      );
       setDiscarded(true);
-      void pushModelContext(discardContextText(draft));
+      void pushModelContext(discardContextText(cur));
     } catch (err) {
+      // Discard failed: the draft still exists and stays editable.
+      closingRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
     } finally {
@@ -189,6 +275,7 @@ export function Composer({ mcpApp }: ComposerProps) {
       saveTimerRef.current = null;
     }
     setDraft(pendingAgent);
+    attachmentsRef.current = pendingAgent.attachments ?? [];
     setPendingAgent(null);
     localDirtyRef.current = false;
   };
@@ -339,6 +426,18 @@ export function Composer({ mcpApp }: ComposerProps) {
         rows={14}
         style={isMobile ? mobileTextareaStyle : textareaStyle}
         aria-label="Body"
+      />
+
+      <AttachmentsSection
+        attachments={draft.attachments ?? []}
+        uploads={attachmentApi.uploads}
+        dragActive={attachmentApi.dragActive}
+        setDragActive={attachmentApi.setDragActive}
+        fileInputRef={attachmentApi.fileInputRef}
+        onFilesChosen={attachmentApi.onFilesChosen}
+        onRemoveAttachment={attachmentApi.onRemoveAttachment}
+        dismissUpload={attachmentApi.dismissUpload}
+        onDrop={attachmentApi.onDrop}
       />
 
       <div style={buttonRowStyle}>
