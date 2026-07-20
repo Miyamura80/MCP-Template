@@ -32,7 +32,7 @@ dependencies = [
     "langfuse>=4.7.1",
     "litellm>=1.59.8,!=1.82.*",
     "tenacity>=9.0.0",
-    "pillow>=12.1.0",
+    "pillow>=12.3.0",
     "google-genai>=2.3.0",
     "ty>=0.0.14",
     "pytest-env>=1.2.0",
