@@ -122,8 +122,13 @@ max-complexity = 10
 
 [tool.ty.src]
 # Standalone, dev-only helper scripts run outside the app venv (optional deps
-# like cairosvg) - not part of the typed app surface.
-exclude = ["scripts/sync_agent_config.py", "landing-page/scripts/gen-og.py"]
+# like cairosvg) - not part of the typed app surface. The goose-gui-e2e harness
+# scripts import app modules but only ever run under the e2e stack, not the app.
+exclude = [
+    "scripts/sync_agent_config.py",
+    "landing-page/scripts/gen-og.py",
+    ".agents/skills/goose-gui-e2e/scripts/",
+]
 
 [tool.ty.rules]
 possibly-unresolved-reference = "error"
@@ -136,7 +141,7 @@ python-version = "3.12"
 
 [tool.deptry]
 ignore = ["DEP002"]
-extend_exclude = ["scripts/sync_agent_config.py", "landing-page/scripts/gen-og.py"]
+extend_exclude = ["scripts/sync_agent_config.py", "landing-page/scripts/gen-og.py", ".agents/skills/goose-gui-e2e/scripts/"]
 package_module_name_map = { "PyJWT" = "jwt", "google-api-python-client" = "googleapiclient", "google-auth" = "google", "google-genai" = "google", "openfeature-sdk" = "openfeature", "pillow" = "PIL", "pyyaml" = "yaml", "python-dotenv" = "dotenv" }
 
 [tool.vulture]
@@ -149,6 +154,7 @@ exclude = [
     ".uv-tools/",
     "docs/",
     "node_modules/",
+    ".agents/skills/goose-gui-e2e/scripts/",
     "tests/test_logging_security.py",
     "tests/test_logging_thread_safety.py",
     "tests/test_template.py",

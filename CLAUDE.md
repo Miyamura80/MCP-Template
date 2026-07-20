@@ -225,8 +225,12 @@ See `mcp_server/MCP_UI_ARCHITECTURE.md` for design rationale and
   `docs/content/docs/mcp/oauth.mdx`.
 - App frontends: vitest per app (`bun run test` in `mcp_server/apps/<name>/`,
   not in CI); each app has an `appContract.test.ts` pinning the real
-  `ext-apps` `App` surface against the `McpAppLike` mock type. Driving the
-  rendered iframe end-to-end is deliberately uncovered (#37 deferred).
+  `ext-apps` `App` surface against the `McpAppLike` mock type.
+- **Rendered-iframe tier (L4, #37):** `make test_apps_e2e` drives the **real
+  Goose desktop GUI** (Electron) as an MCP client and asserts the `ui://` app
+  actually renders + round-trips in a real host. One-time build + how it works:
+  `.agents/skills/goose-gui-e2e/SKILL.md`. Heavy (Goose + Electron); **not** in
+  `make ci`.
 
 ## Subagents
 
