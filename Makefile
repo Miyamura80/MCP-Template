@@ -13,6 +13,11 @@ PYTHON=uv run
 TEST=uv run python -m pytest
 PROJECT_ROOT=.
 
+# Minimum uv version required by this repo. `[tool.uv]` in pyproject.toml uses a
+# relative `exclude-newer` duration that only uv >= 0.9.17 can parse; an older uv
+# silently discards the whole table (guard included) and rewrites uv.lock. See #196.
+MIN_UV_VERSION=0.9.17
+
 .DEFAULT_GOAL := help
 
 ########################################################
@@ -64,8 +69,17 @@ check_uv:
 	@if ! command -v uv > /dev/null 2>&1; then \
 		echo "$(RED)uv is not installed. Please install uv before proceeding.$(RESET)"; \
 		exit 1; \
-	else \
-		uv --version; \
+	fi
+	@uv --version
+	@UV_VERSION=$$(uv --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1); \
+	if [ -z "$$UV_VERSION" ]; then \
+		echo "$(RED)Could not determine uv version from 'uv --version'.$(RESET)"; \
+		exit 1; \
+	fi; \
+	if [ "$$(printf '%s\n' "$(MIN_UV_VERSION)" "$$UV_VERSION" | sort -V | head -n1)" != "$(MIN_UV_VERSION)" ]; then \
+		echo "$(RED)uv $$UV_VERSION is too old - this repo needs uv >= $(MIN_UV_VERSION) (relative exclude-newer in [tool.uv]).$(RESET)"; \
+		echo "$(RED)Fix: run .claude/hooks/session-start.sh, or 'uv tool install --force uv>=$(MIN_UV_VERSION)'.$(RESET)"; \
+		exit 1; \
 	fi
 
 check_jq:
