@@ -1,0 +1,182 @@
+---
+name: goose-gui-e2e
+description: Drive the real Goose desktop GUI (Electron) as an MCP client via Playwright to end-to-end test this template's MCP Apps - asserting the ui:// iframe actually renders and round-trips in a real host. Use to run, add, or debug MCP-App e2e scenarios.
+---
+
+# Goose-GUI end-to-end testing of the MCP Apps
+
+Goose (Block's open-source agent, an Agentic AI Foundation reference MCP client)
+renders MCP Apps natively - it fetches a tool's `ui://` resource and mounts the
+HTML in a sandboxed iframe. This skill stands up the **real Goose desktop app**
+(Electron), wires **this template's `/mcp` mount** into it as a streamable-HTTP
+extension, drives a chat scenario with **Playwright-Electron** (DOM selectors, no
+pixel coordinates), and decides PASS/FAIL from two records the mock LLM cannot
+fake: the **rendered iframe DOM** and the **tool-call round-trip log**.
+
+This closes the L4 "rendered iframe in a real host" gap from issue #37 - the layer
+`tests/test_mcp_e2e.py` (wire) and the per-app vitest (component) deliberately
+don't cover. It's ported from Edison-Watch's `goose-gui-e2e` harness; the Goose
+build under `$E2E_HOME/goose_src` is repo-agnostic and shared with it.
+
+```
+   scenario (JSON: prompt + tool plan + expect)
+        │  Playwright-Electron drives the DOM
+        ▼
+   mock LLM ──emits webhook_settings──► Goose desktop GUI ──/mcp──► template server
+   (scenario engine)                    (Electron, real)            (FastMCP + enhancer
+        ▲                                     │  renders ui://       attaches ui://mymcp/settings)
+        │                                     ▼
+        └──────────────────────────  sandboxed iframe (Settings app)
+                                             │
+                     assert: iframe DOM (pw_result) + tool round-trip (toolcalls.jsonl)
+```
+
+## Quickstart
+
+```bash
+cd .agents/skills/goose-gui-e2e/scripts     # or the symlink under .claude/skills/
+export E2E_HOME="$HOME/goose-e2e"           # working dir (default; override freely)
+
+bash setup.sh                # ONE TIME: build goose + Electron + bundles (~6-8 min). Idempotent.
+bash up.sh                   # seed e2e DB + API key; start template server + mock + vite (idempotent)
+bash run_test.sh settings_render   # drive the GUI + assert -> PASS/FAIL, screenshot in $E2E_HOME
+bash run_all.sh              # run every scenario, print a summary
+bash down.sh                 # stop test services  (down.sh --reset also drops the e2e DB + key)
+```
+
+`make test_apps_e2e` runs `up.sh && run_all.sh`. Each `run_test.sh` writes a
+screenshot of the real Goose GUI (with the Settings app rendered) to
+`$E2E_HOME/shot_<scenario>.png`.
+
+## Where this runs in the suite
+
+Heavy tier - **not** in `make ci` (which stays Node/Rust/Electron-free):
+
+- **Local / make:** `make test_apps_e2e` (after the one-time `setup.sh`).
+- **Full pytest suite:** `tests/test_apps_e2e.py` is a collectable member, **skipped
+  by default**; opt in with `RUN_APPS_E2E=1` (e.g. `RUN_APPS_E2E=1 uv run pytest
+  tests/test_apps_e2e.py --no-cov`). It shells out to `up.sh` + `run_all.sh`.
+  (`--no-cov` keeps a single-file run from tripping `pytest.ini`'s coverage gate.)
+- **CI:** `.github/workflows/apps_e2e.yaml` - `workflow_dispatch` + weekly cron. It
+  builds Goose via `setup.sh` (open egress, so the npmmirror preconditions below
+  don't apply on GitHub runners) and runs the guarded pytest entry.
+
+## Preconditions (verify before setup)
+
+- **npmmirror on the network allowlist.** Electron's binary is fetched from a
+  mirror because GitHub release assets are egress-blocked in the sandbox. In the
+  environment's **Network access → Custom**, add `registry.npmmirror.com` and
+  `cdn.npmmirror.com` (keep the default package-manager list checked). `setup.sh`
+  preflights this and fails loudly if it's missing.
+- Sandbox provides: `cargo`, `pnpm`/`node`, `bun`, `uv`, `xvfb-run`. `setup.sh`
+  uses `git clone` (allowed) + the mirror - none of the GitHub-blocked paths.
+
+## How a scenario works
+
+A scenario is JSON in `scripts/scenarios/<name>.json`:
+
+```json
+{
+  "prompt": "Open my settings.",
+  "plan": [ { "match": "webhook_settings" } ],
+  "final": "Opened your settings.",
+  "app_uri": "ui://mymcp/settings",
+  "expect": {
+    "tool_called": "webhook_settings",
+    "round_trip": true,
+    "app_rendered": true,
+    "dom_contains": ["Settings", "Gmail"]
+  }
+}
+```
+
+- `prompt` - the user message typed into Goose.
+- `plan` - the tool-call sequence the **mock** emits. `match` is a substring of
+  the tool name Goose offers (Goose may namespace extension tools, so substring
+  not exact). Pick an **app-returning** tool: `webhook_settings` → `ui://mymcp/settings`
+  is the shipped fixture because it renders offline with zero external deps (the
+  gmail_inbox / gmail_composer apps need a linked Google account).
+- `expect` - checked by `mcp_probe.py`: `tool_called` + `round_trip` (from the
+  tool-call log) and `app_rendered` + `dom_contains` (from the rendered iframe).
+
+### Optional: a click → `callServerTool` → re-render step
+
+A scenario may add an `interact` block to drive a real control **inside** the app
+iframe after it renders, exercising a **user-initiated** server round-trip (the
+`settings_subscribe` fixture does this - clicks "Add endpoint" → `settings.subscribe`):
+
+```json
+"expect": { "...": "...", "interaction_rendered": true },
+"interact": {
+  "fill":  { "selector": "input[type=url]", "value": "https://webhook.example.com/e2e" },
+  "click": { "text": "Add endpoint" },
+  "expect_dom_contains": ["Signing secret", "webhook.example.com"]
+}
+```
+
+The iframe's `callServerTool` goes **app → Goose → `/mcp` directly, bypassing the
+mock LLM**, so this round-trip never appears in the tool-call log - the re-rendered
+DOM (`expect_dom_contains`, here the returned signing secret) is the only proof,
+and only the server's real response can produce it. `interaction_rendered: true`
+makes `mcp_probe.py` require it, and `pw_scenario.mjs` fails the drive if the
+post-click DOM never matches. This needs the "Add endpoint" control, which renders
+only when `push_available` is true - `up.sh` sets `GMAIL_PUBSUB_TOPIC` to ungate it
+(no Pub/Sub is ever contacted).
+
+## Why the mock cannot fake a PASS
+
+The mock only follows the plan and returns canned narration; it never inspects
+tool results. The verdict is computed by `mcp_probe.py` from two records the mock
+doesn't control:
+- **the rendered iframe** - `pw_scenario.mjs` frameLocators into the real Goose
+  DOM and asserts the Settings app's text. The iframe only exists if the server
+  returned the app resource and Goose fetched + mounted it - a full round-trip.
+- **the tool-call log** - the calls Goose actually issued to `/mcp` and the
+  results the server returned.
+
+Two gates stop a no-op run from passing on stale data:
+- **Drive must render.** `pw_scenario.mjs` exits non-zero unless the app iframe
+  rendered with the expected DOM; `run_test.sh` checks it (`PIPESTATUS[0]`).
+- **Log must be new.** `run_test.sh` snapshots the tool-call-log line count before
+  driving; `mcp_probe.py` FAILs if no new entries were appended for this run.
+
+## Mock vs. real LLM
+
+- **Mock (default):** deterministic, offline, CI-friendly. `configure_goose.sh mock`.
+- **Real LLM:** `configure_goose.sh real anthropic $KEY` (model via `$GOOSE_REAL_MODEL`).
+  The agent decides tool calls from the `prompt`; requires an API key **and** the
+  provider host on the allowlist. The render/round-trip assertions are unchanged.
+
+## Sandbox gotchas already handled (do not re-discover)
+
+Baked into the scripts; listed so you recognize them if something drifts:
+
+| Symptom | Cause → handled by |
+|---|---|
+| Electron binary 403 | GitHub release assets blocked → mirror + checksum (`setup.sh`) |
+| `@electron/node-gyp` 403 on `pnpm install` | git tarball on codeload blocked → registry override (`setup.sh`) |
+| Electron SIGSEGV "Missing X server" | needs a display → `xvfb-run` owns Xvfb per test |
+| Electron crash under Xvfb | `--no-sandbox --disable-gpu` (NOT `--in-process-gpu`) |
+| CDP `/json` empty / debug-port hang | Playwright-Electron launches over a CDP pipe |
+| bg service dies next tool call | `setsid ... & disown` (`start_detached`); re-run `up.sh` to recover |
+| `/mcp` 401 | the extension must send the seeded `X-API-KEY` header (`configure_goose.sh`) |
+| app iframe not found | assert only on an **app-returning** tool; the Settings app renders offline |
+
+## Files
+
+| File | Role |
+|---|---|
+| `lib.sh` | paths/ports + bounded-wait/`setsid` helpers |
+| `setup.sh` | one-time provisioning: build goose, Electron via mirror, pnpm install, dev bundle |
+| `seed.py` | create the e2e SQLite schema + one API key; prints the raw key |
+| `up.sh` / `down.sh` | idempotent stack bring-up / teardown |
+| `configure_goose.sh` | write Goose config for `mock`/`real`, wiring the `mymcp` extension at `/mcp` |
+| `mock_llm.py` | scenario-engine mock LLM (follows the plan, logs tool calls) |
+| `pw_scenario.mjs` | Playwright-Electron driver + rendered-iframe DOM assertion |
+| `mcp_probe.py` | assertion oracle - rendered iframe (`pw_result`) + tool round-trip (`toolcalls.jsonl`) |
+| `run_test.sh` / `run_all.sh` | drive + assert one / all scenarios |
+| `scenarios/settings_render.json` | scenario 1: LLM opens the Settings app; assert it renders |
+| `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings.subscribe` → assert the re-render |
+
+Also outside the skill: `tests/test_apps_e2e.py` (guarded pytest entry) and
+`.github/workflows/apps_e2e.yaml` (opt-in CI).

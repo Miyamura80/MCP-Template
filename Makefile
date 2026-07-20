@@ -169,6 +169,16 @@ mcp_conformance: check_uv ## Run MCPJam apps + protocol conformance against the 
 	@uv run python scripts/mcp_conformance.py
 	@echo "$(GREEN)✅ MCP conformance passed.$(RESET)"
 
+GOOSE_E2E := .agents/skills/goose-gui-e2e/scripts
+test_apps_e2e: ## L4 MCP-App e2e: drive the real Goose desktop GUI as an MCP client (needs one-time setup; NOT in make ci)
+	@test -x "$$HOME/goose-e2e/goose_src/target/debug/goose" || { \
+		echo "$(YELLOW)⚠️  Goose not built yet. Run once: bash $(GOOSE_E2E)/setup.sh$(RESET)"; \
+		echo "$(YELLOW)   (needs registry.npmmirror.com on the network allowlist; ~6-8 min)$(RESET)"; exit 1; }
+	@echo "$(YELLOW)🪿 Running Goose-GUI MCP-App e2e (real Electron host)...$(RESET)"
+	@bash $(GOOSE_E2E)/up.sh
+	@bash $(GOOSE_E2E)/run_all.sh
+	@echo "$(GREEN)✅ MCP-App e2e passed.$(RESET)"
+
 gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page tool-surface JSON
 	@echo "$(YELLOW)🛠  Exporting tool surface...$(RESET)"
 	@uv run python scripts/export_tool_surface.py
