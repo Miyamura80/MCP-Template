@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowCounterClockwise,
   EnvelopeOpen,
@@ -15,6 +15,7 @@ import {
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { sanitizeHtml } from "./sanitize";
+import { blockRemoteImages, restoreRemoteImages } from "./remoteImages";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
@@ -1307,7 +1308,10 @@ function InlineComposer({
         <div style={{ color: "#5f6368", fontSize: 13, padding: "8px 0" }}>Loading conversation…</div>
       )}
       {sentMessages.length > 0 && (
-        <ComposerThreadPanel thread={{ ...effectiveThread!, messages: sentMessages }} />
+        <ComposerThreadPanel
+          thread={{ ...effectiveThread!, messages: sentMessages }}
+          mcpApp={mcpApp}
+        />
       )}
 
       {pendingAgent && (
@@ -1475,17 +1479,17 @@ function InlineComposer({
   );
 }
 
-function ComposerThreadPanel({ thread }: { thread: Thread }) {
+function ComposerThreadPanel({ thread, mcpApp }: { thread: Thread; mcpApp: McpAppLike }) {
   return (
     <div style={composerThreadPanelStyle}>
       {thread.messages.map((m, i) => (
-        <ComposerThreadMsg key={m.message_id} message={m} defaultExpanded={i === thread.messages.length - 1} />
+        <ComposerThreadMsg key={m.message_id} message={m} mcpApp={mcpApp} defaultExpanded={i === thread.messages.length - 1} />
       ))}
     </div>
   );
 }
 
-function ComposerThreadMsg({ message, defaultExpanded }: { message: ThreadMessage; defaultExpanded: boolean }) {
+function ComposerThreadMsg({ message, mcpApp, defaultExpanded }: { message: ThreadMessage; mcpApp: McpAppLike; defaultExpanded: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   if (!expanded) {
@@ -1513,28 +1517,22 @@ function ComposerThreadMsg({ message, defaultExpanded }: { message: ThreadMessag
         </div>
         <span style={{ fontSize: 12, color: "#5f6368" }}>{relativeTime(message.date)}</span>
       </div>
-      <ComposerMsgBody message={message} />
+      <ComposerMsgBody message={message} mcpApp={mcpApp} />
     </div>
   );
 }
 
-function ComposerMsgBody({ message }: { message: ThreadMessage }) {
+function ComposerMsgBody({ message, mcpApp }: { message: ThreadMessage; mcpApp: McpAppLike }) {
   const [showQuoted, setShowQuoted] = useState(false);
 
   if (message.body_html) {
-    const { main, quoted } = splitHtmlAtQuote(message.body_html);
     return (
-      <div>
-        <div style={composerBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }} />
-        {quoted && (
-          <>
-            <button onClick={() => setShowQuoted((v) => !v)} style={composerQuoteToggle}>&bull;&bull;&bull;</button>
-            {showQuoted && (
-              <div style={{ ...composerBodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }} />
-            )}
-          </>
-        )}
-      </div>
+      <HtmlEmailBody
+        html={message.body_html}
+        mcpApp={mcpApp}
+        htmlStyle={composerBodyHtmlStyle}
+        quoteToggleStyle={composerQuoteToggle}
+      />
     );
   }
   if (message.body_text) {
@@ -1806,6 +1804,126 @@ function MessageView({
   );
 }
 
+// Cap per-message proxy fetches so a pathological newsletter can't fan out
+// into hundreds of gmail_inbox.fetch_image calls.
+const MAX_REMOTE_IMAGES = 20;
+
+// Renders sanitized email HTML with remote images blocked by default and a
+// Gmail-style "Show images" action. Strict-CSP hosts (claude.ai) block
+// remote img-src inside the app iframe anyway, so on user request the images
+// are fetched server-side (gmail_inbox.fetch_image) and swapped in as data:
+// URIs - which also keeps tracking pixels from firing without user intent on
+// lax hosts. Owns the quoted-reply toggle for the HTML branch.
+function HtmlEmailBody({
+  html,
+  mcpApp,
+  htmlStyle,
+  quoteToggleStyle: toggleStyle,
+  onClick,
+}: {
+  html: string;
+  mcpApp: McpAppLike;
+  htmlStyle: React.CSSProperties;
+  quoteToggleStyle: React.CSSProperties;
+  onClick?: (e: React.MouseEvent<HTMLElement>) => void;
+}) {
+  const [showQuoted, setShowQuoted] = useState(false);
+  // null = still blocked; a Map (possibly with misses) = user asked to show.
+  const [resolved, setResolved] = useState<Map<string, string> | null>(null);
+  const [loadingImages, setLoadingImages] = useState(false);
+
+  const { main, quoted } = useMemo(() => splitHtmlAtQuote(html), [html]);
+  const mainBlocked = useMemo(() => blockRemoteImages(sanitizeHtml(main)), [main]);
+  const quotedBlocked = useMemo(
+    () => (quoted ? blockRemoteImages(sanitizeHtml(quoted)) : null),
+    [quoted],
+  );
+  const remoteUrls = useMemo(
+    () => [...new Set([...mainBlocked.remoteUrls, ...(quotedBlocked?.remoteUrls ?? [])])],
+    [mainBlocked, quotedBlocked],
+  );
+
+  useEffect(() => {
+    setResolved(null);
+  }, [html]);
+
+  const showImages = async () => {
+    setLoadingImages(true);
+    const entries = await Promise.all(
+      remoteUrls.slice(0, MAX_REMOTE_IMAGES).map(async (url): Promise<[string, string] | null> => {
+        try {
+          const raw = await mcpApp.callServerTool({
+            name: "gmail_inbox.fetch_image",
+            arguments: { url },
+          });
+          const parsed = extractStructuredContent<{
+            mime_type?: string;
+            data_base64?: string;
+          }>(raw);
+          if (parsed?.data_base64 && parsed.mime_type?.startsWith("image/")) {
+            return [url, `data:${parsed.mime_type};base64,${parsed.data_base64}`];
+          }
+        } catch {
+          // Per-image best effort: failures keep their placeholder.
+        }
+        return null;
+      }),
+    );
+    setResolved(new Map(entries.filter((e): e is [string, string] => e !== null)));
+    setLoadingImages(false);
+  };
+
+  const mainHtml = resolved ? restoreRemoteImages(mainBlocked.html, resolved) : mainBlocked.html;
+  const quotedHtml = quotedBlocked
+    ? resolved
+      ? restoreRemoteImages(quotedBlocked.html, resolved)
+      : quotedBlocked.html
+    : null;
+
+  return (
+    <div>
+      {remoteUrls.length > 0 && resolved === null && (
+        <div style={showImagesBannerStyle} data-testid="show-images-banner">
+          <span>
+            Remote images are hidden ({remoteUrls.length}).
+          </span>
+          <button
+            onClick={showImages}
+            style={showImagesBtnStyle}
+            disabled={loadingImages}
+            data-testid="show-images-btn"
+          >
+            {loadingImages ? "Loading…" : "Show images"}
+          </button>
+        </div>
+      )}
+      <div
+        style={htmlStyle}
+        dangerouslySetInnerHTML={{ __html: mainHtml }}
+        onClick={onClick}
+      />
+      {quotedHtml !== null && (
+        <>
+          <button
+            onClick={() => setShowQuoted((v) => !v)}
+            style={toggleStyle}
+            title={showQuoted ? "Hide quoted text" : "Show quoted text"}
+          >
+            •••
+          </button>
+          {showQuoted && (
+            <div
+              style={{ ...htmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 10, marginTop: 4 }}
+              dangerouslySetInnerHTML={{ __html: quotedHtml }}
+              onClick={onClick}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function MessageBody({
   message,
   mcpApp,
@@ -1832,33 +1950,14 @@ function MessageBody({
   };
 
   if (message.body_html) {
-    const { main, quoted } = splitHtmlAtQuote(message.body_html);
     return (
-      <div>
-        <div
-          style={bodyHtmlStyle}
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }}
-          onClick={handleLinkClick}
-        />
-        {quoted && (
-          <>
-            <button
-              onClick={() => setShowQuoted((v) => !v)}
-              style={quoteToggleStyle}
-              title={showQuoted ? "Hide quoted text" : "Show quoted text"}
-            >
-              •••
-            </button>
-            {showQuoted && (
-              <div
-                style={{ ...bodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 10, marginTop: 4 }}
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }}
-                onClick={handleLinkClick}
-              />
-            )}
-          </>
-        )}
-      </div>
+      <HtmlEmailBody
+        html={message.body_html}
+        mcpApp={mcpApp}
+        htmlStyle={bodyHtmlStyle}
+        quoteToggleStyle={quoteToggleStyle}
+        onClick={handleLinkClick}
+      />
     );
   }
   if (message.body_text) {
@@ -2431,6 +2530,32 @@ const bodyTextStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
   color: "#222",
+};
+
+const showImagesBannerStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  padding: "6px 10px",
+  marginBottom: 8,
+  background: "#f8f9fa",
+  border: "1px solid #ebebeb",
+  borderRadius: 6,
+  fontSize: 12,
+  color: "#5f6368",
+};
+
+const showImagesBtnStyle: React.CSSProperties = {
+  border: "1px solid #dadce0",
+  borderRadius: 4,
+  background: "#fff",
+  padding: "3px 10px",
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#1a73e8",
+  cursor: "pointer",
+  flexShrink: 0,
 };
 
 const bodyHtmlStyle: React.CSSProperties = {
