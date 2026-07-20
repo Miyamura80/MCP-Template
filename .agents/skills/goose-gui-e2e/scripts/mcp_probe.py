@@ -75,9 +75,21 @@ def assert_scenario(scenario_path: str, before: int = 0) -> int:
             f"matched={pw.get('matched')} missing={pw.get('missing')} frames={pw.get('frames')}"
         )
 
+    # --- scenario 2: user-initiated click -> callServerTool -> re-render ---
+    # The iframe's callServerTool bypasses the mock LLM, so this round-trip cannot
+    # show up in the tool-call log; the re-rendered DOM is the only proof, and only
+    # the server's real response can produce it.
+    if exp.get("interaction_rendered") and not pw.get("interacted"):
+        fails.append(
+            f"expected in-iframe interaction to re-render; pw interacted={pw.get('interacted')} "
+            f"matched={pw.get('interact_matched')} missing={pw.get('interact_missing')}"
+        )
+
     print(
         f"scenario {name}: tool_calls={[c.get('tool') for c in calls]} result_returned={got_result} "
-        f"app_rendered={pw.get('rendered')} matched={pw.get('matched')} app={pw.get('app_uri')}"
+        f"app_rendered={pw.get('rendered')} matched={pw.get('matched')} "
+        f"interacted={pw.get('interacted')} interact_matched={pw.get('interact_matched')} "
+        f"app={pw.get('app_uri')}"
     )
     if fails:
         for f in fails:

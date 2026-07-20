@@ -203,6 +203,7 @@ exclude = [
     "tests/test_inbox_curation.py",
     "tests/test_mcp_oauth.py",
     "tests/test_mcp_e2e.py",
+    "tests/test_apps_e2e.py",
 ]
 
 [tool.file_length]

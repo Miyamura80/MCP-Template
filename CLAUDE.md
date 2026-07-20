@@ -228,9 +228,12 @@ See `mcp_server/MCP_UI_ARCHITECTURE.md` for design rationale and
   `ext-apps` `App` surface against the `McpAppLike` mock type.
 - **Rendered-iframe tier (L4, #37):** `make test_apps_e2e` drives the **real
   Goose desktop GUI** (Electron) as an MCP client and asserts the `ui://` app
-  actually renders + round-trips in a real host. One-time build + how it works:
-  `.agents/skills/goose-gui-e2e/SKILL.md`. Heavy (Goose + Electron); **not** in
-  `make ci`.
+  actually renders + round-trips in a real host - including a click →
+  `callServerTool` → re-render scenario. Also wired as a skipped-by-default pytest
+  entry (`tests/test_apps_e2e.py`, opt in with `RUN_APPS_E2E=1`) and an opt-in CI
+  workflow (`.github/workflows/apps_e2e.yaml`, `workflow_dispatch` + weekly). Build
+  + rationale: `.agents/skills/goose-gui-e2e/SKILL.md`. Heavy (Goose + Electron);
+  **not** in `make ci`.
 
 ## Subagents
 

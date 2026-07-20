@@ -48,6 +48,19 @@ bash down.sh                 # stop test services  (down.sh --reset also drops t
 screenshot of the real Goose GUI (with the Settings app rendered) to
 `$E2E_HOME/shot_<scenario>.png`.
 
+## Where this runs in the suite
+
+Heavy tier - **not** in `make ci` (which stays Node/Rust/Electron-free):
+
+- **Local / make:** `make test_apps_e2e` (after the one-time `setup.sh`).
+- **Full pytest suite:** `tests/test_apps_e2e.py` is a collectable member, **skipped
+  by default**; opt in with `RUN_APPS_E2E=1` (e.g. `RUN_APPS_E2E=1 uv run pytest
+  tests/test_apps_e2e.py --no-cov`). It shells out to `up.sh` + `run_all.sh`.
+  (`--no-cov` keeps a single-file run from tripping `pytest.ini`'s coverage gate.)
+- **CI:** `.github/workflows/apps_e2e.yaml` - `workflow_dispatch` + weekly cron. It
+  builds Goose via `setup.sh` (open egress, so the npmmirror preconditions below
+  don't apply on GitHub runners) and runs the guarded pytest entry.
+
 ## Preconditions (verify before setup)
 
 - **npmmirror on the network allowlist.** Electron's binary is fetched from a
@@ -85,6 +98,30 @@ A scenario is JSON in `scripts/scenarios/<name>.json`:
   gmail_inbox / gmail_composer apps need a linked Google account).
 - `expect` - checked by `mcp_probe.py`: `tool_called` + `round_trip` (from the
   tool-call log) and `app_rendered` + `dom_contains` (from the rendered iframe).
+
+### Optional: a click → `callServerTool` → re-render step
+
+A scenario may add an `interact` block to drive a real control **inside** the app
+iframe after it renders, exercising a **user-initiated** server round-trip (the
+`settings_subscribe` fixture does this - clicks "Add endpoint" → `settings.subscribe`):
+
+```json
+"expect": { "...": "...", "interaction_rendered": true },
+"interact": {
+  "fill":  { "selector": "input[type=url]", "value": "https://webhook.example.com/e2e" },
+  "click": { "text": "Add endpoint" },
+  "expect_dom_contains": ["Signing secret", "webhook.example.com"]
+}
+```
+
+The iframe's `callServerTool` goes **app → Goose → `/mcp` directly, bypassing the
+mock LLM**, so this round-trip never appears in the tool-call log - the re-rendered
+DOM (`expect_dom_contains`, here the returned signing secret) is the only proof,
+and only the server's real response can produce it. `interaction_rendered: true`
+makes `mcp_probe.py` require it, and `pw_scenario.mjs` fails the drive if the
+post-click DOM never matches. This needs the "Add endpoint" control, which renders
+only when `push_available` is true - `up.sh` sets `GMAIL_PUBSUB_TOPIC` to ungate it
+(no Pub/Sub is ever contacted).
 
 ## Why the mock cannot fake a PASS
 
@@ -138,4 +175,8 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | `pw_scenario.mjs` | Playwright-Electron driver + rendered-iframe DOM assertion |
 | `mcp_probe.py` | assertion oracle - rendered iframe (`pw_result`) + tool round-trip (`toolcalls.jsonl`) |
 | `run_test.sh` / `run_all.sh` | drive + assert one / all scenarios |
-| `scenarios/*.json` | scenario fixtures |
+| `scenarios/settings_render.json` | scenario 1: LLM opens the Settings app; assert it renders |
+| `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings.subscribe` → assert the re-render |
+
+Also outside the skill: `tests/test_apps_e2e.py` (guarded pytest entry) and
+`.github/workflows/apps_e2e.yaml` (opt-in CI).

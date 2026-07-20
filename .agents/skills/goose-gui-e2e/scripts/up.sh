@@ -18,10 +18,14 @@ API_KEY="$(cat "$API_KEY_FILE")"; export API_KEY
 log "API key: ${API_KEY:0:12}..."
 
 # 2) template server (FastAPI + FastMCP /mcp mount). SQLite persists on disk.
+# GMAIL_PUBSUB_TOPIC is a real config field (common/global_config.py) - setting it
+# flips push_available true so the Settings app renders its "Add endpoint" control,
+# which the settings_subscribe scenario clicks. No Pub/Sub is ever contacted (there
+# is no connected Gmail account); it only ungates the webhook UI.
 if ! is_up_http "$SRV_URL/health"; then
   log "template server down -> starting mymcp-serve"
   start_detached mcp-server \
-    "cd $REPO && exec env DEV_ENV=dev BACKEND_DB_URI=$BACKEND_DB_URI SENTRY_DSN= uv run mymcp-serve"
+    "cd $REPO && exec env DEV_ENV=dev BACKEND_DB_URI=$BACKEND_DB_URI SENTRY_DSN= GMAIL_PUBSUB_TOPIC=projects/mcp-e2e/topics/gmail-e2e uv run mymcp-serve"
   wait_http "$SRV_URL/health" 90 1 && log "server healthy" || { log "FATAL server"; tail -12 "$E2E_HOME/mcp-server.log"; exit 1; }
 fi
 

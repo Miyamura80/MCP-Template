@@ -50,7 +50,15 @@ const env = {
   NODE_ENV: "development", GOOSE_TUNNEL: "no",
 };
 
-const result = { scenario: name, rendered: false, matched: [], missing: want, app_uri: sc.app_uri || null, frames: 0 };
+const interact = sc.interact || null;
+const wantI = (interact && interact.expect_dom_contains) || [];
+const result = {
+  scenario: name, rendered: false, matched: [], missing: want, app_uri: sc.app_uri || null, frames: 0,
+  // Second-scenario (click -> callServerTool -> re-render) fields. `interacted` is
+  // the proof of a USER-initiated round-trip: the iframe called /mcp directly
+  // (bypassing the mock LLM) and the returned data re-rendered into the DOM.
+  interacted: interact ? false : null, interact_matched: [], interact_missing: wantI,
+};
 const writeResult = () => writeFileSync(resultPath, JSON.stringify(result, null, 2));
 
 // Scan every frame of every Goose window for the app iframe. The MCP App renders
@@ -118,6 +126,37 @@ try {
     // Screenshot the app iframe's owning window so the shot shows the rendered app.
     const ownWin = app.windows().find((w) => w.frames().includes(frame)) || win;
     if (shot) { await ownWin.screenshot({ path: shot }); log("screenshot ->", shot); }
+
+    // --- optional in-iframe interaction (scenario 2: click -> re-render) ---
+    // Drive a real control INSIDE the sandboxed app iframe, then assert the DOM
+    // that only the server's response can produce. The iframe's callServerTool
+    // goes app -> Goose -> /mcp directly (NOT through the mock LLM), so a matched
+    // re-render is proof of a genuine user-initiated round-trip - unfakeable here.
+    if (result.rendered && interact) {
+      try {
+        if (interact.fill)
+          await frame.locator(interact.fill.selector).first().fill(interact.fill.value, { timeout: 6000 });
+        if (interact.click) {
+          const btn = interact.click.selector
+            ? frame.locator(interact.click.selector).first()
+            : frame.getByText(interact.click.text, { exact: false }).first();
+          await btn.click({ timeout: 6000 });
+        }
+        let ibody = "";
+        for (let i = 0; i < 30 && result.interact_missing.length; i++) {
+          ibody = await frame.locator("body").innerText({ timeout: 2000 }).catch(() => "");
+          result.interact_matched = wantI.filter((t) => ibody.includes(t));
+          result.interact_missing = wantI.filter((t) => !ibody.includes(t));
+          if (!result.interact_missing.length) break;
+          await win.waitForTimeout(700);
+        }
+        result.interacted = wantI.length > 0 && result.interact_missing.length === 0;
+        log(`interaction: matched [${result.interact_matched}] missing [${result.interact_missing}]`);
+        if (shot) { await ownWin.screenshot({ path: shot }); } // reshoot the post-interaction DOM
+      } catch (e) {
+        log("interaction ERROR", e.message.split("\n")[0]);
+      }
+    }
   } else {
     log("app iframe NOT found in any window/frame; dumping frame tree:");
     for (const w of app.windows()) {
@@ -131,8 +170,13 @@ try {
   }
 
   writeResult();
-  ok = result.rendered;
-  console.log(ok ? "DRIVE: OK (app rendered)" : "DRIVE: FAIL (app not rendered / DOM mismatch)");
+  ok = result.rendered && (!interact || result.interacted);
+  const why = !result.rendered
+    ? "app not rendered / DOM mismatch"
+    : interact && !result.interacted
+      ? "interaction did not re-render"
+      : interact ? "app rendered + interaction re-rendered" : "app rendered";
+  console.log(ok ? `DRIVE: OK (${why})` : `DRIVE: FAIL (${why})`);
 } catch (e) {
   console.log("DRIVE: ERROR", e.message.split("\n")[0]);
   writeResult();
