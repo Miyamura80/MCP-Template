@@ -33,6 +33,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import socket
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -41,7 +42,11 @@ from models.gmail import GmailFetchImageResult
 
 _MAX_IMAGE_BYTES = 2 * 1024 * 1024  # cap per image; emails shouldn't need more
 _MAX_REDIRECTS = 3
-_TIMEOUT_SECONDS = 10.0
+_TIMEOUT_SECONDS = 10.0  # per network operation (httpx timeout)
+# Wall-clock ceiling across all redirect hops: the frontend fires up to 20 of
+# these in parallel per click, so one slow-loris chain must not hold a slot
+# for _MAX_REDIRECTS * _TIMEOUT_SECONDS.
+_TOTAL_DEADLINE_SECONDS = 20.0
 
 
 class ImageFetchError(ValueError):
@@ -56,8 +61,11 @@ def _assert_public_host(url: str) -> None:
     host = parsed.hostname
     if not host:
         raise ImageFetchError("URL has no host")
+    default_port = 80 if parsed.scheme == "http" else 443
     try:
-        infos = socket.getaddrinfo(host, parsed.port or 443, proto=socket.IPPROTO_TCP)
+        infos = socket.getaddrinfo(
+            host, parsed.port or default_port, proto=socket.IPPROTO_TCP
+        )
     except socket.gaierror as exc:
         raise ImageFetchError(f"cannot resolve host {host!r}") from exc
     for info in infos:
@@ -73,15 +81,17 @@ def fetch_remote_image(url: str) -> GmailFetchImageResult:
     address, non-image response, oversize body, network failure).
     """
     current = url
+    deadline = time.monotonic() + _TOTAL_DEADLINE_SECONDS
     with httpx.Client(timeout=_TIMEOUT_SECONDS, follow_redirects=False) as client:
         for _ in range(_MAX_REDIRECTS + 1):
+            if time.monotonic() > deadline:
+                raise ImageFetchError("image fetch deadline exceeded")
             _assert_public_host(current)
             try:
                 with client.stream("GET", current) as resp:
                     if resp.is_redirect:
-                        location = resp.headers.get("location")
-                        if not location:
-                            raise ImageFetchError("redirect without Location header")
+                        # is_redirect implies a Location header exists.
+                        location = resp.headers["location"]
                         current = str(httpx.URL(current).join(location))
                         continue
                     if resp.status_code != 200:

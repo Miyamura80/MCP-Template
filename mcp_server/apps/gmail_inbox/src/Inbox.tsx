@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowCounterClockwise,
   EnvelopeOpen,
@@ -14,8 +14,8 @@ import {
 } from "@phosphor-icons/react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { sanitizeHtml } from "./sanitize";
-import { blockRemoteImages, restoreRemoteImages } from "./remoteImages";
+import { HtmlEmailBody } from "./HtmlEmailBody";
+import { extractStructuredContent } from "./mcpResult";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
@@ -980,18 +980,6 @@ function draftFieldsEqual(a: ComposerDraft, b: ComposerDraft): boolean {
   return a.to === b.to && a.cc === b.cc && a.bcc === b.bcc && a.subject === b.subject && a.body === b.body;
 }
 
-function splitHtmlAtQuote(html: string): { main: string; quoted: string | null } {
-  const markers = ['<div class="gmail_quote"', '<blockquote class="gmail_quote"', '<div class=3D"gmail_quote"'];
-  for (const marker of markers) {
-    const idx = html.indexOf(marker);
-    if (idx > 0) return { main: html.slice(0, idx), quoted: html.slice(idx) };
-  }
-  const onWroteRe = /(<br\s*\/?>[\s\S]{0,20}?On\s.{10,80}\s+wrote:\s*<br\s*\/?>)/i;
-  const m = onWroteRe.exec(html);
-  if (m && m.index > 50) return { main: html.slice(0, m.index), quoted: html.slice(m.index) };
-  return { main: html, quoted: null };
-}
-
 function splitTextAtQuote(text: string): { main: string; quoted: string | null } {
   const lines = text.split("\n");
   const onWroteRe = /^On .{10,80} wrote:\s*$/;
@@ -1804,126 +1792,6 @@ function MessageView({
   );
 }
 
-// Cap per-message proxy fetches so a pathological newsletter can't fan out
-// into hundreds of gmail_inbox.fetch_image calls.
-const MAX_REMOTE_IMAGES = 20;
-
-// Renders sanitized email HTML with remote images blocked by default and a
-// Gmail-style "Show images" action. Strict-CSP hosts (claude.ai) block
-// remote img-src inside the app iframe anyway, so on user request the images
-// are fetched server-side (gmail_inbox.fetch_image) and swapped in as data:
-// URIs - which also keeps tracking pixels from firing without user intent on
-// lax hosts. Owns the quoted-reply toggle for the HTML branch.
-function HtmlEmailBody({
-  html,
-  mcpApp,
-  htmlStyle,
-  quoteToggleStyle: toggleStyle,
-  onClick,
-}: {
-  html: string;
-  mcpApp: McpAppLike;
-  htmlStyle: React.CSSProperties;
-  quoteToggleStyle: React.CSSProperties;
-  onClick?: (e: React.MouseEvent<HTMLElement>) => void;
-}) {
-  const [showQuoted, setShowQuoted] = useState(false);
-  // null = still blocked; a Map (possibly with misses) = user asked to show.
-  const [resolved, setResolved] = useState<Map<string, string> | null>(null);
-  const [loadingImages, setLoadingImages] = useState(false);
-
-  const { main, quoted } = useMemo(() => splitHtmlAtQuote(html), [html]);
-  const mainBlocked = useMemo(() => blockRemoteImages(sanitizeHtml(main)), [main]);
-  const quotedBlocked = useMemo(
-    () => (quoted ? blockRemoteImages(sanitizeHtml(quoted)) : null),
-    [quoted],
-  );
-  const remoteUrls = useMemo(
-    () => [...new Set([...mainBlocked.remoteUrls, ...(quotedBlocked?.remoteUrls ?? [])])],
-    [mainBlocked, quotedBlocked],
-  );
-
-  useEffect(() => {
-    setResolved(null);
-  }, [html]);
-
-  const showImages = async () => {
-    setLoadingImages(true);
-    const entries = await Promise.all(
-      remoteUrls.slice(0, MAX_REMOTE_IMAGES).map(async (url): Promise<[string, string] | null> => {
-        try {
-          const raw = await mcpApp.callServerTool({
-            name: "gmail_inbox.fetch_image",
-            arguments: { url },
-          });
-          const parsed = extractStructuredContent<{
-            mime_type?: string;
-            data_base64?: string;
-          }>(raw);
-          if (parsed?.data_base64 && parsed.mime_type?.startsWith("image/")) {
-            return [url, `data:${parsed.mime_type};base64,${parsed.data_base64}`];
-          }
-        } catch {
-          // Per-image best effort: failures keep their placeholder.
-        }
-        return null;
-      }),
-    );
-    setResolved(new Map(entries.filter((e): e is [string, string] => e !== null)));
-    setLoadingImages(false);
-  };
-
-  const mainHtml = resolved ? restoreRemoteImages(mainBlocked.html, resolved) : mainBlocked.html;
-  const quotedHtml = quotedBlocked
-    ? resolved
-      ? restoreRemoteImages(quotedBlocked.html, resolved)
-      : quotedBlocked.html
-    : null;
-
-  return (
-    <div>
-      {remoteUrls.length > 0 && resolved === null && (
-        <div style={showImagesBannerStyle} data-testid="show-images-banner">
-          <span>
-            Remote images are hidden ({remoteUrls.length}).
-          </span>
-          <button
-            onClick={showImages}
-            style={showImagesBtnStyle}
-            disabled={loadingImages}
-            data-testid="show-images-btn"
-          >
-            {loadingImages ? "Loading…" : "Show images"}
-          </button>
-        </div>
-      )}
-      <div
-        style={htmlStyle}
-        dangerouslySetInnerHTML={{ __html: mainHtml }}
-        onClick={onClick}
-      />
-      {quotedHtml !== null && (
-        <>
-          <button
-            onClick={() => setShowQuoted((v) => !v)}
-            style={toggleStyle}
-            title={showQuoted ? "Hide quoted text" : "Show quoted text"}
-          >
-            •••
-          </button>
-          {showQuoted && (
-            <div
-              style={{ ...htmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 10, marginTop: 4 }}
-              dangerouslySetInnerHTML={{ __html: quotedHtml }}
-              onClick={onClick}
-            />
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
 function MessageBody({
   message,
   mcpApp,
@@ -2040,25 +1908,6 @@ function DraftCard({ draft, onEdit, onPreview }: { draft: Draft; onEdit?: () => 
       )}
     </article>
   );
-}
-
-function extractStructuredContent<T>(raw: unknown): T | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  if (obj.structuredContent && typeof obj.structuredContent === "object") {
-    return obj.structuredContent as T;
-  }
-  if (Array.isArray(obj.content)) {
-    for (const item of obj.content) {
-      if (item && typeof item === "object" && "text" in (item as Record<string, unknown>)) {
-        try {
-          const parsed = JSON.parse((item as { text: string }).text);
-          if (parsed && typeof parsed === "object") return parsed as T;
-        } catch { /* not JSON text content */ }
-      }
-    }
-  }
-  return null;
 }
 
 function errMsg(err: unknown): string {
@@ -2530,32 +2379,6 @@ const bodyTextStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
   color: "#222",
-};
-
-const showImagesBannerStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 8,
-  padding: "6px 10px",
-  marginBottom: 8,
-  background: "#f8f9fa",
-  border: "1px solid #ebebeb",
-  borderRadius: 6,
-  fontSize: 12,
-  color: "#5f6368",
-};
-
-const showImagesBtnStyle: React.CSSProperties = {
-  border: "1px solid #dadce0",
-  borderRadius: 4,
-  background: "#fff",
-  padding: "3px 10px",
-  fontSize: 12,
-  fontWeight: 600,
-  color: "#1a73e8",
-  cursor: "pointer",
-  flexShrink: 0,
 };
 
 const bodyHtmlStyle: React.CSSProperties = {
