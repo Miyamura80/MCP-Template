@@ -4,6 +4,10 @@ import type { Draft, DraftAttachment, Thread } from "./types";
 // `structuredContent`, else parse a JSON `TextContent` item. Returns null when
 // neither is present - never the raw envelope - so a malformed result can't
 // masquerade as a draft/thread and content-only JSON results aren't dropped.
+//
+// Keep in sync with gmail_inbox/src/helpers.ts:extractStructuredContent - the
+// apps are isolated bun packages and can't share this; #170 tracks folding the
+// per-app boilerplate into a shared source once that's designed.
 export function extractStructuredContent<T>(raw: unknown): T | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
