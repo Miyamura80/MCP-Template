@@ -93,11 +93,28 @@ A scenario is JSON in `scripts/scenarios/<name>.json`:
 - `prompt` - the user message typed into Goose.
 - `plan` - the tool-call sequence the **mock** emits. `match` is a substring of
   the tool name Goose offers (Goose may namespace extension tools, so substring
-  not exact). Pick an **app-returning** tool: `webhook_settings` → `ui://mymcp/settings`
-  is the shipped fixture because it renders offline with zero external deps (the
-  gmail_inbox / gmail_composer apps need a linked Google account).
+  not exact). A plan step may carry `"args"` (e.g. `{"match": "gmail_get_thread",
+  "args": {"thread_id": "t-1001"}}`) which the mock passes through as the tool
+  call's arguments. Pick an **app-returning** tool: `webhook_settings` →
+  `ui://mymcp/settings` renders offline with zero external deps, and
+  `gmail_get_thread` → `ui://mymcp/gmail_inbox` renders offline **because the
+  stack sets `GMAIL_FAKE_BACKEND=1`** (see below).
 - `expect` - checked by `mcp_probe.py`: `tool_called` + `round_trip` (from the
   tool-call log) and `app_rendered` + `dom_contains` (from the rendered iframe).
+
+### Rendering the Gmail apps offline (`GMAIL_FAKE_BACKEND`)
+
+The `gmail_inbox` / `gmail_composer` apps normally need a linked Google account:
+`gmail_get_thread` → `_get_gmail_client()` raises `GmailNotConnectedError`
+(`ConnectRequiredError`) with no token row, so the tool errors **before**
+`send_app` and the iframe never mounts. To render them offline, `up.sh` starts
+the server with `GMAIL_FAKE_BACKEND=1`, which makes `_get_gmail_client` return a
+fixture-serving fake (`services/_gmail_fake_backend.py`) instead of hitting
+Google - no linked account, OAuth, or network. The fixtures are raw-Gmail-API
+shaped, so the *real* service parsing → Pydantic `GmailThread` runs end-to-end;
+only the network boundary is faked. The flag is **hard-refused under
+`DEV_ENV=prod`** (guard in `services.gmail_svc._maybe_fake_gmail_client`), so it
+can never stand in for a real mailbox in production.
 
 ### Optional: a click → `callServerTool` → re-render step
 
@@ -177,6 +194,7 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | `run_test.sh` / `run_all.sh` | drive + assert one / all scenarios |
 | `scenarios/settings_render.json` | scenario 1: LLM opens the Settings app; assert it renders |
 | `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings.subscribe` → assert the re-render |
+| `scenarios/gmail_thread_render.json` | scenario 3: LLM opens a thread via `gmail_get_thread`; assert the gmail_inbox reader iframe renders (needs `GMAIL_FAKE_BACKEND`) |
 
 Also outside the skill: `tests/test_apps_e2e.py` (guarded pytest entry) and
 `.github/workflows/apps_e2e.yaml` (opt-in CI).

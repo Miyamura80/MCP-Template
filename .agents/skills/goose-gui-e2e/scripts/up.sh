@@ -22,10 +22,14 @@ log "API key: ${API_KEY:0:12}..."
 # flips push_available true so the Settings app renders its "Add endpoint" control,
 # which the settings_subscribe scenario clicks. No Pub/Sub is ever contacted (there
 # is no connected Gmail account); it only ungates the webhook UI.
+# GMAIL_FAKE_BACKEND=1 makes _get_gmail_client serve fixture threads instead of
+# hitting Google, so the gmail_thread_render scenario can render the reader iframe
+# with no linked account / OAuth / network. Hard-refused under DEV_ENV=prod; here
+# DEV_ENV=dev so it's active. No Gmail tool ever reaches Google in this stack.
 if ! is_up_http "$SRV_URL/health"; then
   log "template server down -> starting mymcp-serve"
   start_detached mcp-server \
-    "cd $REPO && exec env DEV_ENV=dev BACKEND_DB_URI=$BACKEND_DB_URI SENTRY_DSN= GMAIL_PUBSUB_TOPIC=projects/mcp-e2e/topics/gmail-e2e uv run mymcp-serve"
+    "cd $REPO && exec env DEV_ENV=dev BACKEND_DB_URI=$BACKEND_DB_URI SENTRY_DSN= GMAIL_PUBSUB_TOPIC=projects/mcp-e2e/topics/gmail-e2e GMAIL_FAKE_BACKEND=1 uv run mymcp-serve"
   wait_http "$SRV_URL/health" 90 1 && log "server healthy" || { log "FATAL server"; tail -12 "$E2E_HOME/mcp-server.log"; exit 1; }
 fi
 
