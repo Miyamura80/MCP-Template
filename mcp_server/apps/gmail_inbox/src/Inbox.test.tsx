@@ -6,6 +6,7 @@ import {
   type CuratedThread,
   type Thread,
 } from "./Inbox";
+import { bufferToolResults } from "./helpers";
 
 function makeMcpApp(opts?: {
   threadResults?: Record<string, Thread>;
@@ -168,6 +169,23 @@ describe("Inbox", () => {
     });
     expect(await screen.findByTestId("msg-m1")).toBeInTheDocument();
     expect(screen.getByText(/Hello world plain body/)).toBeInTheDocument();
+  });
+
+  it("renders the thread reader from a result buffered before mount (no inbox fallback)", async () => {
+    const { app, calls } = makeMcpApp({ threadResults: { tA: plainThread } });
+    const buffer = bufferToolResults(app);
+    // Host delivers the thread result BEFORE <Inbox> mounts (the race).
+    app.ontoolresult?.({ structuredContent: plainThread });
+    render(<Inbox mcpApp={app} resultBuffer={buffer} />);
+    // The buffered result is drained on mount -> reader renders the thread, not
+    // the curated inbox.
+    expect(await screen.findByTestId("msg-m1")).toBeInTheDocument();
+    expect(screen.getByText(/Hello world plain body/)).toBeInTheDocument();
+    // The 800ms curated-inbox fallback must NOT fire, since the result arrived.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(
+      calls.some((c) => c.name === "gmail_inbox.refresh")
+    ).toBe(false);
   });
 
   it("renders HTML body when no plaintext is provided", async () => {

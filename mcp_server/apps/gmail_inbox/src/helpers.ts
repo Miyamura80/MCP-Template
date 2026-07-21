@@ -6,7 +6,46 @@ import type {
   ExistingAttachment,
   FileAttachment,
   LabelChip,
+  McpAppLike,
 } from "./types";
+
+export type ToolResultBuffer = {
+  /**
+   * Take over live `ontoolresult` delivery with `handler`, first replaying (oldest
+   * first) any results the host delivered before this call.
+   */
+  drainInto: (handler: (raw: unknown) => void) => void;
+};
+
+/**
+ * Capture `ontoolresult` deliveries from the earliest possible moment.
+ *
+ * The host can deliver the initiating tool result before the React component's
+ * mount effect runs and assigns its `ontoolresult` handler; that result would
+ * otherwise be lost, and for a thread-open the app would fall back to a curated-
+ * inbox refresh instead of showing the requested thread. Installing this buffer
+ * in the entry point (before `connect()`/render) means the result is captured no
+ * matter when it arrives; the component then calls `drainInto(handler)` on mount
+ * to replay it through its real handler and take over live delivery.
+ *
+ * Replay-then-assign is gapless: there is no `await` between the two, so no
+ * postMessage-driven `ontoolresult` can interleave and be dropped.
+ */
+export function bufferToolResults(
+  app: Pick<McpAppLike, "ontoolresult">,
+): ToolResultBuffer {
+  const pending: unknown[] = [];
+  app.ontoolresult = (raw) => {
+    pending.push(raw);
+  };
+  return {
+    drainInto(handler) {
+      const buffered = pending.splice(0, pending.length);
+      for (const raw of buffered) handler(raw);
+      app.ontoolresult = handler;
+    },
+  };
+}
 
 const BUCKET_CHIP: Record<string, LabelChip> = {
   needs_reply: { name: "Needs reply", bg_color: "#fce8e6", text_color: "#c5221f" },
