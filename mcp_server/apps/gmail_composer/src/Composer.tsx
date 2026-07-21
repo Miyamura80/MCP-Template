@@ -7,7 +7,7 @@ import type {
   SentState,
   Thread,
 } from "./types";
-import { draftFields, extractDraft, extractThread, fieldsEqual } from "./draft";
+import { draftFields, extractDraft, extractStructuredContent, extractThread, fieldsEqual } from "./draft";
 import { discardContextText, sentContextText } from "./modelContext";
 import { useAutoGrow, useIsMobile } from "./hooks";
 import { ThreadPanel } from "./ThreadPanel";
@@ -221,9 +221,8 @@ export function Composer({ mcpApp }: ComposerProps) {
           arguments: { draft_id: cur.draft_id, ...draftFields(cur) },
         });
       });
-      const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
-      const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
-      const messageId = (inner as { message_id?: string })?.message_id ?? "";
+      const inner = extractStructuredContent<{ message_id?: string }>(raw);
+      const messageId = inner?.message_id ?? "";
       setSent({ message_id: messageId });
       const cur = draftRef.current;
       if (cur) void pushModelContext(sentContextText(cur, messageId));

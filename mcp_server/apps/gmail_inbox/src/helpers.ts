@@ -82,10 +82,8 @@ export function curationToThreads(records: CurationRecord[]): CuratedThread[] {
 }
 
 export function extractDraft(raw: unknown): ComposerDraft | null {
-  if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
-  if (!data || typeof data !== "object") return null;
+  const data = extractStructuredContent<Record<string, unknown>>(raw);
+  if (!data) return null;
   const draftId = data["draft_id"];
   if (typeof draftId !== "string") return null;
   return {
@@ -132,6 +130,14 @@ export function splitTextAtQuote(text: string): { main: string; quoted: string |
   return { main: text, quoted: null };
 }
 
+// Unwrap an MCP CallToolResult to its structured payload: prefer
+// `structuredContent`, else parse a JSON `TextContent` item. Returns null when
+// neither is present - never the raw envelope - so a malformed result can't
+// masquerade as a draft/thread and content-only JSON results aren't dropped.
+//
+// Keep in sync with gmail_composer/src/draft.ts:extractStructuredContent - the
+// apps are isolated bun packages and can't share this; #170 tracks folding the
+// per-app boilerplate into a shared source once that's designed.
 export function extractStructuredContent<T>(raw: unknown): T | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
@@ -140,12 +146,16 @@ export function extractStructuredContent<T>(raw: unknown): T | null {
   }
   if (Array.isArray(obj.content)) {
     for (const item of obj.content) {
-      if (item && typeof item === "object" && "text" in (item as Record<string, unknown>)) {
-        try {
-          const parsed = JSON.parse((item as { text: string }).text);
-          if (parsed && typeof parsed === "object") return parsed as T;
-        } catch { /* not JSON text content */ }
-      }
+      if (!item || typeof item !== "object") continue;
+      // Only a real MCP TextContent block qualifies: a `type: "text"`
+      // discriminator with a string `text`. Without this an image/resource/other
+      // block that happens to carry a `text` field could smuggle JSON through.
+      const candidate = item as { type?: unknown; text?: unknown };
+      if (candidate.type !== "text" || typeof candidate.text !== "string") continue;
+      try {
+        const parsed = JSON.parse(candidate.text);
+        if (parsed && typeof parsed === "object") return parsed as T;
+      } catch { /* not JSON text content */ }
     }
   }
   return null;
