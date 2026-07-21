@@ -13,6 +13,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 from collections.abc import Generator
@@ -41,6 +42,7 @@ from models.gmail import (
     InlineImageUpload,
 )
 from services import ConnectRequiredError, service
+from services._gmail_fake_backend import build_fake_gmail_client
 
 # ---------------------------------------------------------------------------
 # Domain errors
@@ -380,6 +382,27 @@ _client_cache: dict[str, tuple[float, Any]] = {}
 _CLIENT_TTL_S = 50 * 60  # 50 min; access tokens live ~60 min
 
 
+def _maybe_fake_gmail_client():  # noqa: ANN202 - fake mirrors the dynamic Resource
+    """Return a fixture-serving fake Gmail client when the e2e fake backend is
+    explicitly enabled, else ``None``.
+
+    Gated on ``GMAIL_FAKE_BACKEND=1``. Hard-refuses under ``DEV_ENV=prod`` so the
+    fake can never stand in for a real mailbox in production, no matter how the
+    env is set. Used only by the MCP-App e2e harness to render Gmail apps offline
+    (no linked account / OAuth / network); see ``services/_gmail_fake_backend.py``.
+    """
+    if os.environ.get("GMAIL_FAKE_BACKEND") != "1":
+        return None
+    if global_config.DEV_ENV == "prod":
+        raise RuntimeError(
+            "GMAIL_FAKE_BACKEND must never be set in production (DEV_ENV=prod)"
+        )
+    log.warning(
+        "GMAIL_FAKE_BACKEND active: serving fixture Gmail data, not a real mailbox"
+    )
+    return build_fake_gmail_client()
+
+
 def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource is dynamic
     """Return an authorized ``googleapiclient`` Gmail v1 service for ``user_id``.
 
@@ -389,6 +412,10 @@ def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource 
     Raises ``GmailNotConnectedError`` if no active token row exists. Network
     or Google-side errors propagate so the caller can decide how to surface them.
     """
+    fake = _maybe_fake_gmail_client()
+    if fake is not None:
+        return fake
+
     now = time.time()
     cached = _client_cache.get(user_id)
     if cached is not None:

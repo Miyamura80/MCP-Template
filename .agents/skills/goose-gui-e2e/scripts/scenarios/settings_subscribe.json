@@ -1,7 +1,9 @@
 {
   "prompt": "Open my settings so I can add a webhook endpoint.",
   "plan": [
-    { "match": "webhook_settings" }
+    {
+      "match": "webhook_settings"
+    }
   ],
   "final": "Opened your settings.",
   "app_uri": "ui://mymcp/settings",
@@ -9,12 +11,23 @@
     "tool_called": "webhook_settings",
     "round_trip": true,
     "app_rendered": true,
-    "dom_contains": ["Settings", "Add endpoint"],
+    "dom_contains": [
+      "Settings",
+      "Add endpoint"
+    ],
     "interaction_rendered": true
   },
   "interact": {
-    "fill": { "selector": "input[type=url]", "value": "https://webhook.example.com/e2e" },
-    "click": { "text": "Add endpoint" },
-    "expect_dom_contains": ["Signing secret", "webhook.example.com"]
+    "fill": {
+      "selector": "input[type=url]",
+      "value": "https://webhook.example.com/e2e"
+    },
+    "click": {
+      "text": "Add endpoint"
+    },
+    "expect_dom_contains": [
+      "Signing secret",
+      "webhook.example.com"
+    ]
   }
 }
