@@ -1,4 +1,5 @@
 {
+  "comment": "dom_contains uses thread content present in BOTH the reader view (race won) and the curated-inbox fallback the app shows when it misses the thread result (race lost); GMAIL_FAKE_BACKEND serves both paths, so the assertion is deterministic.",
   "prompt": "Open the Series A term sheet email thread.",
   "plan": [
     {

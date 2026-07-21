@@ -12,8 +12,9 @@ from __future__ import annotations
 import pytest
 
 from common import global_config
-from models.gmail import GmailGetThreadInput
+from models.gmail import GmailCurateInboxInput, GmailGetThreadInput
 from services import gmail_svc
+from services.gmail_curate_svc import gmail_curate_inbox
 from services.gmail_messages_svc import gmail_get_thread
 from tests.test_template import TestTemplate
 
@@ -40,6 +41,20 @@ class TestGmailFakeBackend(TestTemplate):
         # came through the raw-Gmail-API fixture, not a hand-built GmailThread.
         assert msg.body_html is not None and "liquidation preference" in msg.body_html
         assert [a.filename for a in msg.attachments] == ["termsheet-v7.pdf"]
+        # Date is derived from internalDate (not the Date header); pin the year so
+        # the fixture stays in sync with the Date header + dev-preview fixture.
+        assert msg.date is not None and msg.date.year == 2026
+
+    def test_enabled_serves_curated_inbox(self, monkeypatch):
+        # The gmail_inbox app falls back to a curated-inbox refresh when it misses
+        # the thread result, so the fake must render that path too (batch fetch).
+        monkeypatch.setenv("GMAIL_FAKE_BACKEND", "1")
+        monkeypatch.setattr(global_config, "DEV_ENV", "dev", raising=False)
+        result = gmail_curate_inbox(GmailCurateInboxInput())
+        subjects = [t.subject for t in result.threads]
+        assert "Series A term sheet - final redlines" in subjects
+        thread = next(t for t in result.threads if t.thread_id == "t-1001")
+        assert thread.from_ is not None and "Dana Whitfield" in thread.from_
 
     def test_refused_in_prod(self, monkeypatch):
         monkeypatch.setenv("GMAIL_FAKE_BACKEND", "1")

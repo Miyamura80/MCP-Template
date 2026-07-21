@@ -42,6 +42,7 @@ from models.gmail import (
     InlineImageUpload,
 )
 from services import ConnectRequiredError, service
+from services._gmail_fake_backend import build_fake_gmail_client
 
 # ---------------------------------------------------------------------------
 # Domain errors
@@ -396,10 +397,6 @@ def _maybe_fake_gmail_client():  # noqa: ANN202 - fake mirrors the dynamic Resou
         raise RuntimeError(
             "GMAIL_FAKE_BACKEND must never be set in production (DEV_ENV=prod)"
         )
-    from services._gmail_fake_backend import (  # noqa: PLC0415 - lazy: keep e2e-only fixtures out of the prod import path
-        build_fake_gmail_client,
-    )
-
     log.warning(
         "GMAIL_FAKE_BACKEND active: serving fixture Gmail data, not a real mailbox"
     )

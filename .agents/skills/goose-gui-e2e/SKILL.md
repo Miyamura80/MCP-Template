@@ -116,6 +116,16 @@ only the network boundary is faked. The flag is **hard-refused under
 `DEV_ENV=prod`** (guard in `services.gmail_svc._maybe_fake_gmail_client`), so it
 can never stand in for a real mailbox in production.
 
+**Why the fake also serves the curated inbox:** the `gmail_inbox` app registers
+its `ontoolresult` handler in a mount effect, and if the host delivers the thread
+result *before* that runs, the app misses it and falls back to a curated-inbox
+refresh (`gmail_inbox.refresh` → `gmail_curate_inbox`) after ~800ms. So a
+thread-open renders the **reader** when it wins that race and the **curated list**
+when it loses. The fake serves both paths from the same fixture thread, and
+`gmail_thread_render` asserts on content present in both views, so the scenario is
+deterministic instead of ~30% flaky. `gmail_get_thread`'s round-trip is still
+proven independently via the tool-call log regardless of which view renders.
+
 ### Optional: a click → `callServerTool` → re-render step
 
 A scenario may add an `interact` block to drive a real control **inside** the app
