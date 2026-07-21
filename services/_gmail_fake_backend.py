@@ -120,7 +120,15 @@ class _Executable:
 class _Threads:
     def get(self, **kwargs: Any) -> _Executable:
         tid = kwargs.get("id")
-        return _Executable(_THREADS.get(tid, {"id": tid, "messages": []}))
+        # Real Gmail returns 404 for an unknown thread id; synthesizing an empty
+        # thread instead would let a misspelled/drifted fixture id pass a render
+        # check with no content. Fail loudly, matching this module's contract.
+        if tid not in _THREADS:
+            raise LookupError(
+                f"fake Gmail backend has no fixture thread {tid!r}; add it to "
+                "_THREADS in services/_gmail_fake_backend.py"
+            )
+        return _Executable(_THREADS[tid])
 
     def list(self, **kwargs: Any) -> _Executable:
         # gmail_curate_inbox lists thread stubs, then batch-fetches each full
@@ -143,8 +151,14 @@ class _Labels:
 
 class _Attachments:
     def get(self, **kwargs: Any) -> _Executable:
-        # No inline/cid images in the fixtures, so this is only hit defensively.
-        return _Executable({"data": "", "size": 0})
+        # No fixture path fetches attachment bytes: the sample thread's PDF is
+        # never downloaded, and it has no inline cid: images to resolve. Returning
+        # empty bytes would mask a real fetch failure, so fail loudly if a new
+        # path hits this - add fixture bytes for the id when a scenario needs them.
+        raise NotImplementedError(
+            f"fake Gmail backend does not serve attachment bytes (id={kwargs.get('id')!r}); "
+            "add a fixture in services/_gmail_fake_backend.py if an e2e path needs one"
+        )
 
 
 class _Messages:

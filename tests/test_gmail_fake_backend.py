@@ -56,6 +56,14 @@ class TestGmailFakeBackend(TestTemplate):
         thread = next(t for t in result.threads if t.thread_id == "t-1001")
         assert thread.from_ is not None and "Dana Whitfield" in thread.from_
 
+    def test_unknown_thread_id_fails_loudly(self, monkeypatch):
+        # An unknown/misspelled fixture id must raise (like Gmail's 404), not
+        # synthesize an empty thread that could pass a render check with no content.
+        monkeypatch.setenv("GMAIL_FAKE_BACKEND", "1")
+        monkeypatch.setattr(global_config, "DEV_ENV", "dev", raising=False)
+        with pytest.raises(LookupError):
+            gmail_get_thread(GmailGetThreadInput(thread_id="does-not-exist"))
+
     def test_refused_in_prod(self, monkeypatch):
         monkeypatch.setenv("GMAIL_FAKE_BACKEND", "1")
         monkeypatch.setattr(global_config, "DEV_ENV", "prod", raising=False)
