@@ -1,5 +1,5 @@
 {
-  "comment": "dom_contains uses thread content present in BOTH the reader view (race won) and the curated-inbox fallback the app shows when it misses the thread result (race lost); GMAIL_FAKE_BACKEND serves both paths, so the assertion is deterministic.",
+  "comment": "'liquidation preference' is in the message BODY, which renders only in the thread READER, not the curated-inbox list (whose snippet lacks it). Asserting it proves the reader rendered - i.e. the ontoolresult buffer (helpers.bufferToolResults) delivered the thread result even when the host raced it ahead of mount, instead of the app falling back to a curated-inbox refresh.",
   "prompt": "Open the Series A term sheet email thread.",
   "plan": [
     {
@@ -17,7 +17,7 @@
     "app_rendered": true,
     "dom_contains": [
       "Series A term sheet",
-      "Dana Whitfield"
+      "liquidation preference"
     ]
   }
 }
