@@ -43,10 +43,8 @@ export function curationToThreads(records: CurationRecord[]): CuratedThread[] {
 }
 
 export function extractDraft(raw: unknown): ComposerDraft | null {
-  if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
-  if (!data || typeof data !== "object") return null;
+  const data = extractStructuredContent<Record<string, unknown>>(raw);
+  if (!data) return null;
   const draftId = data["draft_id"];
   if (typeof draftId !== "string") return null;
   return {

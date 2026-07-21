@@ -1,5 +1,28 @@
 import type { Draft, DraftAttachment, Thread } from "./types";
 
+// Unwrap an MCP CallToolResult to its structured payload: prefer
+// `structuredContent`, else parse a JSON `TextContent` item. Returns null when
+// neither is present - never the raw envelope - so a malformed result can't
+// masquerade as a draft/thread and content-only JSON results aren't dropped.
+export function extractStructuredContent<T>(raw: unknown): T | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  if (obj.structuredContent && typeof obj.structuredContent === "object") {
+    return obj.structuredContent as T;
+  }
+  if (Array.isArray(obj.content)) {
+    for (const item of obj.content) {
+      if (item && typeof item === "object" && "text" in (item as Record<string, unknown>)) {
+        try {
+          const parsed = JSON.parse((item as { text: string }).text);
+          if (parsed && typeof parsed === "object") return parsed as T;
+        } catch { /* not JSON text content */ }
+      }
+    }
+  }
+  return null;
+}
+
 // Pull the draft's existing attachments (each with a stable attachment_id) off a
 // GmailDraft payload. Only files with an id are usable: the id is what a save
 // passes back as a reference to preserve the file in the whole-set replace.
@@ -27,10 +50,8 @@ export function extractAttachments(raw: unknown): DraftAttachment[] {
 }
 
 export function extractDraft(raw: unknown): Draft | null {
-  if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
-  if (typeof data !== "object" || data === null) return null;
+  const data = extractStructuredContent<Record<string, unknown>>(raw);
+  if (!data) return null;
   const draftId = data["draft_id"];
   if (typeof draftId !== "string") return null;
   return {
@@ -61,10 +82,8 @@ export function fieldsEqual(a: Draft, b: Draft): boolean {
 }
 
 export function extractThread(raw: unknown): Thread | null {
-  if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
-  if (!data || typeof data !== "object") return null;
+  const data = extractStructuredContent<Record<string, unknown>>(raw);
+  if (!data) return null;
   if (!Array.isArray((data as { messages?: unknown }).messages)) return null;
   return data as unknown as Thread;
 }
