@@ -16,12 +16,16 @@ export function extractStructuredContent<T>(raw: unknown): T | null {
   }
   if (Array.isArray(obj.content)) {
     for (const item of obj.content) {
-      if (item && typeof item === "object" && "text" in (item as Record<string, unknown>)) {
-        try {
-          const parsed = JSON.parse((item as { text: string }).text);
-          if (parsed && typeof parsed === "object") return parsed as T;
-        } catch { /* not JSON text content */ }
-      }
+      if (!item || typeof item !== "object") continue;
+      // Only a real MCP TextContent block qualifies: a `type: "text"`
+      // discriminator with a string `text`. Without this an image/resource/other
+      // block that happens to carry a `text` field could smuggle JSON through.
+      const candidate = item as { type?: unknown; text?: unknown };
+      if (candidate.type !== "text" || typeof candidate.text !== "string") continue;
+      try {
+        const parsed = JSON.parse(candidate.text);
+        if (parsed && typeof parsed === "object") return parsed as T;
+      } catch { /* not JSON text content */ }
     }
   }
   return null;
