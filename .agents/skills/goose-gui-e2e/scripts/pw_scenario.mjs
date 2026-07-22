@@ -136,6 +136,11 @@ try {
       try {
         if (interact.fill)
           await frame.locator(interact.fill.selector).first().fill(interact.fill.value, { timeout: 6000 });
+        // Optional checkbox tick (e.g. the pdf_signer consent box). force: the
+        // host may auto-resize the iframe while pages render, which keeps
+        // elements "unstable" for Playwright's actionability checks.
+        if (interact.check)
+          await frame.locator(interact.check.selector).first().check({ timeout: 6000, force: true });
         if (interact.click) {
           const btn = interact.click.selector
             ? frame.locator(interact.click.selector).first()

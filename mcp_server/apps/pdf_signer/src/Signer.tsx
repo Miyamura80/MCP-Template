@@ -8,6 +8,7 @@
 // on elicitation-capable hosts the server additionally asks the host to
 // show a native confirmation dialog before sealing.
 
+import "./polyfills";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -266,6 +267,11 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
         )}
       </header>
 
+      {phase === "error" && (
+        <div style={{ ...styles.errorBanner, margin: "12px 16px 0" }} role="alert">
+          {error}
+        </div>
+      )}
       <div style={styles.pagesScroller} data-testid="pages">
         {pages.map((p) => (
           <div

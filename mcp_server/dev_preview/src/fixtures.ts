@@ -138,8 +138,34 @@ const COMPOSER_DRAFT = {
 // --- dispatch -------------------------------------------------------------
 
 /** The first tool result pushed to the app on init (drives the initial paint). */
+// --- pdf_signer -----------------------------------------------------------
+
+// A real (tiny) flat NDA, filled via the actual pdf_edit engine, so pdf.js
+// renders authentic bytes. Regenerate with tests/pdf_fixtures.make_flat_pdf +
+// services.pdf_edit_engine.apply_ops if the fixture builders change.
+const NDA_FILLED_B64 =
+  "JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9Db3VudCAxCi9LaWRzIFsgMyAwIFIgXQo+PgplbmRvYmoKMyAwIG9iago8PAovVHlwZSAvUGFnZQovUmVzb3VyY2VzIDw8Ci9Gb250IDw8Ci9GMSA0IDAgUgovUGRmRWRpdEYxIDcgMCBSCj4+Cj4+Ci9NZWRpYUJveCBbIDAuMCAwLjAgNjEyIDc5MiBdCi9QYXJlbnQgMiAwIFIKL0NvbnRlbnRzIDUgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9Gb250Ci9TdWJ0eXBlIC9UeXBlMQovQmFzZUZvbnQgL0hlbHZldGljYQo+PgplbmRvYmoKNSAwIG9iagpbIDggMCBSIDkgMCBSIF0KZW5kb2JqCjYgMCBvYmoKPDwKL1Byb2R1Y2VyIChweXBkZikKPj4KZW5kb2JqCjcgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCj4+CmVuZG9iago4IDAgb2JqCjw8Ci9MZW5ndGggMTc3Cj4+CnN0cmVhbQpxCkJUIC9GMSAxNCBUZiA3MiA3MDAgVGQgKE5PTi1ESVNDTE9TVVJFIEFHUkVFTUVOVCkgVGogRVQKQlQgL0YxIDEwIFRmIDcyIDY1MCBUZCAoTmFtZTopIFRqIEVUCkJUIC9GMSAxMCBUZiA3MiA2MDAgVGQgKERhdGU6KSBUaiBFVApCVCAvRjEgMTAgVGYgNzIgNTUwIFRkIChTaWduYXR1cmU6KSBUaiBFVAoKUQoKZW5kc3RyZWFtCmVuZG9iago5IDAgb2JqCjw8Ci9MZW5ndGggMTM2Cj4+CnN0cmVhbQpxCjAuMCAwLjAgNjEyIDc5MiByZQpXCm4KQlQKL1BkZkVkaXRGMSAxMCBUZgoxMTAgNjUwIFRkCihFaXRvIE1peWFtdXJhKSBUagpFVApCVAovUGRmRWRpdEYxIDEwIFRmCjEwNSA2MDAgVGQKKDIwMjZcMDU1MDdcMDU1MjIpIFRqCkVUClEKCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDEwCjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMDY0IDAwMDAwIG4gCjAwMDAwMDAxMjMgMDAwMDAgbiAKMDAwMDAwMDI3MiAwMDAwMCBuIAowMDAwMDAwMzQyIDAwMDAwIG4gCjAwMDAwMDAzNzMgMDAwMDAgbiAKMDAwMDAwMDQxMiAwMDAwMCBuIAowMDAwMDAwNDgyIDAwMDAwIG4gCjAwMDAwMDA3MTAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSAxMAovUm9vdCAxIDAgUgovSW5mbyA2IDAgUgo+PgpzdGFydHhyZWYKODk3CiUlRU9GCg==";
+
+const PDF_SIGNER_REQUEST = {
+  doc_id: "doc-fixture-nda",
+  status: "awaiting_user_signature",
+  guidance: "The document is now locked for signing.",
+};
+
+const PDF_SIGNER_DOC = {
+  doc_id: "doc-fixture-nda",
+  filename: "nda.pdf",
+  status: "awaiting_signature",
+  page_count: 1,
+  stamp_page: 1,
+  // From services.pdf_signing.resolve_stamp_rect for placement (1, 140, 545).
+  stamp_rect: [140.0, 541.0, 340.0, 577.0],
+  data_base64: NDA_FILLED_B64,
+};
+
 export function initialResult(app: string): ToolResult {
   if (app === "gmail_composer") return ok(COMPOSER_DRAFT);
+  if (app === "pdf_signer") return ok(PDF_SIGNER_REQUEST);
   return ok(INBOX_CURATE);
 }
 
@@ -153,6 +179,18 @@ export function dispatch(name: string, args: Record<string, unknown>): ToolResul
       return ok(THREADS[String(args.thread_id)] ?? {});
     case "gmail_composer.refresh":
       return ok(COMPOSER_DRAFT);
+    case "pdf_signer.get_document":
+      return ok(PDF_SIGNER_DOC);
+    case "pdf_signer.sign":
+      return ok({
+        doc_id: "doc-fixture-nda",
+        status: "signed",
+        signed_by: String(args.typed_name ?? "Signer"),
+        signed_at_utc: "2026-07-22T12:00:00+00:00",
+        message: `Signed by ${args.typed_name} on 2026-07-22T12:00:00+00:00.`,
+      });
+    case "pdf_signer.cancel":
+      return ok({ doc_id: "doc-fixture-nda", status: "open" });
     case "gmail_composer.send":
       // A real message_id so the composer's Sent state (and the model-context
       // push it triggers) carries a plausible identifier.
