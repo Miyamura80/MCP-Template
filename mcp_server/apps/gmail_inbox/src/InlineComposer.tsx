@@ -347,7 +347,7 @@ export function InlineComposer({
         <div style={{ color: "#5f6368", fontSize: 13, padding: "8px 0" }}>Loading conversation…</div>
       )}
       {sentMessages.length > 0 && (
-        <ComposerThreadPanel thread={{ ...effectiveThread!, messages: sentMessages }} />
+        <ComposerThreadPanel thread={{ ...effectiveThread!, messages: sentMessages }} mcpApp={mcpApp} />
       )}
 
       {pendingAgent && (

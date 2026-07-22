@@ -5,14 +5,13 @@ import {
   CheckCircle,
   PaperclipHorizontal,
 } from "@phosphor-icons/react";
-import { sanitizeHtml } from "./sanitize";
+import { HtmlEmailBody } from "./HtmlEmailBody";
 import type { Draft, McpAppLike, ThreadMessage } from "./types";
 import {
   formatDate,
   formatFileSize,
   isPreviewable,
   relativeTime,
-  splitHtmlAtQuote,
   splitTextAtQuote,
 } from "./helpers";
 import { draftChipStyle, iconBtnStyle, mutedStyle } from "./styles";
@@ -308,33 +307,14 @@ function MessageBody({
   };
 
   if (message.body_html) {
-    const { main, quoted } = splitHtmlAtQuote(message.body_html);
     return (
-      <div>
-        <div
-          style={bodyHtmlStyle}
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }}
-          onClick={handleLinkClick}
-        />
-        {quoted && (
-          <>
-            <button
-              onClick={() => setShowQuoted((v) => !v)}
-              style={quoteToggleStyle}
-              title={showQuoted ? "Hide quoted text" : "Show quoted text"}
-            >
-              •••
-            </button>
-            {showQuoted && (
-              <div
-                style={{ ...bodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 10, marginTop: 4 }}
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }}
-                onClick={handleLinkClick}
-              />
-            )}
-          </>
-        )}
-      </div>
+      <HtmlEmailBody
+        html={message.body_html}
+        mcpApp={mcpApp}
+        htmlStyle={bodyHtmlStyle}
+        quoteToggleStyle={quoteToggleStyle}
+        onClick={handleLinkClick}
+      />
     );
   }
   if (message.body_text) {

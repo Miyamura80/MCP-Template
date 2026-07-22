@@ -144,7 +144,11 @@ iframe after it renders, exercising a **user-initiated** server round-trip (the
 The iframe's `callServerTool` goes **app → Goose → `/mcp` directly, bypassing the
 mock LLM**, so this round-trip never appears in the tool-call log - the re-rendered
 DOM (`expect_dom_contains`, here the returned signing secret) is the only proof,
-and only the server's real response can produce it. `interaction_rendered: true`
+and only the server's real response can produce it. For post-interaction DOM that
+plain text can't see, `interact` also accepts `"expect_selectors": ["css", ...]` -
+CSS selectors that must each match at least one element (e.g.
+`img[src^="data:image/png;base64,"]` to prove a fetched image's data URI was
+written into the iframe DOM - presence, not paint). `interaction_rendered: true`
 makes `mcp_probe.py` require it, and `pw_scenario.mjs` fails the drive if the
 post-click DOM never matches. This needs the "Add endpoint" control, which renders
 only when `push_available` is true - `up.sh` sets `GMAIL_PUBSUB_TOPIC` to ungate it
@@ -205,6 +209,7 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | `scenarios/settings_render.json` | scenario 1: LLM opens the Settings app; assert it renders |
 | `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings.subscribe` → assert the re-render |
 | `scenarios/gmail_thread_render.json` | scenario 3: LLM opens a thread via `gmail_get_thread`; assert the gmail_inbox reader iframe renders (needs `GMAIL_FAKE_BACKEND`) |
+| `scenarios/gmail_remote_images.json` | scenario 4: remote-image pipeline - assert the blocked-by-default "Show images" banner renders, click it, and assert the `gmail_inbox.fetch_image` round-trip re-renders as "Retry" (fixture URL is `.invalid`, so the SSRF guard rejects it deterministically offline and in CI) |
 
 Also outside the skill: `tests/test_apps_e2e.py` (guarded pytest entry) and
 `.github/workflows/apps_e2e.yaml` (opt-in CI).
