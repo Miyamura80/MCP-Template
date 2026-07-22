@@ -62,10 +62,15 @@ def _patch_db():
 
 
 def _read_sse_first_message(response) -> dict:
-    """Parse the first ``data:`` line from an MCP SSE response."""
-    for line in response.iter_lines():
-        if isinstance(line, bytes):
-            line = line.decode()
+    """Parse the first ``data:`` line from an MCP SSE response.
+
+    Deliberately NOT ``iter_lines()``: that splits on Unicode line
+    boundaries (U+2028, NEL, ...) which legally appear unescaped inside
+    JSON string payloads (e.g. the pdf_signer app bundle's inlined pdf.js
+    worker), truncating the frame. The SSE spec ends lines on CR/LF only.
+    """
+    for line in response.text.split("\n"):
+        line = line.rstrip("\r")
         if line.startswith("data:"):
             return json.loads(line.removeprefix("data:").strip())
     raise AssertionError("no SSE data frame in response")

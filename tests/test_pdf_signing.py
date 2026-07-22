@@ -85,6 +85,16 @@ class TestPdfRequestSignature(PdfSigningTestBase):
         result = self._request(doc_id, SignaturePlacement(field_name="signature"))
         assert result.status == "awaiting_user_signature"
 
+    def test_presigned_document_disclosed_in_guidance(self):
+        opened = self._open(make_acroform_pdf(signed_sig_field=True))
+        result = self._request(
+            opened.doc_id, SignaturePlacement(page=1, x=140.0, y=545.0)
+        )
+        assert "invalidate" in result.guidance
+        doc = repo.load_document(opened.doc_id, "u1")
+        last = (doc.audit or [])[-1]
+        assert last["invalidates_existing_signatures"] == ["signature"]
+
     def test_already_signed_rejected(self):
         doc_id = self._open_awaiting()
         self._sign(doc_id)
@@ -156,6 +166,29 @@ class TestPerformSigning(PdfSigningTestBase):
         doc_id = self._open_awaiting()
         with pytest.raises(pdf_signing.PdfSigningInputError):
             self._sign(doc_id, consent=False)
+
+    def test_non_latin1_name_rejected(self):
+        # The stamp face is standard-14 Helvetica (Latin-1): a CJK name would
+        # silently render as '?' on a legal document, so it must be refused.
+        doc_id = self._open_awaiting()
+        with pytest.raises(pdf_signing.PdfSigningInputError) as exc:
+            self._sign(doc_id, typed_name="宮村英人")
+        assert "cannot render" in str(exc.value)
+        assert (
+            repo.load_document(doc_id, "u1").status
+            == repo.PDF_STATUS_AWAITING_SIGNATURE
+        )
+
+    def test_signed_output_reports_seal_on_reinspection(self):
+        # Round-trip: our own sealed output, re-opened, must surface as a
+        # document carrying an existing signature (gap-2 detection works on
+        # real pyHanko signatures, not just synthetic /V dicts).
+        from services.pdf_inspect import inspect_pdf  # noqa: PLC0415 - test-local
+
+        doc_id = self._open_awaiting()
+        doc, _ = self._sign(doc_id)
+        inspection = inspect_pdf(doc.current_bytes, include_text_layout=False)
+        assert inspection.existing_signatures == ["MyMCP-Seal"]
 
     def test_abort_back_to_open(self):
         doc_id = self._open_awaiting()

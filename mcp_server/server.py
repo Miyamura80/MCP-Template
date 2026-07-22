@@ -92,32 +92,43 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
-# ``stateless_http=True`` makes every /mcp request self-contained: the server
-# does not persist per-session state keyed by ``Mcp-Session-Id`` in memory.
-# Stateful mode (the FastMCP default) breaks in exactly the deployments this
-# template targets - Render free-tier spins down when idle, redeploys restart
-# the process, and horizontal scaling routes requests across replicas - each of
-# which wipes/splits the in-memory session store, so a client's next POST fails
-# with "MCP session has been terminated or no longer exists on the server"
-# (mcp_session_terminated). Some clients (OpenAI, and connectors that DELETE the
-# session after each call) trigger the same error even single-replica. Stateless
-# mode sidesteps all of it. Safe here because our enhancers only elicit input and
-# render Apps - both happen *within* a single tool-call request's SSE stream - and
-# we use no server-initiated sampling (the one feature that hangs stateless; see
-# modelcontextprotocol/python-sdk issue 678).
+# ``stateless_http=True`` (the config default) makes every /mcp request
+# self-contained: the server does not persist per-session state keyed by
+# ``Mcp-Session-Id`` in memory. Stateful mode (the FastMCP default) breaks in
+# exactly the deployments this template targets - Render free-tier spins down
+# when idle, redeploys restart the process, and horizontal scaling routes
+# requests across replicas - each of which wipes/splits the in-memory session
+# store, so a client's next POST fails with "MCP session has been terminated or
+# no longer exists on the server" (mcp_session_terminated). Some clients
+# (OpenAI, and connectors that DELETE the session after each call) trigger the
+# same error even single-replica. Stateless mode sidesteps all of it.
 #
-# This is also where the spec is going: the MCP core is dropping session state at
-# the protocol layer (SEP-2567 removes Mcp-Session-Id, SEP-2575 removes the
-# initialize handshake; 2026-07-28 RC), so "any request can land on any instance."
-# stateless_http=True is the SDK option the transport roadmap points implementers
-# to today. It still runs the initialize handshake (the SDK keeps that until it
-# implements those SEPs) but stops persisting/validating per-session state, which
-# is what actually fixes the error - and it's forward-compatible with the RC.
+# The trade-off: EVERY server-initiated request hangs stateless - sampling
+# (python-sdk issue 678) AND in-band elicitation. The elicitation/create
+# request does reach the client on the tool call's SSE stream, but the
+# client's response arrives as a new POST that lands on a fresh transient
+# session and is dropped, so ``ctx.elicit()`` never resolves (verified
+# empirically against this SDK). Rendering Apps and attaching content are
+# unaffected. That is why every elicitation call site gates on the client
+# having DECLARED the capability: under stateless HTTP ``client_params`` is
+# never populated, the check correctly returns False, and the enhancers take
+# their non-elicitation fallbacks. Deployments that want host-native
+# elicitation (e.g. the PDF signing confirmation dialog) must run a single
+# replica and set ``server.mcp_stateless_http: false``.
+#
+# Stateless is also where the spec is going: the MCP core is dropping session
+# state at the protocol layer (SEP-2567 removes Mcp-Session-Id, SEP-2575
+# removes the initialize handshake; 2026-07-28 RC), so "any request can land on
+# any instance." stateless_http=True is the SDK option the transport roadmap
+# points implementers to today. It still runs the initialize handshake (the SDK
+# keeps that until it implements those SEPs) but stops persisting/validating
+# per-session state, which is what actually fixes the error - and it's
+# forward-compatible with the RC.
 mcp: FastMCP = FastMCP(
     "mymcp",
     instructions=_MCP_INSTRUCTIONS,
     transport_security=_transport_security(),
-    stateless_http=True,
+    stateless_http=global_config.server.mcp_stateless_http,
 )
 
 _populated: bool = False

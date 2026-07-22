@@ -11,7 +11,8 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 
-from pypdf import PdfReader
+from pypdf import PasswordType, PdfReader
+from pypdf.errors import DependencyError, PdfReadError
 from pypdf.generic import DictionaryObject
 
 from common import global_config
@@ -48,6 +49,17 @@ class PdfNotAPdfError(Exception):
         )
 
 
+class PdfEncryptedError(Exception):
+    """Raised when the PDF is password-protected and cannot be opened."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The PDF is password-protected and cannot be opened. Ask the "
+            "sender for an unprotected copy, or remove the password before "
+            "uploading - pdf_open does not accept document passwords."
+        )
+
+
 def ensure_pdf_magic(data: bytes) -> None:
     """Reject non-PDF bytes with the detected type named in the error."""
     if data.startswith(b"%PDF-"):
@@ -66,12 +78,41 @@ class PdfInspection:
     fields: list[PdfFormField]
     text_layout: list[PdfTextLine] = field(default_factory=list)
     text_layout_truncated: bool = False
+    # Signature fields that already hold a signature (/V present). Any
+    # full-rewrite edit invalidates these - callers must disclose/gate.
+    existing_signatures: list[str] = field(default_factory=list)
+    # /AcroForm carries an /XFA stream: LiveCycle form whose AcroForm view
+    # may be incomplete and whose XFA rendering ignores AcroForm edits.
+    has_xfa: bool = False
+
+
+def _ensure_decrypted(reader: PdfReader) -> None:
+    """Open owner-encrypted PDFs (empty user password); reject the rest."""
+    if not reader.is_encrypted:
+        return
+    try:
+        outcome = reader.decrypt("")
+    except (NotImplementedError, DependencyError, PdfReadError) as exc:
+        raise PdfEncryptedError() from exc
+    if outcome == PasswordType.NOT_DECRYPTED:
+        raise PdfEncryptedError()
+
+
+def _has_xfa(reader: PdfReader) -> bool:
+    root = reader.trailer["/Root"].get_object()
+    if not isinstance(root, DictionaryObject):
+        return False
+    acroform = root.get("/AcroForm")
+    if acroform is None:
+        return False
+    return "/XFA" in acroform.get_object()
 
 
 def inspect_pdf(data: bytes, *, include_text_layout: bool = True) -> PdfInspection:
     """Read a PDF's geometry, AcroForm inventory and (for flat PDFs) text layout."""
     ensure_pdf_magic(data)
     reader = PdfReader(io.BytesIO(data))
+    _ensure_decrypted(reader)
     page_sizes = [
         PdfPageSize(
             page=i + 1,
@@ -86,6 +127,12 @@ def inspect_pdf(data: bytes, *, include_text_layout: bool = True) -> PdfInspecti
         page_sizes=page_sizes,
         has_acroform=bool(fields),
         fields=fields,
+        existing_signatures=[
+            f.name
+            for f in fields
+            if f.field_type == "signature" and f.value is not None
+        ],
+        has_xfa=_has_xfa(reader),
     )
     # Layout is the overlay anchor for flat PDFs; AcroForm docs are filled by
     # field name, so skipping layout there keeps responses bounded.
@@ -183,6 +230,13 @@ def _collect_fields(reader: PdfReader) -> list[PdfFormField]:
                 continue
             flags = int(_inherited(obj, "/Ff") or 0)
             value = _inherited(obj, "/V")
+            if ftype == "signature" and value is not None:
+                # /V is the signature dictionary; surface the signer's name
+                # rather than the stringified dict (which would leak raw
+                # DER/ByteRange noise into the LLM-visible inventory).
+                sig_dict = value.get_object()
+                signer = sig_dict.get("/Name")
+                value = str(signer) if signer is not None else "(signed)"
             options: list[str] | None = None
             if ftype == "choice":
                 options = _choice_options(obj) or None

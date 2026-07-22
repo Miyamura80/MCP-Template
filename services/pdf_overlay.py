@@ -19,10 +19,30 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 
+def unencodable_pdf_text(text: str) -> str:
+    """Characters in ``text`` the standard-14 fonts cannot render, deduped.
+
+    Overlay text is drawn with standard-14 Type1 faces (Latin-1 coverage
+    only), so callers MUST reject text containing these characters up front:
+    letting them through would silently stamp '?' into the document -
+    unacceptable for a signature stamp on a legal document, and bad even for
+    a plain form overlay. Returns "" when the text is fully renderable.
+    """
+    seen: dict[str, None] = {}
+    for char in text:
+        try:
+            char.encode("latin-1")
+        except UnicodeEncodeError:
+            seen.setdefault(char)
+    return "".join(seen)
+
+
 def escape_pdf_text(text: str) -> bytes:
     """Escape a string for a PDF literal-string operand.
 
-    Standard-14 fonts cover Latin-1; anything outside degrades to '?'.
+    Standard-14 fonts cover Latin-1; anything outside degrades to '?' - the
+    last-resort belt. Callers validate with :func:`unencodable_pdf_text`
+    first so this replacement never actually fires on user-visible text.
     """
     escaped = text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
     return escaped.encode("latin-1", errors="replace")

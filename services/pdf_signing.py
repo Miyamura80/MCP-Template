@@ -42,7 +42,11 @@ from db.models.pdf_documents import PdfDocument
 from models.pdf_forms import PdfDocStatus, SignaturePlacement
 from services.pdf_documents_repo import load_document, update_document
 from services.pdf_inspect import inspect_pdf
-from services.pdf_overlay import build_text_overlay_page, escape_pdf_text
+from services.pdf_overlay import (
+    build_text_overlay_page,
+    escape_pdf_text,
+    unencodable_pdf_text,
+)
 
 _SEAL_FIELD_NAME = "MyMCP-Seal"
 _AUDIT_INFO_KEY = "/MyMCPSignatureAudit"
@@ -96,6 +100,18 @@ def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
     name = typed_name.strip()
     if not name:
         raise PdfSigningInputError("typed_name must be the signer's full legal name.")
+    if bad := unencodable_pdf_text(name):
+        # The stamp draws with standard-14 Helvetica (Latin-1 only); silently
+        # rendering '?' into a signature on a legal document is unacceptable,
+        # so refuse and ask for a renderable form of the name. The audit
+        # trail could store the original faithfully, but a stamp that
+        # contradicts the audit is worse than an honest error.
+        raise PdfSigningInputError(
+            f"typed_name contains characters the signature stamp cannot "
+            f"render: {bad!r}. The stamp uses a Latin-1 (standard-14) font - "
+            "please sign with a Latin-script form of the name (e.g. a "
+            "romanized spelling)."
+        )
     if not consent:
         raise PdfSigningInputError(
             "consent must be true: the signer has to explicitly agree that "

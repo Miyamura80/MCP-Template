@@ -19,10 +19,10 @@ from models.pdf_forms import (
 from services import pdf_documents_repo as repo
 from services import pdf_forms_svc
 from services.pdf_edit_engine import PdfEditBatchError
-from services.pdf_forms_svc import PdfDocumentLockedError
-from services.pdf_inspect import PdfNotAPdfError, inspect_pdf
+from services.pdf_forms_svc import PdfDocumentLockedError, PdfEditSignedSourceError
+from services.pdf_inspect import PdfEncryptedError, PdfNotAPdfError, inspect_pdf
 from services.pdf_render import PdfRenderRequestError
-from tests.pdf_fixtures import make_acroform_pdf, make_flat_pdf
+from tests.pdf_fixtures import make_acroform_pdf, make_encrypted_pdf, make_flat_pdf
 from tests.pdf_harness import PdfServiceTestBase
 
 
@@ -101,6 +101,28 @@ class TestPdfOpen(PdfServiceTestBase):
             pytest.raises(PdfRenderRequestError),
         ):
             self._open(make_flat_pdf(page_count=4), render_pages=[1, 2, 3])
+
+    def test_clean_document_has_no_warnings(self):
+        result = self._open(make_acroform_pdf())
+        assert result.warnings == []
+        assert result.existing_signatures == []
+
+    def test_encrypted_pdf_rejected_cleanly(self):
+        with pytest.raises(PdfEncryptedError) as exc:
+            self._open(make_encrypted_pdf(), filename="locked.pdf")
+        assert "password-protected" in str(exc.value)
+
+    def test_xfa_form_warns(self):
+        result = self._open(make_acroform_pdf(xfa=True))
+        assert any("XFA" in w for w in result.warnings)
+
+    def test_existing_signature_surfaced_and_warned(self):
+        result = self._open(make_acroform_pdf(signed_sig_field=True))
+        assert result.existing_signatures == ["signature"]
+        assert any("invalidate" in w for w in result.warnings)
+        # The inventory shows the signer's name, not the stringified sig dict.
+        by_name = {f.name: f for f in result.fields}
+        assert by_name["signature"].value == "Alice Example"
 
 
 class TestPdfEdit(PdfServiceTestBase):
@@ -218,6 +240,39 @@ class TestPdfEdit(PdfServiceTestBase):
         with pytest.raises(PdfDocumentLockedError) as exc:
             self._edit(opened.doc_id, [SetFieldOp(name="full_name", value="x")])
         assert "immutable" in str(exc.value)
+
+    def test_add_text_non_latin1_rejected(self):
+        opened = self._open(make_flat_pdf())
+        with pytest.raises(PdfEditBatchError) as exc:
+            self._edit(
+                opened.doc_id, [AddTextOp(page=1, x=110.0, y=650.0, text="宮村英人")]
+            )
+        assert "cannot render" in exc.value.errors[0]["error"]
+        # Atomicity: nothing stamped.
+        doc = repo.load_document(opened.doc_id, "u1")
+        assert not any(
+            "?" in line.text for line in inspect_pdf(doc.current_bytes).text_layout
+        )
+
+    def test_latin1_accents_still_accepted(self):
+        opened = self._open(make_flat_pdf())
+        result = self._edit(
+            opened.doc_id, [AddTextOp(page=1, x=110.0, y=650.0, text="Renée Müller")]
+        )
+        assert result.applied_ops == 1
+
+    def test_edit_presigned_requires_acknowledgement(self):
+        opened = self._open(make_acroform_pdf(signed_sig_field=True))
+        with pytest.raises(PdfEditSignedSourceError) as exc:
+            self._edit(opened.doc_id, [SetFieldOp(name="full_name", value="Eito")])
+        assert "invalidate" in str(exc.value)
+        # Explicit acknowledgement unlocks the edit.
+        result = self._edit(
+            opened.doc_id,
+            [SetFieldOp(name="full_name", value="Eito")],
+            acknowledge_signature_invalidation=True,
+        )
+        assert result.applied_ops == 1
 
     def test_edit_returns_render(self):
         opened = self._open(make_flat_pdf())

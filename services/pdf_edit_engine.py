@@ -21,7 +21,11 @@ from pypdf import PdfReader, PdfWriter
 
 from models.pdf_forms import AddTextOp, PdfEditOp, PdfFormField, SetFieldOp
 from services.pdf_inspect import inspect_pdf
-from services.pdf_overlay import build_text_overlay_page, escape_pdf_text
+from services.pdf_overlay import (
+    build_text_overlay_page,
+    escape_pdf_text,
+    unencodable_pdf_text,
+)
 
 
 class PdfEditBatchError(Exception):
@@ -77,6 +81,15 @@ def _validate_ops(
             problem = _validate_set_field(op, fields_by_name)
         elif op.page > page_count:
             problem = f"page {op.page} out of range (document has {page_count} pages)"
+        elif bad := unencodable_pdf_text(op.text):
+            # Overlays draw with standard-14 Helvetica (Latin-1 only);
+            # letting these through would silently render '?' on the page.
+            problem = (
+                f"text contains characters the overlay font cannot render: "
+                f"{bad!r}. add_text uses a Latin-1 (standard-14) font; "
+                "transliterate the text or restrict it to Latin script. "
+                "(AcroForm set_field values are not affected.)"
+            )
         else:
             problem = None
         if problem is not None:

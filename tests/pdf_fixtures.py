@@ -72,8 +72,14 @@ def _widget(
     return writer._add_object(annot)
 
 
-def make_acroform_pdf() -> bytes:
-    """One page, four fields: text (required), checkbox, combo choice, signature."""
+def make_acroform_pdf(*, xfa: bool = False, signed_sig_field: bool = False) -> bytes:
+    """One page, four fields: text (required), checkbox, combo choice, signature.
+
+    ``xfa=True`` adds an ``/XFA`` packet to the AcroForm (LiveCycle hybrid);
+    ``signed_sig_field=True`` populates the signature field's ``/V`` with a
+    minimal signature dictionary (signer name only - detection tests don't
+    need real crypto).
+    """
     writer = PdfWriter()
     page = writer.add_blank_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
 
@@ -121,6 +127,18 @@ def make_acroform_pdf() -> bytes:
             field_type="/Sig",
             name="signature",
             rect=(100, 120, 300, 160),
+            extra=(
+                {
+                    "/V": DictionaryObject(
+                        {
+                            NameObject("/Type"): NameObject("/Sig"),
+                            NameObject("/Name"): TextStringObject("Alice Example"),
+                        }
+                    )
+                }
+                if signed_sig_field
+                else None
+            ),
         ),
     ]
     page[NameObject("/Annots")] = ArrayObject(field_refs)
@@ -139,8 +157,22 @@ def make_acroform_pdf() -> bytes:
             ),
         }
     )
+    if xfa:
+        packet = DecodedStreamObject()
+        packet.set_data(b"<xdp:xdp xmlns:xdp='http://ns.adobe.com/xdp/'/>")
+        acroform[NameObject("/XFA")] = writer._add_object(packet)
     writer._root_object[NameObject("/AcroForm")] = writer._add_object(acroform)
 
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+def make_encrypted_pdf(user_password: str = "secret") -> bytes:
+    """A password-protected flat page (user password required to open)."""
+    writer = PdfWriter()
+    writer.add_blank_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+    writer.encrypt(user_password=user_password, algorithm="AES-256")
     buffer = io.BytesIO()
     writer.write(buffer)
     return buffer.getvalue()

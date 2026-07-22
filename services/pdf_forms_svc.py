@@ -41,6 +41,19 @@ from services.pdf_ports import deliver_to_destination, resolve_source
 from services.pdf_render import render_pages
 
 
+class PdfEditSignedSourceError(Exception):
+    """Editing a document that carries third-party signatures needs an ack."""
+
+    def __init__(self, signatures: list[str]) -> None:
+        names = ", ".join(signatures)
+        super().__init__(
+            f"This document already carries digital signature(s) ({names}); "
+            "editing will cryptographically invalidate them. If the user "
+            "explicitly confirms they accept that, retry with "
+            "acknowledge_signature_invalidation=true."
+        )
+
+
 class PdfDocumentLockedError(Exception):
     """Raised when an edit targets a document that is no longer editable."""
 
@@ -55,6 +68,28 @@ class PdfDocumentLockedError(Exception):
         else:
             detail = "signed documents are immutable"
         super().__init__(f"Document {doc_id!r} is {status!r}: {detail}.")
+
+
+def _document_warnings(inspection) -> list[str]:
+    """Non-fatal caveats surfaced by pdf_open (and disclosed downstream)."""
+    warnings: list[str] = []
+    if inspection.existing_signatures:
+        names = ", ".join(inspection.existing_signatures)
+        warnings.append(
+            f"This document already carries digital signature(s) ({names}). "
+            "Any edit - and the signing ceremony itself - will "
+            "cryptographically invalidate them. pdf_edit requires "
+            "acknowledge_signature_invalidation=true; tell the user before "
+            "proceeding."
+        )
+    if inspection.has_xfa:
+        warnings.append(
+            "This is an XFA (LiveCycle) form. The field inventory shown here "
+            "is the AcroForm view, which may be incomplete, and edits may "
+            "not appear in XFA-only viewers. Verify results with "
+            "render_pages before exporting."
+        )
+    return warnings
 
 
 @service(
@@ -98,6 +133,8 @@ def pdf_open(input: PdfOpenInput) -> PdfOpenResult:
         text_layout=inspection.text_layout,
         text_layout_truncated=inspection.text_layout_truncated,
         page_images=page_images,
+        existing_signatures=inspection.existing_signatures,
+        warnings=_document_warnings(inspection),
     )
 
 
@@ -122,6 +159,11 @@ def pdf_edit(input: PdfEditInput) -> PdfEditResult:
     doc = load_document(input.doc_id, input.user_id)
     if doc.status != PdfDocStatus.OPEN:
         raise PdfDocumentLockedError(doc_id=input.doc_id, status=doc.status)
+    # Docs carrying third-party signatures: a pypdf rewrite invalidates them,
+    # so require an explicit, user-confirmed acknowledgement first.
+    pre = inspect_pdf(doc.current_bytes, include_text_layout=False)
+    if pre.existing_signatures and not input.acknowledge_signature_invalidation:
+        raise PdfEditSignedSourceError(pre.existing_signatures)
     new_bytes = apply_ops(doc.current_bytes, input.ops)
     inspection = inspect_pdf(new_bytes, include_text_layout=False)
     update_document(
@@ -153,8 +195,8 @@ _AWAITING_GUIDANCE = (
 )
 
 
-def _validate_placement(placement: SignaturePlacement, data: bytes) -> None:
-    """Document-dependent placement checks.
+def _validate_placement(placement: SignaturePlacement, data: bytes):
+    """Document-dependent placement checks; returns the inspection.
 
     The shape half (field_name XOR complete page/x/y) is enforced by
     ``SignaturePlacement``'s own model validator; only the checks that need
@@ -179,6 +221,7 @@ def _validate_placement(placement: SignaturePlacement, data: bytes) -> None:
             f"placement page {placement.page} out of range "
             f"(document has {inspection.page_count} pages)."
         )
+    return inspection
 
 
 @service(
@@ -213,7 +256,17 @@ def pdf_request_signature(
             status="awaiting_user_signature",
             guidance=_AWAITING_GUIDANCE,
         )
-    _validate_placement(input.placement, doc.current_bytes)
+    inspection = _validate_placement(input.placement, doc.current_bytes)
+    guidance = _AWAITING_GUIDANCE
+    if inspection.existing_signatures:
+        # A pypdf rewrite at signing time invalidates third-party signatures;
+        # the user must hear that BEFORE they sign, not discover it after.
+        names = ", ".join(inspection.existing_signatures)
+        guidance += (
+            f" IMPORTANT: this document already carries digital signature(s) "
+            f"({names}) which the new signature will cryptographically "
+            "invalidate - make sure the user knows before they sign."
+        )
     update_document(
         input.doc_id,
         input.user_id,
@@ -222,12 +275,13 @@ def pdf_request_signature(
         audit_event={
             "event": "signature_requested",
             "placement": input.placement.model_dump(),
+            "invalidates_existing_signatures": inspection.existing_signatures,
         },
     )
     return PdfRequestSignatureResult(
         doc_id=input.doc_id,
         status="awaiting_user_signature",
-        guidance=_AWAITING_GUIDANCE,
+        guidance=guidance,
     )
 
 

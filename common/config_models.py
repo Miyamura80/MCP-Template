@@ -121,6 +121,15 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
     allowed_origins: list[str] = ["http://localhost:3000"]
+    # Streamable-HTTP session mode for the /mcp mount. True (default) keeps
+    # every request self-contained - required for multi-replica / spin-down
+    # deployments - but makes in-band elicitation impossible (the client's
+    # elicitation response POST cannot be correlated back to the transient
+    # session, so ctx.elicit() hangs; empirically verified, same failure mode
+    # as python-sdk issue 678 for sampling). Single-replica deployments may
+    # set False to enable host-native elicitation (e.g. the signing
+    # confirmation dialog) at the cost of in-memory session affinity.
+    mcp_stateless_http: bool = True
 
 
 class IconConfig(BaseModel):

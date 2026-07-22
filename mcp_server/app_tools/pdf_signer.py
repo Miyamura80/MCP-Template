@@ -105,6 +105,12 @@ async def sign(
     doc = load_document(doc_id, uid)
     name = validate_ceremony(doc, typed_name, consent)
     confirmed = False
+    # Declared-capability gate, never attempt-when-unknown: under stateless
+    # HTTP (production default) client_params is absent and ctx.elicit()
+    # would hang, so this correctly degrades to the app-ceremony-only path
+    # with the audit recording confirmed_via_elicitation=False. Stateful
+    # deployments (server.mcp_stateless_http: false) with capable hosts get
+    # the extra host-native dialog. See mcp_server/server.py.
     if ctx.session.check_client_capability(
         ClientCapabilities(elicitation=ElicitationCapability())
     ):

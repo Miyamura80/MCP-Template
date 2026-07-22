@@ -172,6 +172,23 @@ class PdfOpenResult(BaseModel):
         description="True if text_layout was cut at pdf_forms.text_layout_max_lines",
     )
     page_images: list[PdfPageImage] = Field(default_factory=list)
+    existing_signatures: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Signature fields that already hold a digital signature. Editing "
+            "such a document cryptographically invalidates them - pdf_edit "
+            "requires acknowledge_signature_invalidation=true, and the user "
+            "must be told before proceeding."
+        ),
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Non-fatal caveats about this document (existing digital "
+            "signatures, XFA forms). Relay these to the user before planning "
+            "edits."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +239,15 @@ class PdfEditInput(BaseModel):
         description=(
             "1-based page numbers to rasterize into the response as PNG images "
             "to verify placement (capped by pdf_forms.render_max_pages)"
+        ),
+    )
+    acknowledge_signature_invalidation: bool = Field(
+        default=False,
+        description=(
+            "Must be true to edit a document that already carries digital "
+            "signatures (pdf_open's existing_signatures) - editing "
+            "cryptographically invalidates them. Set only after the user has "
+            "explicitly confirmed they accept that."
         ),
     )
 

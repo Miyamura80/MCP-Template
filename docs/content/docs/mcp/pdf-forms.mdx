@@ -71,7 +71,15 @@ Signing runs through layered guarantees, strongest first:
 2. **Host-native confirmation.** On clients that support MCP elicitation,
    the server asks the host to render a confirmation dialog naming the
    document and the typed name *outside the iframe*. The model cannot answer
-   it; a spoofed iframe cannot fake it.
+   it; a spoofed iframe cannot fake it. **Transport caveat:** this layer
+   requires a *stateful* MCP session (stdio, or
+   `server.mcp_stateless_http: false` on a single replica). Under the
+   production default `stateless_http=true`, in-band elicitation cannot
+   complete (the client's response cannot be correlated back to the
+   per-request session), so the capability check correctly reports
+   unsupported, the dialog is skipped, and the audit records
+   `confirmed_via_elicitation: false`. Layers 1 and 3 do not depend on the
+   transport.
 3. **Visibility hint.** The `pdf_signer.*` tools carry
    `_meta.ui.visibility = ["app"]` so well-behaved hosts hide them from the
    LLM. This layer is convention, not spec - see edge case A8 in
@@ -86,11 +94,34 @@ Any post-signature modification is detectable by standard PDF validators.
 
 ### Hosts without iframe support
 
-If the client cannot render MCP Apps but supports elicitation, the ceremony
-falls back to a host-native typed-name prompt (`full_name` + `consent`) with
+If the client cannot render MCP Apps but supports elicitation (and the
+session is stateful - see the transport caveat above), the ceremony falls
+back to a host-native typed-name prompt (`full_name` + `consent`) with
 `channel: "elicitation"` recorded in the audit trail. With neither
 capability, `pdf_request_signature` returns `signing_unavailable`, the
 document unlocks, and form filling keeps working everywhere.
+
+### Document caveats surfaced at open
+
+`pdf_open` refuses password-protected PDFs outright (owner-only encryption
+with an empty user password still opens), and returns `warnings` +
+`existing_signatures` for two cases the model must relay before editing:
+
+- **Already-signed documents.** Editing (or counter-signing) a PDF that
+  carries digital signatures cryptographically invalidates them - pypdf
+  rewrites the file rather than appending an incremental update. `pdf_edit`
+  refuses such documents unless `acknowledge_signature_invalidation: true`,
+  and `pdf_request_signature`'s guidance repeats the warning before the user
+  signs.
+- **XFA (LiveCycle) forms.** The reported field inventory is the AcroForm
+  view, which may be incomplete; edits may not display in XFA-only viewers.
+  Verify with `render_pages` before exporting.
+
+Overlay text and the signature stamp draw with standard-14 (Latin-1) fonts:
+`add_text` ops and typed signer names containing characters outside Latin-1
+(e.g. CJK) are rejected with a clear error instead of silently rendering
+`?` - romanized input works today; embedded Unicode fonts are a tracked
+follow-up.
 
 ### The sealing certificate
 
