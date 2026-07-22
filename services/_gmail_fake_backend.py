@@ -47,6 +47,11 @@ _TERMSHEET_HTML = (
     "<b>liquidation preference</b> (we're proposing 1x non-participating).</p>"
     "<p>If that works, we can sign this week.</p>"
     "<p>Best,<br/>Dana</p>"
+    # Remote image: exercises the reader's blocked-by-default "Show images"
+    # banner. `.invalid` (RFC 2606) never resolves, so a "Show images" click
+    # fails the server-side proxy fetch identically offline and in open-egress
+    # CI - scenarios can deterministically assert the blocked/Retry states.
+    '<img src="https://img.invalid/northwind-logo.png" alt="Northwind Ventures">'
 )
 
 

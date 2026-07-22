@@ -74,7 +74,9 @@ const THREADS: Record<string, unknown> = {
         date: "2026-07-05T09:14:00Z",
         subject: "Series A term sheet - final redlines",
         body_html:
-          "<p>Hi,</p><p>Great call today. Attaching the final redlines - one open point on the <b>liquidation preference</b> (we're proposing 1x non-participating).</p><p>If that works, we can sign this week.</p><p>Best,<br/>Dana</p>",
+          // Remote img mirrors services/_gmail_fake_backend.py: exercises the
+          // blocked-by-default "Show images" banner (.invalid never resolves).
+          "<p>Hi,</p><p>Great call today. Attaching the final redlines - one open point on the <b>liquidation preference</b> (we're proposing 1x non-participating).</p><p>If that works, we can sign this week.</p><p>Best,<br/>Dana</p><img src=\"https://img.invalid/northwind-logo.png\" alt=\"Northwind Ventures\">",
         attachments: [
           { filename: "termsheet-v7.pdf", mime_type: "application/pdf", size: 184320 },
         ],

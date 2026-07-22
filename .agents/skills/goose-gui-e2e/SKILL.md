@@ -205,6 +205,7 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | `scenarios/settings_render.json` | scenario 1: LLM opens the Settings app; assert it renders |
 | `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings.subscribe` → assert the re-render |
 | `scenarios/gmail_thread_render.json` | scenario 3: LLM opens a thread via `gmail_get_thread`; assert the gmail_inbox reader iframe renders (needs `GMAIL_FAKE_BACKEND`) |
+| `scenarios/gmail_remote_images.json` | scenario 4: remote-image pipeline - assert the blocked-by-default "Show images" banner renders, click it, and assert the `gmail_inbox.fetch_image` round-trip re-renders as "Retry" (fixture URL is `.invalid`, so the SSRF guard rejects it deterministically offline and in CI) |
 
 Also outside the skill: `tests/test_apps_e2e.py` (guarded pytest entry) and
 `.github/workflows/apps_e2e.yaml` (opt-in CI).
