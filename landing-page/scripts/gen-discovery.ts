@@ -48,7 +48,7 @@ const toolsValid =
   tools.length > 0 &&
   tools.every((t): t is Tool => {
     if (typeof t !== "object" || t === null) return false;
-    const o = t as Record<string, unknown>;
+    const o = t as unknown as Record<string, unknown>;
     return typeof o.name === "string" && typeof o.description === "string";
   });
 if (!toolsValid) {
