@@ -1,146 +1,52 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { sanitizeHtml } from "./sanitize";
+import { useEffect, useRef, useState } from "react";
+import type {
+  Draft,
+  DraftAttachment,
+  McpAppLike,
+  SaveStatus,
+  SentState,
+  Thread,
+} from "./types";
+import { draftFields, extractDraft, extractStructuredContent, extractThread, fieldsEqual } from "./draft";
+import { discardContextText, sentContextText } from "./modelContext";
+import { useAutoGrow, useIsMobile } from "./hooks";
+import { ThreadPanel } from "./ThreadPanel";
+import {
+  AttachmentsSection,
+  useAttachments,
+  type SaveAttachment,
+} from "./attachments";
+import {
+  agentBannerStyle,
+  buttonRowStyle,
+  confirmRowStyle,
+  containerStyle,
+  destructiveButtonStyle,
+  headerStyle,
+  inputStyle,
+  labelStyle,
+  linkButtonStyle,
+  mobileTextareaStyle,
+  mobileThreadMessagesContainer,
+  mutedStyle,
+  primaryButtonStyle,
+  readOnlyStyle,
+  rowStyle,
+  secondaryButtonStyle,
+  smallPrimaryStyle,
+  smallSecondaryStyle,
+  statusStyle,
+  successStyle,
+  textareaStyle,
+  threadMessagesContainer,
+} from "./styles";
 
-export type Draft = {
-  draft_id: string;
-  from?: string;
-  to?: string;
-  cc?: string;
-  bcc?: string;
-  subject?: string;
-  body?: string;
-  thread_id?: string;
-};
-
-export type ThreadMessage = {
-  message_id: string;
-  from?: string;
-  to?: string;
-  cc?: string;
-  date?: string;
-  subject?: string;
-  body_text?: string;
-  body_html?: string;
-};
-
-export type Thread = {
-  thread_id: string;
-  messages: ThreadMessage[];
-};
-
-export type McpAppLike = {
-  ontoolresult?: (result: any) => void;  // eslint-disable-line @typescript-eslint/no-explicit-any
-  callServerTool: (args: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
-};
+// Re-exported so consumers (and tests) keep importing types from "./Composer".
+export type { Draft, McpAppLike, Thread, ThreadMessage } from "./types";
 
 type ComposerProps = {
   mcpApp: McpAppLike;
 };
-
-type SaveStatus =
-  | { kind: "idle" }
-  | { kind: "saving" }
-  | { kind: "saved"; at: Date }
-  | { kind: "error"; message: string };
-
-type SentState = { message_id: string };
-
-export function extractDraft(raw: unknown): Draft | null {
-  if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
-  if (typeof data !== "object" || data === null) return null;
-  const draftId = data["draft_id"];
-  if (typeof draftId !== "string") return null;
-  return {
-    draft_id: draftId,
-    from: typeof data["from"] === "string" ? (data["from"] as string) : undefined,
-    to: typeof data["to"] === "string" ? (data["to"] as string) : undefined,
-    cc: typeof data["cc"] === "string" ? (data["cc"] as string) : undefined,
-    bcc: typeof data["bcc"] === "string" ? (data["bcc"] as string) : undefined,
-    subject:
-      typeof data["subject"] === "string" ? (data["subject"] as string) : undefined,
-    body: typeof data["body"] === "string" ? (data["body"] as string) : undefined,
-    thread_id:
-      typeof data["thread_id"] === "string"
-        ? (data["thread_id"] as string)
-        : undefined,
-  };
-}
-
-function fieldsEqual(a: Draft, b: Draft): boolean {
-  return (
-    a.to === b.to &&
-    a.cc === b.cc &&
-    a.bcc === b.bcc &&
-    a.subject === b.subject &&
-    a.body === b.body
-  );
-}
-
-// Tracks whether the app is rendered in a narrow (mobile) viewport. Guards
-// against `matchMedia` being unavailable (jsdom in tests) by falling back to
-// desktop behavior, so the thread stays expanded and the body keeps its inner
-// scroll there - exactly the "desktop is fine" case.
-function useIsMobile(query = "(max-width: 600px)"): boolean {
-  const getMatch = () =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia(query).matches
-      : false;
-  const [matches, setMatches] = useState(getMatch);
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
-    }
-    const mql = window.matchMedia(query);
-    const onChange = () => setMatches(mql.matches);
-    onChange();
-    // Safari < 14 (older iOS) has no addEventListener on MediaQueryList and
-    // only implements the legacy addListener/removeListener API. Calling the
-    // missing method would throw at mount, so fall back when it's absent.
-    if (typeof mql.addEventListener === "function") {
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    }
-    mql.addListener(onChange);
-    return () => mql.removeListener(onChange);
-  }, [query]);
-  return matches;
-}
-
-// Grows a textarea to fit its content while `enabled`, so there is no inner
-// scroll region for a touch drag to fight. Recomputes on three triggers:
-//   - `value` changes (typing / an agent rewriting the body),
-//   - `enabled` flips (crossing the mobile breakpoint),
-//   - the element's own width changes (host iframe resized *without* crossing
-//     the breakpoint - otherwise the height would go stale and, because the
-//     mobile style hides overflow, the extra lines would be unreachable).
-// Uses useLayoutEffect so the box is sized before paint, avoiding a one-frame
-// clip on each keystroke. When disabled it clears the inline height so the
-// CSS fixed-height (desktop) box takes back over.
-function useAutoGrow(
-  ref: React.RefObject<HTMLTextAreaElement | null>,
-  value: string,
-  enabled: boolean,
-) {
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (!enabled) {
-      el.style.height = "";
-      return;
-    }
-    const resize = () => {
-      el.style.height = "auto";
-      el.style.height = `${el.scrollHeight}px`;
-    };
-    resize();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(resize);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref, value, enabled]);
-}
 
 export function Composer({ mcpApp }: ComposerProps) {
   const isMobile = useIsMobile();
@@ -153,8 +59,27 @@ export function Composer({ mcpApp }: ComposerProps) {
   const [pendingAgent, setPendingAgent] = useState<Draft | null>(null);
   const localDirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set once a send/discard is committed (the textarea stays mounted until the
+  // RPC resolves): blocks autosave + attachment ops against the terminal draft.
+  const closingRef = useRef(false);
   const draftRef = useRef<Draft | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  // The last server-confirmed attachment set - the authoritative keep-list a
+  // whole-set-replace save must echo back. Advanced only by server responses
+  // (never by optimistic UI), so concurrent mutations build on committed state.
+  const attachmentsRef = useRef<DraftAttachment[]>([]);
+  // Serializes every draft write (text autosave, attachment add/remove, send)
+  // into one chain, so a whole-set-replace save can't interleave with another
+  // and drop a file, and a slow save can't land after a newer one.
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = saveChainRef.current.then(fn, fn);
+    saveChainRef.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
 
   useEffect(() => {
     draftRef.current = draft;
@@ -172,6 +97,7 @@ export function Composer({ mcpApp }: ComposerProps) {
       const current = draftRef.current;
       if (!current) {
         setDraft(incoming);
+        attachmentsRef.current = incoming.attachments ?? [];
         localDirtyRef.current = false;
         return;
       }
@@ -180,6 +106,7 @@ export function Composer({ mcpApp }: ComposerProps) {
         return;
       }
       setDraft(incoming);
+      attachmentsRef.current = incoming.attachments ?? [];
       localDirtyRef.current = false;
     };
     mcpApp.ontoolresult = handler;
@@ -190,40 +117,66 @@ export function Composer({ mcpApp }: ComposerProps) {
     };
   }, [mcpApp]);
 
-  const scheduleAutoSave = (next: Draft) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      void persistDraft(next);
-    }, 800);
+  // Best-effort: host support for `ui/update-model-context` varies (the MCP
+  // Apps extension is young), and the send/discard that triggered the push
+  // already succeeded - a failure here must never surface in the UI. Call
+  // sites use `void pushModelContext(...)` (never `await`) so a surrounding
+  // try/catch structurally cannot repurpose a push failure into an error UI.
+  const pushModelContext = async (text: string) => {
+    try {
+      await mcpApp.updateModelContext({ content: [{ type: "text", text }] });
+    } catch {
+      // Host rejected or doesn't implement context updates; nothing to do.
+    }
   };
 
-  const persistDraft = async (next: Draft) => {
+  // The single draft-write path. Reads the freshest text off draftRef at call
+  // time (never a pre-await snapshot), so a save issued after a slow file read
+  // can't revert a live edit. `attachments`: undefined omits the arg (preserve
+  // files); an array is a whole-set replace whose echoed result is adopted as
+  // truth. Throws on failure so attachment callers can react.
+  const doSave = async (attachments?: SaveAttachment[]): Promise<Draft | null> => {
+    const snapshot = draftRef.current;
+    if (!snapshot) return null;
     setSaveStatus({ kind: "saving" });
-    // Snapshot what we're saving so a save that completes after a newer
-    // edit doesn't falsely clear the dirty flag and lose the unsaved diff.
-    const snapshot = next;
+    const args: Record<string, unknown> = {
+      draft_id: snapshot.draft_id,
+      ...draftFields(snapshot),
+    };
+    if (attachments !== undefined) args.attachments = attachments;
     try {
-      await mcpApp.callServerTool({
+      const raw = await mcpApp.callServerTool({
         name: "gmail_composer.save_draft",
-        arguments: {
-          draft_id: snapshot.draft_id,
-          to: snapshot.to ?? "",
-          cc: snapshot.cc ?? "",
-          bcc: snapshot.bcc ?? "",
-          subject: snapshot.subject ?? "",
-          body: snapshot.body ?? "",
-        },
+        arguments: args,
       });
+      const saved = extractDraft(raw);
+      if (attachments !== undefined) {
+        attachmentsRef.current = saved?.attachments ?? [];
+      }
       setSaveStatus({ kind: "saved", at: new Date() });
-      // Only clear dirty if the user hasn't typed anything newer.
+      // Clear dirty only if nothing newer was typed than the text we just sent.
       const latest = draftRef.current;
       if (latest && fieldsEqual(latest, snapshot)) {
         localDirtyRef.current = false;
       }
+      return saved;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
+      throw err;
     }
+  };
+
+  const scheduleAutoSave = () => {
+    // Don't arm a save once the draft is being sent/discarded.
+    if (closingRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      // Re-check: a terminal transition may have happened since arming.
+      // Text-only save (no attachments arg) preserves existing files.
+      if (closingRef.current) return;
+      enqueue(() => doSave()).catch(() => {});
+    }, 800);
   };
 
   const updateField = (key: keyof Draft, value: string) => {
@@ -231,42 +184,63 @@ export function Composer({ mcpApp }: ComposerProps) {
     const next: Draft = { ...draft, [key]: value };
     setDraft(next);
     localDirtyRef.current = true;
-    scheduleAutoSave(next);
+    scheduleAutoSave();
   };
 
   const onSaveNow = () => {
-    if (!draft) return;
+    if (!draftRef.current || closingRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    void persistDraft(draft);
+    enqueue(() => doSave()).catch(() => {});
   };
 
+  const attachmentApi = useAttachments({
+    draftRef,
+    setDraft,
+    setSaveStatus,
+    attachmentsRef,
+    doSave,
+    enqueue,
+    closingRef,
+  });
+
   const onSend = async () => {
-    if (!draft) return;
+    // Single-flight: a repeat click while a send is in flight is a no-op.
+    if (!draftRef.current || closingRef.current) return;
+    // Committing to send: block new autosaves against this draft (reset below
+    // if the send fails and the composer stays editable).
+    closingRef.current = true;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     try {
-      const raw = await mcpApp.callServerTool({
-        name: "gmail_composer.send",
-        arguments: {
-          draft_id: draft.draft_id,
-          to: draft.to ?? "",
-          cc: draft.cc ?? "",
-          bcc: draft.bcc ?? "",
-          subject: draft.subject ?? "",
-          body: draft.body ?? "",
-        },
+      // Serialized after any in-flight attachment upload so the files are
+      // persisted before we send; reads the freshest text at issue time.
+      const raw = await enqueue(() => {
+        const cur = draftRef.current;
+        if (!cur) throw new Error("no draft to send");
+        return mcpApp.callServerTool({
+          name: "gmail_composer.send",
+          arguments: { draft_id: cur.draft_id, ...draftFields(cur) },
+        });
       });
-      const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
-      const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
-      const messageId = (inner as { message_id?: string })?.message_id ?? "";
+      const inner = extractStructuredContent<{ message_id?: string }>(raw);
+      const messageId = inner?.message_id ?? "";
       setSent({ message_id: messageId });
+      const cur = draftRef.current;
+      if (cur) void pushModelContext(sentContextText(cur, messageId));
     } catch (err) {
+      // Send failed: the composer stays editable, so re-enable autosaving.
+      closingRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
     }
   };
 
   const onDiscardConfirm = async () => {
-    if (!draft) return;
+    const cur = draftRef.current;
+    // Single-flight: ignore a repeat confirm while a discard is in flight.
+    if (!cur || closingRef.current) return;
+    // Committing to discard: block new autosaves (a keystroke during the
+    // in-flight delete must not resurrect the draft). Reset on failure.
+    closingRef.current = true;
     // Cancel any queued autosave so a debounced save can't race ahead and
     // re-create a row immediately after the discard call returns.
     if (saveTimerRef.current) {
@@ -274,12 +248,18 @@ export function Composer({ mcpApp }: ComposerProps) {
       saveTimerRef.current = null;
     }
     try {
-      await mcpApp.callServerTool({
-        name: "gmail_composer.discard",
-        arguments: { draft_id: draft.draft_id },
-      });
+      // Serialized so it runs after any in-flight save rather than racing it.
+      await enqueue(() =>
+        mcpApp.callServerTool({
+          name: "gmail_composer.discard",
+          arguments: { draft_id: cur.draft_id },
+        }),
+      );
       setDiscarded(true);
+      void pushModelContext(discardContextText(cur));
     } catch (err) {
+      // Discard failed: the draft still exists and stays editable.
+      closingRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setSaveStatus({ kind: "error", message: msg });
     } finally {
@@ -294,6 +274,7 @@ export function Composer({ mcpApp }: ComposerProps) {
       saveTimerRef.current = null;
     }
     setDraft(pendingAgent);
+    attachmentsRef.current = pendingAgent.attachments ?? [];
     setPendingAgent(null);
     localDirtyRef.current = false;
   };
@@ -446,6 +427,18 @@ export function Composer({ mcpApp }: ComposerProps) {
         aria-label="Body"
       />
 
+      <AttachmentsSection
+        attachments={draft.attachments ?? []}
+        uploads={attachmentApi.uploads}
+        dragActive={attachmentApi.dragActive}
+        setDragActive={attachmentApi.setDragActive}
+        fileInputRef={attachmentApi.fileInputRef}
+        onFilesChosen={attachmentApi.onFilesChosen}
+        onRemoveAttachment={attachmentApi.onRemoveAttachment}
+        dismissUpload={attachmentApi.dismissUpload}
+        onDrop={attachmentApi.onDrop}
+      />
+
       <div style={buttonRowStyle}>
         <button onClick={onSend} style={primaryButtonStyle}>
           Send
@@ -479,190 +472,6 @@ export function Composer({ mcpApp }: ComposerProps) {
   );
 }
 
-function extractThread(raw: unknown): Thread | null {
-  if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
-  if (!data || typeof data !== "object") return null;
-  if (!Array.isArray((data as { messages?: unknown }).messages)) return null;
-  return data as unknown as Thread;
-}
-
-function ThreadPanel({
-  thread,
-  collapsed,
-  messagesStyle,
-  onToggle,
-}: {
-  thread: Thread;
-  collapsed: boolean;
-  messagesStyle: React.CSSProperties;
-  onToggle: () => void;
-}) {
-  return (
-    <div style={threadPanelStyle}>
-      <button onClick={onToggle} style={threadToggleBtn}>
-        {collapsed ? "▶" : "▼"} Conversation ({thread.messages.length} message
-        {thread.messages.length === 1 ? "" : "s"})
-      </button>
-      {!collapsed && (
-        <div style={messagesStyle}>
-          {thread.messages.map((m, i) => (
-            <ThreadMessageView
-              key={m.message_id}
-              message={m}
-              defaultExpanded={i === thread.messages.length - 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ThreadMessageView({
-  message,
-  defaultExpanded,
-}: {
-  message: ThreadMessage;
-  defaultExpanded: boolean;
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  if (!expanded) {
-    return (
-      <div
-        style={threadMsgCollapsedStyle}
-        onClick={() => setExpanded(true)}
-      >
-        <strong style={{ fontSize: 12 }}>{message.from || "(unknown)"}</strong>
-        <span style={{ color: "#888", fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {message.body_text?.slice(0, 100) || message.subject || ""}
-        </span>
-        <span style={{ color: "#999", fontSize: 10, flexShrink: 0 }}>
-          {relativeTime(message.date)}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div style={threadMsgExpandedStyle}>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, cursor: "pointer" }}
-        onClick={() => setExpanded(false)}
-      >
-        <div>
-          <strong style={{ fontSize: 12 }}>{message.from || "(unknown)"}</strong>
-          {message.to && <span style={{ fontSize: 11, color: "#666", marginLeft: 8 }}>to {message.to}</span>}
-        </div>
-        <span style={{ fontSize: 10, color: "#999" }}>{relativeTime(message.date)}</span>
-      </div>
-      <ThreadMessageBody message={message} />
-    </div>
-  );
-}
-
-function ThreadMessageBody({ message }: { message: ThreadMessage }) {
-  const [showQuoted, setShowQuoted] = useState(false);
-
-  if (message.body_html) {
-    const { main, quoted } = splitHtmlAtQuote(message.body_html);
-    return (
-      <div>
-        <div style={threadBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }} />
-        {quoted && (
-          <>
-            <button onClick={() => setShowQuoted((v) => !v)} style={quoteToggleBtnStyle}>
-              &bull;&bull;&bull;
-            </button>
-            {showQuoted && (
-              <div
-                style={{ ...threadBodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }}
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }}
-              />
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-  if (message.body_text) {
-    const { main, quoted } = splitTextAtQuote(message.body_text);
-    return (
-      <div>
-        <pre style={threadBodyTextStyle}>{main}</pre>
-        {quoted && (
-          <>
-            <button onClick={() => setShowQuoted((v) => !v)} style={quoteToggleBtnStyle}>
-              &bull;&bull;&bull;
-            </button>
-            {showQuoted && (
-              <pre style={{ ...threadBodyTextStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }}>{quoted}</pre>
-            )}
-          </>
-        )}
-      </div>
-    );
-  }
-  return <div style={{ color: "#888", fontSize: 12 }}>(no body)</div>;
-}
-
-function splitHtmlAtQuote(html: string): { main: string; quoted: string | null } {
-  const markers = [
-    '<div class="gmail_quote"',
-    "<div class=\"gmail_quote\"",
-    '<blockquote class="gmail_quote"',
-    "<blockquote class=\"gmail_quote\"",
-    '<div class=3D"gmail_quote"',
-  ];
-  for (const marker of markers) {
-    const idx = html.indexOf(marker);
-    if (idx > 0) return { main: html.slice(0, idx), quoted: html.slice(idx) };
-  }
-  const onWroteRe = /(<br\s*\/?>[\s\S]{0,20}?On\s.{10,80}\s+wrote:\s*<br\s*\/?>)/i;
-  const m = onWroteRe.exec(html);
-  if (m && m.index > 50) return { main: html.slice(0, m.index), quoted: html.slice(m.index) };
-  return { main: html, quoted: null };
-}
-
-function splitTextAtQuote(text: string): { main: string; quoted: string | null } {
-  const lines = text.split("\n");
-  const onWroteRe = /^On .{10,80} wrote:\s*$/;
-  for (let i = 0; i < lines.length; i++) {
-    if (onWroteRe.test(lines[i]) && i > 0) {
-      return { main: lines.slice(0, i).join("\n"), quoted: lines.slice(i).join("\n") };
-    }
-  }
-  let firstQuoteLine = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith(">")) {
-      if (firstQuoteLine === -1) firstQuoteLine = i;
-    } else if (firstQuoteLine !== -1) {
-      break;
-    }
-  }
-  if (firstQuoteLine > 0 && lines.length - firstQuoteLine >= 3) {
-    return { main: lines.slice(0, firstQuoteLine).join("\n"), quoted: lines.slice(firstQuoteLine).join("\n") };
-  }
-  return { main: text, quoted: null };
-}
-
-function relativeTime(iso: string | undefined): string {
-  if (!iso) return "";
-  const dt = new Date(iso);
-  if (Number.isNaN(dt.getTime())) return "";
-  const ageMs = Date.now() - dt.getTime();
-  const mins = Math.round(ageMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.round(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return dt.toLocaleDateString();
-}
-
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={rowStyle}>
@@ -686,247 +495,4 @@ function renderStatus(s: SaveStatus): string {
     case "error":
       return `Save failed: ${s.message}`;
   }
-}
-
-const containerStyle: React.CSSProperties = {
-  fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
-  padding: 16,
-  maxWidth: 720,
-  color: "#111",
-};
-
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: 12,
-};
-
-const rowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  marginBottom: 8,
-};
-
-const labelStyle: React.CSSProperties = {
-  width: 70,
-  color: "#555",
-  fontSize: 13,
-};
-
-const inputStyle: React.CSSProperties = {
-  flex: 1,
-  padding: "6px 8px",
-  border: "1px solid #ddd",
-  borderRadius: 4,
-  fontSize: 14,
-  width: "100%",
-  boxSizing: "border-box",
-};
-
-const readOnlyStyle: React.CSSProperties = {
-  padding: "6px 8px",
-  color: "#666",
-  fontSize: 14,
-};
-
-const textareaStyle: React.CSSProperties = {
-  width: "100%",
-  padding: 8,
-  border: "1px solid #ddd",
-  borderRadius: 4,
-  fontSize: 14,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  marginTop: 8,
-  boxSizing: "border-box",
-};
-
-// Mobile: the box auto-grows to its content (see the effect in Composer), so
-// there is no inner scroll to trap a finger drag - the page scrolls instead.
-// `touchAction: manipulation` and a comfortable min-height round it out.
-const mobileTextareaStyle: React.CSSProperties = {
-  ...textareaStyle,
-  minHeight: 180,
-  overflowY: "hidden",
-  resize: "none",
-  fontSize: 16, // prevents iOS Safari from zooming in on focus
-  touchAction: "manipulation",
-};
-
-const buttonRowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  marginTop: 12,
-  alignItems: "center",
-  flexWrap: "wrap",
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  background: "#3b82f6",
-  color: "white",
-  border: "none",
-  padding: "6px 14px",
-  borderRadius: 6,
-  cursor: "pointer",
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  background: "#f3f4f6",
-  color: "#111",
-  border: "1px solid #ddd",
-  padding: "6px 12px",
-  borderRadius: 6,
-  cursor: "pointer",
-};
-
-const destructiveButtonStyle: React.CSSProperties = {
-  background: "transparent",
-  color: "#991b1b",
-  border: "1px solid #fecaca",
-  padding: "6px 12px",
-  borderRadius: 6,
-  cursor: "pointer",
-};
-
-const linkButtonStyle: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  color: "#3b82f6",
-  padding: 0,
-  cursor: "pointer",
-  fontSize: 13,
-};
-
-const smallPrimaryStyle: React.CSSProperties = {
-  ...primaryButtonStyle,
-  padding: "2px 8px",
-  fontSize: 12,
-};
-
-const smallSecondaryStyle: React.CSSProperties = {
-  ...secondaryButtonStyle,
-  padding: "2px 8px",
-  fontSize: 12,
-};
-
-const confirmRowStyle: React.CSSProperties = {
-  display: "inline-flex",
-  gap: 8,
-  alignItems: "center",
-  fontSize: 13,
-  color: "#991b1b",
-};
-
-const agentBannerStyle: React.CSSProperties = {
-  background: "#fff7ed",
-  border: "1px solid #fed7aa",
-  padding: "6px 10px",
-  borderRadius: 6,
-  marginBottom: 8,
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  fontSize: 13,
-};
-
-const successStyle: React.CSSProperties = {
-  background: "#ecfdf5",
-  border: "1px solid #a7f3d0",
-  padding: "10px 12px",
-  borderRadius: 6,
-  color: "#065f46",
-};
-
-const mutedStyle: React.CSSProperties = {
-  color: "#666",
-};
-
-const threadPanelStyle: React.CSSProperties = {
-  borderBottom: "1px solid #e5e7eb",
-  marginBottom: 12,
-  paddingBottom: 8,
-};
-
-const threadToggleBtn: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  padding: "4px 0",
-  cursor: "pointer",
-  fontSize: 13,
-  color: "#374151",
-  fontWeight: 600,
-};
-
-const threadMessagesContainer: React.CSSProperties = {
-  maxHeight: 280,
-  overflowY: "auto",
-  WebkitOverflowScrolling: "touch",
-  marginTop: 6,
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-};
-
-// Mobile: drop the fixed-height inner scroll region. Nested scrolling inside
-// the iframe is the thing that feels broken under touch, so let the messages
-// flow and the whole page scroll instead.
-const mobileThreadMessagesContainer: React.CSSProperties = {
-  ...threadMessagesContainer,
-  maxHeight: "none",
-  overflowY: "visible",
-};
-
-const threadMsgCollapsedStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "6px 8px",
-  borderRadius: 4,
-  background: "#f9fafb",
-  cursor: "pointer",
-  border: "1px solid #f3f4f6",
-};
-
-const threadMsgExpandedStyle: React.CSSProperties = {
-  padding: "8px 10px",
-  borderRadius: 4,
-  background: "#f9fafb",
-  border: "1px solid #e5e7eb",
-};
-
-const threadBodyHtmlStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: "#374151",
-  lineHeight: 1.5,
-  wordBreak: "break-word",
-};
-
-const threadBodyTextStyle: React.CSSProperties = {
-  whiteSpace: "pre-wrap",
-  fontFamily: "inherit",
-  margin: 0,
-  fontSize: 12,
-  color: "#374151",
-};
-
-const quoteToggleBtnStyle: React.CSSProperties = {
-  display: "block",
-  background: "#f1f3f4",
-  border: "none",
-  borderRadius: 4,
-  padding: "2px 10px",
-  fontSize: 12,
-  color: "#5f6368",
-  cursor: "pointer",
-  marginTop: 4,
-  letterSpacing: 2,
-  fontWeight: 700,
-  lineHeight: 1,
-};
-
-function statusStyle(s: SaveStatus): React.CSSProperties {
-  if (s.kind === "error") return { color: "#991b1b", fontSize: 12 };
-  if (s.kind === "saved") return { color: "#059669", fontSize: 12 };
-  return { color: "#666", fontSize: 12 };
 }

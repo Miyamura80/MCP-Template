@@ -16,6 +16,7 @@ import json
 from contextlib import contextmanager
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy import create_engine
@@ -24,12 +25,16 @@ from sqlalchemy.pool import StaticPool
 
 from api_server.auth.api_key_auth import create_api_key
 from api_server.server import app
+from common import global_config, token_encryption
+from common.token_encryption import FernetEncryption
 from db import engine as db_engine
 from db.base import Base
 from mcp_server._tool_factory import make_tool
 from mcp_server.enhancers import _enhancers, enhance
 from mcp_server.server import mcp
+from models.curation import CurationBucket, ThreadJudgment
 from services import _registry, get_registry, service
+from services.curation_ledger import upsert_judgments
 from tests.test_template import TestTemplate
 
 _PROTOCOL_VERSION = "2025-03-26"
@@ -108,6 +113,24 @@ class _McpSession:
         msg = _read_sse_first_message(resp)
         assert "error" not in msg, f"{method} returned error: {msg.get('error')}"
         return msg["result"]
+
+    def request_error(self, method: str, params: dict | None = None) -> dict:
+        """POST a JSON-RPC request expected to fail; return the `error` member."""
+        self._next_id += 1
+        resp = self._client.post(
+            "/mcp",
+            headers=self._headers(),
+            json={
+                "jsonrpc": "2.0",
+                "id": self._next_id,
+                "method": method,
+                "params": params or {},
+            },
+        )
+        assert resp.status_code == 200, f"{method}: {resp.status_code} {resp.text}"
+        msg = _read_sse_first_message(resp)
+        assert "error" in msg, f"{method} unexpectedly succeeded: {msg}"
+        return msg["error"]
 
     def notify(self, method: str) -> None:
         resp = self._client.post(
@@ -198,6 +221,87 @@ class TestMCPWireE2E(TestTemplate):
             assert len(contents) == 1
             assert contents[0]["mimeType"] == "text/html;profile=mcp-app"
             assert contents[0]["text"].lstrip().lower().startswith("<!doctype html>")
+
+    def test_inbox_get_curation_over_wire(self):
+        """inbox_get_curation crosses the wire as a real enhanced tool: banked
+        verdicts + coverage in structuredContent, and the gmail_inbox app in
+        both tools/list and the CallToolResult _meta.ui."""
+        user = "u-e2e-curation"
+        enc = FernetEncryption(Fernet.generate_key().decode())
+        stubs = [{"id": "t1", "historyId": "100"}]
+        with (
+            patch.object(token_encryption, "require_encryption", return_value=enc),
+            _wire_session(user) as session,
+        ):
+            # Bank one verdict into the same in-memory DB the wire uses.
+            upsert_judgments(
+                user,
+                [
+                    ThreadJudgment(
+                        thread_id="t1",
+                        bucket=CurationBucket.needs_reply,
+                        importance=0.9,
+                        summary="deck due Friday",
+                    )
+                ],
+                history_ids={"t1": "100"},
+            )
+            with (
+                patch("services.inbox_curation_svc._get_gmail_client"),
+                patch(
+                    "services.inbox_curation_svc._list_thread_stubs",
+                    return_value=stubs,
+                ),
+            ):
+                tools = {t["name"]: t for t in session.request("tools/list")["tools"]}
+                # Enhanced read tool: publishes outputSchema + its ui:// app.
+                gc = tools["inbox_get_curation"]
+                assert gc["outputSchema"]["type"] == "object"
+                assert gc["_meta"]["ui"]["resourceUri"] == "ui://mymcp/gmail_inbox"
+                # The mutating write-back stays headless (no UI on the wire).
+                save_meta = tools["inbox_save_curation"].get("_meta")
+                assert save_meta in (None, {})
+
+                result = session.request(
+                    "tools/call", {"name": "inbox_get_curation", "arguments": {}}
+                )
+                sc = result["structuredContent"]
+                assert sc["coverage"] == {"curated": 1, "stale": 0, "uncurated": 0}
+                assert sc["records"][0]["thread_id"] == "t1"
+                assert sc["records"][0]["summary"] == "deck due Friday"
+                assert sc["records"][0]["ledger_status"] == "curated"
+                assert result["isError"] is False
+                # Enhancer attached the dashboard app on the result.
+                assert result["_meta"]["ui"]["resourceUri"] == "ui://mymcp/gmail_inbox"
+
+    def test_not_connected_gmail_tool_returns_url_elicitation_error(self):
+        """A Gmail tool called by a user with no linked account surfaces the
+        SEP-1036 URL-elicitation-required error (JSON-RPC -32042) carrying the
+        Google consent URL - on both the headless (gmail_list_inbox) and
+        enhanced (inbox_get_curation) registration paths. The stateless mount
+        never sees client capabilities, so conversion is the default."""
+        with (
+            patch.object(global_config, "GOOGLE_CLIENT_ID", "e2e-client"),
+            patch.object(
+                global_config,
+                "GOOGLE_REDIRECT_URI",
+                "http://localhost:8000/api/v1/auth/google/callback",
+            ),
+            _wire_session("u-e2e-nolink") as session,
+        ):
+            for tool_name in ("gmail_list_inbox", "inbox_get_curation"):
+                error = session.request_error(
+                    "tools/call", {"name": tool_name, "arguments": {}}
+                )
+                assert error["code"] == -32042, f"{tool_name}: {error}"
+                elic = error["data"]["elicitations"][0]
+                assert elic["mode"] == "url"
+                assert elic["elicitationId"].startswith("connect-")
+                assert elic["url"].startswith("https://accounts.google.com/")
+                # Hosts that don't understand -32042 fall back to the message
+                # text alone, so it must stay self-recovering on its own.
+                assert "gmail_connect" in error["message"]
+                assert elic["url"] in error["message"]
 
     def test_enhanced_tool_call_assembles_full_result_on_wire(self):
         """Register a throwaway enhanced tool and call it through the wire,

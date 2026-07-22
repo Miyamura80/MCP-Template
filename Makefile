@@ -13,6 +13,11 @@ PYTHON=uv run
 TEST=uv run python -m pytest
 PROJECT_ROOT=.
 
+# Minimum uv version required by this repo. `[tool.uv]` in pyproject.toml uses a
+# relative `exclude-newer` duration that only uv >= 0.9.17 can parse; an older uv
+# silently discards the whole table (guard included) and rewrites uv.lock. See #196.
+MIN_UV_VERSION=0.9.17
+
 .DEFAULT_GOAL := help
 
 ########################################################
@@ -64,8 +69,17 @@ check_uv:
 	@if ! command -v uv > /dev/null 2>&1; then \
 		echo "$(RED)uv is not installed. Please install uv before proceeding.$(RESET)"; \
 		exit 1; \
-	else \
-		uv --version; \
+	fi
+	@uv --version
+	@UV_VERSION=$$(uv --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1); \
+	if [ -z "$$UV_VERSION" ]; then \
+		echo "$(RED)Could not determine uv version from 'uv --version'.$(RESET)"; \
+		exit 1; \
+	fi; \
+	if [ "$$(printf '%s\n' "$(MIN_UV_VERSION)" "$$UV_VERSION" | sort -V | head -n1)" != "$(MIN_UV_VERSION)" ]; then \
+		echo "$(RED)uv $$UV_VERSION is too old - this repo needs uv >= $(MIN_UV_VERSION) (relative exclude-newer in [tool.uv]).$(RESET)"; \
+		echo "$(RED)Fix: run .claude/hooks/session-start.sh, or 'uv tool install --force uv>=$(MIN_UV_VERSION)'.$(RESET)"; \
+		exit 1; \
 	fi
 
 check_jq:
@@ -137,26 +151,38 @@ dev_host: ## Run upstream @modelcontextprotocol/ext-apps basic-host for manual s
 	@if [ ! -d /tmp/ext-apps ]; then git clone --depth 1 https://github.com/modelcontextprotocol/ext-apps.git /tmp/ext-apps; fi
 	@cd /tmp/ext-apps/examples/basic-host && bun install --silent && bun start
 
+.PHONY: preview_app preview_smoke
+APP ?= gmail_inbox
+preview_app: ## Build a standalone fixture-driven preview of an MCP App (APP=gmail_inbox)
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@echo "$(YELLOW)🖼  Building $(APP) fixture preview...$(RESET)"
+	@cd mcp_server/dev_preview && bun install --silent && APP=$(APP) bun run build.mjs
+
+preview_smoke: ## Headless Playwright check that an MCP App renders from fixtures (APP=gmail_inbox)
+	@command -v bun >/dev/null 2>&1 || { echo "$(RED)bun is not installed. Install from https://bun.sh$(RESET)"; exit 1; }
+	@echo "$(YELLOW)🧪 Smoke-testing $(APP) fixture preview...$(RESET)"
+	@cd mcp_server/dev_preview && bun install --silent && APP=$(APP) bun run smoke.mjs
+
 mcp_conformance: check_uv ## Run MCPJam apps + protocol conformance against the local /mcp server (requires node)
 	@command -v npx >/dev/null 2>&1 || { echo "$(RED)npx (Node.js) is not installed. Install from https://nodejs.org$(RESET)"; exit 1; }
 	@echo "$(YELLOW)🔌 Running MCPJam conformance...$(RESET)"
 	@uv run python scripts/mcp_conformance.py
 	@echo "$(GREEN)✅ MCP conformance passed.$(RESET)"
 
+GOOSE_E2E := .agents/skills/goose-gui-e2e/scripts
+test_apps_e2e: ## L4 MCP-App e2e: drive the real Goose desktop GUI as an MCP client (needs one-time setup; NOT in make ci)
+	@test -x "$$HOME/goose-e2e/goose_src/target/debug/goose" || { \
+		echo "$(YELLOW)⚠️  Goose not built yet. Run once: bash $(GOOSE_E2E)/setup.sh$(RESET)"; \
+		echo "$(YELLOW)   (needs registry.npmmirror.com on the network allowlist; ~6-8 min)$(RESET)"; exit 1; }
+	@echo "$(YELLOW)🪿 Running Goose-GUI MCP-App e2e (real Electron host)...$(RESET)"
+	@bash $(GOOSE_E2E)/up.sh
+	@bash $(GOOSE_E2E)/run_all.sh
+	@echo "$(GREEN)✅ MCP-App e2e passed.$(RESET)"
+
 gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page tool-surface JSON
 	@echo "$(YELLOW)🛠  Exporting tool surface...$(RESET)"
 	@uv run python scripts/export_tool_surface.py
 	@echo "$(GREEN)✅ Tool surface exported.$(RESET)"
-
-ralph: check_jq ## Run Ralph agent loop
-	@echo "$(RED)⚠️  WARNING: Ralph is an autonomous agent that can modify your codebase.$(RESET)"
-	@echo "$(RED)⚠️  It is HIGHLY RECOMMENDED to run Ralph in a sandboxed environment.$(RESET)"
-	@printf "$(YELLOW)Are you sure you want to continue? [y/N] $(RESET)" && read ans && [ "$$ans" = "y" ] || (echo "$(RED)Aborted.$(RESET)"; exit 1)
-	@echo "$(GREEN)🤖 Starting Ralph Agent...$(RESET)"
-	@chmod +x scripts/ralph.sh
-	@./scripts/ralph.sh $(ARGS)
-	@echo "$(GREEN)✅ Ralph Agent finished.$(RESET)"
-
 
 ########################################################
 # Run Tests
@@ -289,7 +315,7 @@ check_deps: install_tools ## Check for unused dependencies
 	@uv run deptry .
 	@echo "$(GREEN)✅Dependency check completed.$(RESET)"
 
-file_len_check: check_uv ## Check Python files don't exceed max line count
+file_len_check: check_uv ## Check source files (.py/.ts/.tsx) don't exceed max line count
 	@echo "$(YELLOW)🔍Checking file lengths...$(RESET)"
 	@uv run python scripts/check_file_length.py
 	@echo "$(GREEN)✅File length check completed.$(RESET)"

@@ -18,6 +18,7 @@ from typing import Any
 
 from loguru import logger as log
 
+from models.curation import CurationState
 from models.gmail import (
     AttachmentInput,
     AttachmentUpload,
@@ -39,6 +40,7 @@ from models.gmail import (
     GmailDraftSummary as _DraftSummary,
 )
 from services import service
+from services.curation_ledger import mark_state_best_effort
 from services.gmail_draft_helpers import (
     _draft_resource_to_model,
     _fetch_draft_model,
@@ -460,6 +462,15 @@ def gmail_reply_to_thread(input: GmailReplyInput) -> GmailDraft:
         .execute()
     )
     log.debug("Created Gmail reply draft id={}", created.get("id"))
+    # A reply draft is an action on the thread: reflect it in the ledger so the
+    # triage view shows the thread as handled (with its draft) rather than still
+    # needing a reply. Best-effort - a DB hiccup must not fail draft creation.
+    mark_state_best_effort(
+        input.user_id,
+        input.thread_id,
+        CurationState.acted,
+        draft_id=created.get("id"),
+    )
     # Re-fetch at format=full: the create response omits the saved recipients,
     # subject, and body, so echoing it directly would return all-null.
     return _fetch_draft_model(svc, created.get("id") or "")

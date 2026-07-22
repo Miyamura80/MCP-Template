@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { styles } from "./styles";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
@@ -55,9 +56,28 @@ type Phase =
   | "cancelled"
   | "error";
 
-function unwrap(raw: unknown): Record<string, unknown> {
-  const wrapper = (raw ?? {}) as { structuredContent?: unknown };
-  return (wrapper.structuredContent ?? raw ?? {}) as Record<string, unknown>;
+// Same hardened CallToolResult parsing as the gmail apps (#183/#201): accept
+// a structured object only from `structuredContent` or a real MCP TextContent
+// block - never the raw envelope. Local copy pending the shared per-app
+// helpers consolidation (issue #170).
+function extractStructuredContent<T>(raw: unknown): T | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  if (obj.structuredContent && typeof obj.structuredContent === "object") {
+    return obj.structuredContent as T;
+  }
+  if (Array.isArray(obj.content)) {
+    for (const item of obj.content) {
+      if (!item || typeof item !== "object") continue;
+      const candidate = item as { type?: unknown; text?: unknown };
+      if (candidate.type !== "text" || typeof candidate.text !== "string") continue;
+      try {
+        const parsed = JSON.parse(candidate.text);
+        if (parsed && typeof parsed === "object") return parsed as T;
+      } catch { /* not JSON text content */ }
+    }
+  }
+  return null;
 }
 
 type RenderedPage = {
@@ -125,7 +145,10 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
           name: "pdf_signer.get_document",
           arguments: { doc_id: docId },
         });
-        const data = unwrap(raw) as SignerDocument;
+        const data = extractStructuredContent<SignerDocument>(raw);
+        if (data === null) {
+          throw new Error("malformed pdf_signer.get_document result");
+        }
         setDoc(data);
         loadedDocId.current = data.doc_id;
         setPages(await renderAllPages(data.data_base64));
@@ -146,8 +169,8 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
   // The pdf_request_signature tool result carries the doc_id to review.
   useEffect(() => {
     const handler = (result: unknown) => {
-      const data = unwrap(result);
-      const docId = typeof data.doc_id === "string" ? data.doc_id : null;
+      const data = extractStructuredContent<{ doc_id?: unknown }>(result);
+      const docId = typeof data?.doc_id === "string" ? data.doc_id : null;
       if (docId && docId !== loadedDocId.current) {
         void loadDocument(docId);
       }
@@ -173,7 +196,10 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
           consent,
         },
       });
-      const result = unwrap(raw) as SignOutcome;
+      const result = extractStructuredContent<SignOutcome>(raw);
+      if (result === null) {
+        throw new Error("malformed pdf_signer.sign result");
+      }
       setOutcome(result);
       if (result.status === "signed") {
         setPhase("signed");
@@ -343,143 +369,3 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  shell: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100vh",
-    fontFamily: "system-ui, -apple-system, sans-serif",
-    background: "#f5f5f5",
-    color: "#1f1f1f",
-  },
-  centered: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100vh",
-    color: "#5f6368",
-    fontFamily: "system-ui, sans-serif",
-  },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: "10px 16px",
-    background: "#fff",
-    borderBottom: "1px solid #e0e0e0",
-    flexShrink: 0,
-  },
-  filename: { fontWeight: 600, fontSize: 14 },
-  pendingBadge: {
-    fontSize: 12,
-    color: "#8a5a00",
-    background: "#fff3d6",
-    border: "1px solid #f0d48a",
-    borderRadius: 999,
-    padding: "3px 10px",
-  },
-  signedBadge: {
-    fontSize: 12,
-    color: "#0d652d",
-    background: "#e6f4ea",
-    border: "1px solid #b7dfc0",
-    borderRadius: 999,
-    padding: "3px 10px",
-  },
-  cancelledBadge: {
-    fontSize: 12,
-    color: "#5f6368",
-    background: "#eee",
-    borderRadius: 999,
-    padding: "3px 10px",
-  },
-  pagesScroller: {
-    flex: 1,
-    overflow: "auto",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 16,
-    padding: 16,
-  },
-  pageWrap: {
-    position: "relative",
-    background: "#fff",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
-    flexShrink: 0,
-  },
-  highlight: {
-    position: "absolute",
-    border: "2px dashed #d97706",
-    background: "rgba(251, 191, 36, 0.15)",
-    borderRadius: 4,
-    pointerEvents: "none",
-  },
-  highlightLabel: {
-    position: "absolute",
-    top: -20,
-    left: 0,
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#92400e",
-    background: "#fde68a",
-    borderRadius: 3,
-    padding: "1px 6px",
-  },
-  ceremony: {
-    padding: "12px 16px",
-    background: "#fff",
-    borderTop: "1px solid #e0e0e0",
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    flexShrink: 0,
-  },
-  errorBanner: {
-    background: "#fdecea",
-    color: "#b3261e",
-    border: "1px solid #f5c6c0",
-    borderRadius: 6,
-    padding: "6px 10px",
-    fontSize: 13,
-  },
-  fieldLabel: { fontSize: 12, fontWeight: 600, color: "#444" },
-  nameInput: {
-    fontSize: 16,
-    fontFamily: "'Segoe Script', 'Bradley Hand', cursive",
-    padding: "8px 10px",
-    border: "1px solid #dadce0",
-    borderRadius: 6,
-  },
-  consentRow: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: 8,
-    fontSize: 13,
-    color: "#333",
-  },
-  buttonRow: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  cancelBtn: {
-    background: "none",
-    border: "1px solid #dadce0",
-    borderRadius: 6,
-    padding: "8px 16px",
-    fontSize: 14,
-    cursor: "pointer",
-  },
-  signBtn: {
-    background: "#0b57d0",
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    padding: "8px 20px",
-    fontSize: 14,
-    fontWeight: 600,
-  },
-};

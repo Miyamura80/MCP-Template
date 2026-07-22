@@ -7,6 +7,7 @@ relies on a signed ``state`` token to recover the user_id.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import html
@@ -78,7 +79,13 @@ def _success_page(email: str) -> HTMLResponse:
         content=(
             "<!doctype html><html><body>"
             "<h1>Connected ✓</h1>"
-            f"<p>Gmail is now linked to {email}. You can close this tab.</p>"
+            f"<p>Gmail is now linked to {email}.</p>"
+            # Under stateless HTTP the server cannot push a completion
+            # notification to the MCP client (SEP-1036
+            # notifications/elicitation/complete), so this page is the user's
+            # only completion signal - it must say what to do next.
+            "<p>Return to your chat and ask the assistant to retry - "
+            "it can use Gmail now. You can close this tab.</p>"
             "</body></html>"
         ),
     )
@@ -178,7 +185,11 @@ async def callback(
         return _error_page("Missing OAuth state parameter.")
     user_id = _verify_state(state)
     if user_id is None:
-        return _error_page("Invalid or expired OAuth state.")
+        return _error_page(
+            "Invalid or expired OAuth state. Authorization links are only "
+            "valid for 10 minutes - go back to your chat and retry the "
+            "request to get a fresh link."
+        )
     if not code:
         return _error_page("Missing authorization code.")
 
@@ -217,4 +228,29 @@ async def callback(
         key_id=enc.key_id,
         scopes=scopes,
     )
+    _maybe_start_watch(user_id)
     return _success_page(email or "your Google account")
+
+
+def _log_watch_start_failure(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        log.warning("Auto-start Gmail watch failed: {}", task.exception())
+
+
+def _maybe_start_watch(user_id: str) -> None:
+    """Fire-and-forget a Gmail watch so a Pub/Sub hiccup never fails OAuth.
+
+    Only runs when push is configured; the watch is best-effort and, if it
+    fails here, the periodic renewal loop will re-establish it later.
+    """
+    if not global_config.GMAIL_PUBSUB_TOPIC:
+        return
+    # Lazy imports: keep the watch service (and Gmail SDK) off the OAuth import
+    # path, and avoid an import cycle through the service registry.
+    from models.gmail_watch import GmailWatchStartInput  # noqa: PLC0415
+    from services.gmail_watch_svc import gmail_watch_start  # noqa: PLC0415
+
+    task = asyncio.create_task(
+        asyncio.to_thread(gmail_watch_start, GmailWatchStartInput(user_id=user_id))
+    )
+    task.add_done_callback(_log_watch_start_failure)

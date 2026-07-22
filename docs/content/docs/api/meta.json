@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "tools",
+    "ask",
     "authentication",
     "billing",
     "rate-limits",

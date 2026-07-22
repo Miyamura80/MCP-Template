@@ -1049,8 +1049,20 @@ class TestGmailCurateInbox(TestTemplate):
 
 class TestGmailNotConnected(TestTemplate):
     def test_raises_when_no_row(self):
-        with _patch_db(), pytest.raises(GmailNotConnectedError):
+        with _patch_db(), pytest.raises(GmailNotConnectedError) as excinfo:
             _get_gmail_client("nonexistent-user")
+        assert excinfo.value.user_id == "nonexistent-user"
+
+    def test_message_is_self_recovering(self):
+        """The error text is what the MCP host LLM sees (isError tool result),
+        so it must contain the full recovery path, not just the diagnosis."""
+        err = GmailNotConnectedError("u-123")
+        msg = str(err)
+        assert "u-123" in msg
+        assert "gmail_connect" in msg
+        assert "auth_url" in msg
+        assert "retry" in msg
+        assert "gmail_status" in msg
 
 
 class TestDraftRoundTrip(TestTemplate):
@@ -1401,7 +1413,9 @@ class TestGmailReplyToThread(TestTemplate):
             patches = _patch_client(mock)
             _apply(patches)
             try:
-                with pytest.raises(ValueError, match="Cannot determine a reply recipient"):
+                with pytest.raises(
+                    ValueError, match="Cannot determine a reply recipient"
+                ):
                     gmail_reply_to_thread(
                         GmailReplyInput(user_id="alice", thread_id="t-rep")
                     )
@@ -1626,9 +1640,7 @@ class TestUpdateDraftOmitVsNullOverMcp(TestTemplate):
         assert "Original body" in decoded.decode("utf-8")
 
     def test_explicit_null_subject_over_mcp_still_clears(self):
-        mime = self._run(
-            {"user_id": "alice", "draft_id": "d-1", "subject": None}
-        )
+        mime = self._run({"user_id": "alice", "draft_id": "d-1", "subject": None})
         # Explicit null is distinct from omitted: it clears.
         assert (mime["Subject"] or "") == ""
         assert mime["To"] == "orig@x"  # untouched
@@ -1638,9 +1650,7 @@ class TestMutationsEchoSavedState(TestTemplate):
     """Mutations must return the persisted draft, not the minimal API response."""
 
     def test_update_echoes_saved_state_not_minimal_response(self):
-        original = _draft_resource(
-            draft_id="d-1", to="a@x", subject="Subj", body="old"
-        )
+        original = _draft_resource(draft_id="d-1", to="a@x", subject="Subj", body="old")
         saved = _draft_resource(
             draft_id="d-1", to="a@x", subject="Subj", body="patched"
         )
@@ -1678,9 +1688,7 @@ class TestMutationsEchoSavedState(TestTemplate):
             _apply(patches)
             try:
                 draft = gmail_compose(
-                    GmailComposeInput(
-                        user_id="alice", to="a@x", subject="S", body="B"
-                    )
+                    GmailComposeInput(user_id="alice", to="a@x", subject="S", body="B")
                 )
             finally:
                 _stop(patches)
@@ -1793,9 +1801,7 @@ class TestUpdateDraftPreservesAttachments(TestTemplate):
             _apply(patches)
             try:
                 gmail_update_draft(
-                    GmailUpdateDraftInput(
-                        user_id="alice", draft_id="d-1", subject=None
-                    )
+                    GmailUpdateDraftInput(user_id="alice", draft_id="d-1", subject=None)
                 )
             finally:
                 _stop(patches)
@@ -1978,9 +1984,7 @@ class TestAddRemoveAttachment(TestTemplate):
         # Content fields untouched.
         assert mime["To"] == "keep@x"
         assert mime["Subject"] == "Keep subj"
-        body_part = next(
-            p for p in mime.walk() if p.get_content_type() == "text/plain"
-        )
+        body_part = next(p for p in mime.walk() if p.get_content_type() == "text/plain")
         decoded = body_part.get_payload(decode=True)
         assert isinstance(decoded, bytes)
         assert "Keep this body" in decoded.decode("utf-8")
@@ -1991,7 +1995,9 @@ class TestAddRemoveAttachment(TestTemplate):
         original = _draft_resource_with_attachment(
             body="Body stays", subject="Subj stays", to="stay@x"
         )
-        echoed = _draft_resource(draft_id="d-1", to="stay@x", subject="Subj stays", body="Body stays")
+        echoed = _draft_resource(
+            draft_id="d-1", to="stay@x", subject="Subj stays", body="Body stays"
+        )
 
         with _patch_db() as factory:
             _seed_token(factory)
@@ -2529,9 +2535,9 @@ def _draft_alt_with_inline_image(
                                 "mimeType": "image/png",
                                 "headers": _headers({"Content-ID": f"<{img_cid}>"}),
                                 "body": {
-                                    "data": base64.urlsafe_b64encode(
-                                        img_bytes
-                                    ).decode("ascii"),
+                                    "data": base64.urlsafe_b64encode(img_bytes).decode(
+                                        "ascii"
+                                    ),
                                     "size": len(img_bytes),
                                 },
                             },
