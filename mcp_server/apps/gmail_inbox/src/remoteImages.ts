@@ -53,8 +53,14 @@ const URL_ATTRS = ["src", "poster", "background"] as const;
  * inflate the banner count with permanently-unfetchable entries.
  */
 function isRestorable(node: Element, attr: string): boolean {
-  if (attr === "poster" || attr === "background") return true;
-  return attr === "src" && (node.tagName === "IMG" || node.tagName === "INPUT");
+  if (attr === "background") return true;
+  if (attr === "poster") return node.tagName === "VIDEO";
+  return (
+    attr === "src" &&
+    (node.tagName === "IMG" ||
+      (node.tagName === "INPUT" &&
+        node.getAttribute("type")?.toLowerCase() === "image"))
+  );
 }
 
 /**

@@ -89,13 +89,15 @@ describe("sanitizeEmailHtml - remote image blocking (default-deny)", () => {
     const { html, remoteUrls } = sanitizeEmailHtml(
       '<video src="https://t.example/clip.mp4"></video>' +
         '<audio src="https://t.example/track.mp3"></audio>' +
+        '<input type="text" src="https://t.example/inert.png">' +
         '<img src="https://t.example/logo.png">',
     );
-    // Only the image is fetchable through the image proxy; media is removed
-    // but must not inflate the banner count with unfetchable entries.
+    // Only the image is fetchable through the image proxy; media and inert
+    // controls are removed but must not inflate the banner count.
     expect(remoteUrls).toEqual(["https://t.example/logo.png"]);
     expect(html).not.toContain("clip.mp4");
     expect(html).not.toContain("track.mp3");
+    expect(html).not.toContain("inert.png");
   });
 
   it("closes the CSS-escape bypass (u\\72l parses as url)", () => {
