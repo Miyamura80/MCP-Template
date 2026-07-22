@@ -23,8 +23,10 @@ from __future__ import annotations
 import asyncio
 import base64
 
+from loguru import logger as log
 from mcp.server.elicitation import AcceptedElicitation
 from mcp.server.fastmcp.server import Context
+from mcp.shared.exceptions import McpError
 from mcp.types import ClientCapabilities, ElicitationCapability
 from pydantic import BaseModel, Field
 
@@ -114,14 +116,29 @@ async def sign(
     if ctx.session.check_client_capability(
         ClientCapabilities(elicitation=ElicitationCapability())
     ):
-        result = await ctx.elicit(
-            message=(
-                f"Sign '{doc.filename}' as \"{name}\"? This applies your "
-                "electronic signature and seals the document - it cannot be "
-                "edited afterwards."
-            ),
-            schema=_SignConfirmation,
-        )
+        try:
+            result = await ctx.elicit(
+                message=(
+                    f"Sign '{doc.filename}' as \"{name}\"? This applies your "
+                    "electronic signature and seals the document - it cannot "
+                    "be edited afterwards."
+                ),
+                schema=_SignConfirmation,
+            )
+        except McpError as exc:
+            # Declared-but-broken hosts exist: Goose advertises elicitation
+            # yet errors requests that originate from an iframe callServerTool
+            # (its elicitation routing follows chat tool-streams). The dialog
+            # is an additive layer, never load-bearing - the in-app ceremony
+            # (typed name + consent + click) already gated this call - so an
+            # elicit *error* degrades to the unconfirmed path exactly like an
+            # undeclared capability. A user *decline* (below) still aborts.
+            log.warning(
+                "pdf_signer.sign: host errored the confirmation elicitation "
+                "({}); proceeding with app-ceremony-only signing",
+                exc,
+            )
+            result = None
         # The result union isn't parameterized by the schema, so re-validate
         # the accepted payload into the schema model at this boundary.
         accepted = (
@@ -129,7 +146,7 @@ async def sign(
             if isinstance(result, AcceptedElicitation)
             else None
         )
-        if accepted is None or not accepted.confirm:
+        if result is not None and (accepted is None or not accepted.confirm):
             # Stays awaiting_signature: the user may retry from the app.
             abort_signing(
                 doc_id=doc_id,
@@ -146,7 +163,7 @@ async def sign(
                     "document is still awaiting signature."
                 ),
             )
-        confirmed = True
+        confirmed = result is not None
     # Blocking work (pypdf clone + RSA seal) off the event loop.
     signed_doc, audit = await asyncio.to_thread(
         perform_signing,
