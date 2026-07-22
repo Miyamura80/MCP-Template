@@ -147,7 +147,8 @@ DOM (`expect_dom_contains`, here the returned signing secret) is the only proof,
 and only the server's real response can produce it. For post-interaction DOM that
 plain text can't see, `interact` also accepts `"expect_selectors": ["css", ...]` -
 CSS selectors that must each match at least one element (e.g.
-`img[src^="data:image/png;base64,"]` to prove a fetched image actually painted). `interaction_rendered: true`
+`img[src^="data:image/png;base64,"]` to prove a fetched image's data URI was
+written into the iframe DOM - presence, not paint). `interaction_rendered: true`
 makes `mcp_probe.py` require it, and `pw_scenario.mjs` fails the drive if the
 post-click DOM never matches. This needs the "Add endpoint" control, which renders
 only when `push_available` is true - `up.sh` sets `GMAIL_PUBSUB_TOPIC` to ungate it

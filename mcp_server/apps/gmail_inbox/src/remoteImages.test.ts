@@ -14,7 +14,8 @@ describe("sanitizeEmailHtml - sanitization (hook must not weaken DOMPurify)", ()
     const { html } = sanitizeEmailHtml(
       '<p style="color:red">hi <a href="https://example.com" target="_blank">link</a></p>',
     );
-    expect(html).toContain('style="color:red"');
+    // CSSOM re-serialization may normalize spacing.
+    expect(html).toMatch(/style="color:\s*red;?"/);
     expect(html).toContain('href="https://example.com"');
     expect(html).toContain('target="_blank"');
   });
@@ -84,14 +85,50 @@ describe("sanitizeEmailHtml - remote image blocking (default-deny)", () => {
     expect(remoteUrls).toEqual(["https://a.example/bg.png"]);
   });
 
+  it("strips non-image media srcs without recording them in remoteUrls", () => {
+    const { html, remoteUrls } = sanitizeEmailHtml(
+      '<video src="https://t.example/clip.mp4"></video>' +
+        '<audio src="https://t.example/track.mp3"></audio>' +
+        '<img src="https://t.example/logo.png">',
+    );
+    // Only the image is fetchable through the image proxy; media is removed
+    // but must not inflate the banner count with unfetchable entries.
+    expect(remoteUrls).toEqual(["https://t.example/logo.png"]);
+    expect(html).not.toContain("clip.mp4");
+    expect(html).not.toContain("track.mp3");
+  });
+
+  it("closes the CSS-escape bypass (u\\72l parses as url)", () => {
+    const { html } = sanitizeEmailHtml(
+      '<div style="background:u\\72l(\'https://evil.example/p.gif\')">x</div>',
+    );
+    expect(html).not.toContain("evil.example");
+  });
+
+  it("strips image-set() references", () => {
+    const { html } = sanitizeEmailHtml(
+      "<div style=\"background-image:image-set('https://t.example/x.png' 1x)\">x</div>",
+    );
+    expect(html).not.toContain("t.example");
+  });
+
+  it("drops a style property mixing data: and remote urls", () => {
+    const { html } = sanitizeEmailHtml(
+      '<div style="background:url(data:image/gif;base64,R0lGOD), url(https://t.example/x.png)">x</div>',
+    );
+    expect(html).not.toContain("t.example");
+  });
+
   it("scrubs remote url() from inline styles but keeps data: urls", () => {
     const { html } = sanitizeEmailHtml(
       "<div style=\"color:red;background-image:url('https://a.example/bg.jpg')\">x</div>" +
         '<div style="background-image:url(data:image/gif;base64,R0lGOD)">y</div>',
     );
     expect(html).not.toContain("a.example");
-    expect(html).toContain("color:red");
-    expect(html).toContain("url(data:image/gif;base64,R0lGOD)");
+    // CSSOM re-serialization may normalize spacing and quote the URI (the
+    // quote then HTML-escapes to &quot; in the serialized attribute).
+    expect(html).toMatch(/color:\s*red/);
+    expect(html).toMatch(/url\((&quot;|["'])?data:image\/gif/);
   });
 
   it("dedupes repeated URLs in remoteUrls", () => {

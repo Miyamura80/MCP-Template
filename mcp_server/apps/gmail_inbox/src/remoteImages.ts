@@ -46,8 +46,55 @@ const REMOTE_RE = /^(https?:)?\/\//i;
  */
 const URL_ATTRS = ["src", "poster", "background"] as const;
 
-/** Strip every non-data `url(...)` from an inline style. */
-const STYLE_URL_RE = /url\(\s*(?!['"]?data:)[^)]*\)/gi;
+/**
+ * Elements whose remote reference is an IMAGE the proxy can fetch and
+ * restore. Other remote media (audio/video/track src) is stripped but NOT
+ * recorded in `remoteUrls` - feeding it to the image-only proxy would just
+ * inflate the banner count with permanently-unfetchable entries.
+ */
+function isRestorable(node: Element, attr: string): boolean {
+  if (attr === "poster" || attr === "background") return true;
+  return attr === "src" && (node.tagName === "IMG" || node.tagName === "INPUT");
+}
+
+/**
+ * Remove external-fetch vectors from an inline style via the CSSOM, not the
+ * raw attribute string. Raw-string regexes are bypassable with CSS escapes
+ * (`u\72l(...)` parses as `url(...)`), so we first re-serialize any
+ * escape-bearing style through the CSS parser (which resolves escapes), then
+ * walk the parsed declarations and drop every property whose value carries a
+ * non-`data:` `url()`, an `image-set()`, or a residual escape.
+ *
+ * Deliberate non-goal: CSS background URLs are stripped, not collected for
+ * "Show images" restore - real email clients rarely honor them and keeping
+ * them out of `remoteUrls` avoids style-rebuild complexity.
+ */
+function scrubStyle(node: Element): void {
+  const raw = node.getAttribute("style");
+  if (!raw) return;
+  const style = (node as HTMLElement).style;
+  if (!style) {
+    node.removeAttribute("style");
+    return;
+  }
+  // Walk the PARSED declarations: escapes are resolved by the CSS parser, so
+  // `u\72l(...)` shows up here as `url(...)` and gets dropped.
+  for (let i = style.length - 1; i >= 0; i--) {
+    const prop = style.item(i);
+    const value = style.getPropertyValue(prop);
+    const urlRefs = value.match(/url\(\s*['"]?[^'")]*/gi) || [];
+    const hasRemoteUrl = urlRefs.some((u) => !/^url\(\s*['"]?data:/i.test(u));
+    if (hasRemoteUrl || /image-set\(/i.test(value) || value.includes("\\")) {
+      style.removeProperty(prop);
+    }
+  }
+  // Re-serialize from the CSSOM unconditionally: any declaration the parser
+  // could not represent (and the walk therefore could not inspect) is dropped
+  // rather than passed through as raw attacker-controlled text.
+  const clean = style.cssText;
+  if (clean) node.setAttribute("style", clean);
+  else node.removeAttribute("style");
+}
 
 export type SanitizedEmailHtml = {
   /** Sanitized HTML, remote references blocked or swapped to data: URIs. */
@@ -80,7 +127,7 @@ export function sanitizeEmailHtml(
       if (!node.hasAttribute(attr)) continue;
       const value = (node.getAttribute(attr) || "").trim();
       if (!value || SAFE_INLINE_RE.test(value)) continue;
-      if (REMOTE_RE.test(value)) {
+      if (REMOTE_RE.test(value) && isRestorable(node, attr)) {
         const url = value.startsWith("//") ? `https:${value}` : value;
         if (!seen.has(url)) {
           seen.add(url);
@@ -95,7 +142,8 @@ export function sanitizeEmailHtml(
           continue;
         }
       }
-      // Default-deny: unresolved remote, relative path, or unknown scheme.
+      // Default-deny: unresolved remote, non-image media, relative path, or
+      // unknown scheme.
       if (attr === "src" && node.tagName === "IMG") {
         node.setAttribute("src", BLOCKED_IMG_PLACEHOLDER);
       } else {
@@ -107,10 +155,7 @@ export function sanitizeEmailHtml(
     // it; the plain src swap covers everything emails actually rely on.
     if (node.hasAttribute("srcset")) node.removeAttribute("srcset");
 
-    const style = node.getAttribute("style");
-    if (style && /url\(/i.test(style)) {
-      node.setAttribute("style", style.replace(STYLE_URL_RE, "none"));
-    }
+    scrubStyle(node);
   };
 
   DOMPurify.addHook("afterSanitizeAttributes", hook);

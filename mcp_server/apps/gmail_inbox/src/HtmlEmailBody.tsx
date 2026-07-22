@@ -47,7 +47,15 @@ export function HtmlEmailBody({
   onClick?: (e: React.MouseEvent<HTMLElement>) => void;
 }) {
   const [showQuoted, setShowQuoted] = useState(false);
-  const [resolved, setResolved] = useState<Map<string, string> | null>(null);
+  // The resolved map is KEYED to the html that produced it: when the html
+  // prop swaps (lean -> full thread upgrade), the very first render of the
+  // new content must start fully blocked. An effect-based reset runs a frame
+  // too late and would flash previously-approved images without consent.
+  const [resolvedState, setResolvedState] = useState<{
+    forHtml: string;
+    map: Map<string, string>;
+  } | null>(null);
+  const resolved = resolvedState?.forHtml === html ? resolvedState.map : null;
   const [loadingImages, setLoadingImages] = useState(false);
   // Bumped whenever html changes; in-flight fetches compare against it and
   // drop their result instead of resurrecting state for replaced content.
@@ -55,7 +63,8 @@ export function HtmlEmailBody({
 
   useEffect(() => {
     fetchSeqRef.current++;
-    setResolved(null);
+    // Free the stale map (the render guard above already ignores it).
+    setResolvedState((cur) => (cur?.forHtml === html ? cur : null));
     setLoadingImages(false);
   }, [html]);
 
@@ -96,10 +105,10 @@ export function HtmlEmailBody({
       ),
     );
     if (seq !== fetchSeqRef.current) return; // html changed mid-fetch
-    setResolved((prev) => {
-      const next = new Map(prev ?? []);
+    setResolvedState((prev) => {
+      const next = new Map(prev?.forHtml === html ? prev.map : []);
       for (const entry of entries) if (entry) next.set(entry[0], entry[1]);
-      return next;
+      return { forHtml: html, map: next };
     });
     setLoadingImages(false);
   };
