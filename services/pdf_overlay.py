@@ -20,19 +20,20 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 
 def unencodable_pdf_text(text: str) -> str:
-    """Characters in ``text`` the standard-14 fonts cannot render, deduped.
+    """Characters in ``text`` the overlay font cannot render, deduped.
 
-    Overlay text is drawn with standard-14 Type1 faces (Latin-1 coverage
-    only), so callers MUST reject text containing these characters up front:
-    letting them through would silently stamp '?' into the document -
-    unacceptable for a signature stamp on a legal document, and bad even for
-    a plain form overlay. Returns "" when the text is fully renderable.
+    Overlays draw with standard-14 Type1 faces under ``/WinAnsiEncoding``
+    (see :func:`type1_font`), so callers MUST reject text containing these
+    characters up front: letting them through would silently stamp '?' (or a
+    wrong glyph) into the document - unacceptable for a signature stamp on a
+    legal document, and bad even for a plain form overlay. Rejected: anything
+    outside Latin-1, plus the C0/C1 control ranges (0x00-0x1F, 0x7F-0x9F)
+    where WinAnsi has no printable glyphs. Returns "" when fully renderable.
     """
     seen: dict[str, None] = {}
     for char in text:
-        try:
-            char.encode("latin-1")
-        except UnicodeEncodeError:
+        code = ord(char)
+        if code < 0x20 or 0x7F <= code <= 0x9F or code > 0xFF:
             seen.setdefault(char)
     return "".join(seen)
 
@@ -49,13 +50,19 @@ def escape_pdf_text(text: str) -> bytes:
 
 
 def type1_font(writer: PdfWriter, base_font: str):
-    """Register a standard-14 Type1 font on the writer; returns the ref."""
+    """Register a standard-14 Type1 font on the writer; returns the ref.
+
+    ``/WinAnsiEncoding`` is declared explicitly: without it, viewers apply
+    StandardEncoding, which maps the upper Latin-1 range to different glyphs
+    (e.g. 0xC0 'À' renders as '¿') - silently corrupting accented names.
+    """
     return writer._add_object(
         DictionaryObject(
             {
                 NameObject("/Type"): NameObject("/Font"),
                 NameObject("/Subtype"): NameObject("/Type1"),
                 NameObject("/BaseFont"): NameObject(base_font),
+                NameObject("/Encoding"): NameObject("/WinAnsiEncoding"),
             }
         )
     )

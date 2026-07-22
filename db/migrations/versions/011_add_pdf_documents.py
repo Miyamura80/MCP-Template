@@ -5,8 +5,8 @@ in the model's context); LLM-visible tools operate on the ``doc_id`` handle.
 No foreign keys into Gmail data - the source locator is opaque JSON so the
 PDF domain remains extractable as a standalone add-on.
 
-Revision ID: 009
-Revises: 008
+Revision ID: 011
+Revises: 010
 Create Date: 2026-07-05
 """
 
@@ -15,8 +15,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "009"
-down_revision: str | None = "008"
+revision: str = "011"
+down_revision: str | None = "010"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

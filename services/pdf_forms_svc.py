@@ -30,6 +30,7 @@ from models.pdf_forms import (
 )
 from services import service
 from services.pdf_documents_repo import (
+    PdfInvalidTransitionError,
     create_document,
     load_document,
     sweep_expired_documents,
@@ -107,6 +108,7 @@ def _document_warnings(inspection) -> list[str]:
     ),
     input_model=PdfOpenInput,
     output_model=PdfOpenResult,
+    mutating=True,
 )
 def pdf_open(input: PdfOpenInput) -> PdfOpenResult:
     # Session init doubles as the retention hook (long-running pattern:
@@ -114,6 +116,9 @@ def pdf_open(input: PdfOpenInput) -> PdfOpenResult:
     sweep_expired_documents()
     resolved = resolve_source(input.user_id, input.source)
     inspection = inspect_pdf(resolved.data)
+    # Render BEFORE persisting: a rejected render_pages request must not
+    # leave an orphaned session row behind the error.
+    page_images = render_pages(resolved.data, input.render_pages, inspection.page_count)
     doc = create_document(
         user_id=input.user_id,
         filename=resolved.filename,
@@ -121,7 +126,6 @@ def pdf_open(input: PdfOpenInput) -> PdfOpenResult:
         page_count=inspection.page_count,
         source_ref=input.source.model_dump(),
     )
-    page_images = render_pages(resolved.data, input.render_pages, inspection.page_count)
     return PdfOpenResult(
         doc_id=doc.doc_id,
         filename=doc.filename,
@@ -166,13 +170,16 @@ def pdf_edit(input: PdfEditInput) -> PdfEditResult:
         raise PdfEditSignedSourceError(pre.existing_signatures)
     new_bytes = apply_ops(doc.current_bytes, input.ops)
     inspection = inspect_pdf(new_bytes, include_text_layout=False)
+    # Render BEFORE persisting: a rejected render_pages request must fail the
+    # whole call with the document unchanged, or a retry would re-apply the
+    # overlay ops on top of the committed first attempt.
+    page_images = render_pages(new_bytes, input.render_pages, inspection.page_count)
     update_document(
         input.doc_id,
         input.user_id,
         data=new_bytes,
         page_count=inspection.page_count,
     )
-    page_images = render_pages(new_bytes, input.render_pages, inspection.page_count)
     return PdfEditResult(
         doc_id=input.doc_id,
         status=PdfDocStatus.OPEN,
@@ -221,6 +228,15 @@ def _validate_placement(placement: SignaturePlacement, data: bytes):
             f"placement page {placement.page} out of range "
             f"(document has {inspection.page_count} pages)."
         )
+    elif placement.x is not None and placement.y is not None:
+        # Anchor must be on the page: an off-page stamp would lock the
+        # ceremony onto a signature the user can never see.
+        size = inspection.page_sizes[(placement.page or 1) - 1]
+        if not (0 <= placement.x <= size.width and 0 <= placement.y <= size.height):
+            raise PdfSignatureRequestError(
+                f"placement ({placement.x}, {placement.y}) is outside page "
+                f"{placement.page}'s bounds ({size.width} x {size.height} pt)."
+            )
     return inspection
 
 
@@ -267,17 +283,27 @@ def pdf_request_signature(
             f"({names}) which the new signature will cryptographically "
             "invalidate - make sure the user knows before they sign."
         )
-    update_document(
-        input.doc_id,
-        input.user_id,
-        new_status=PdfDocStatus.AWAITING_SIGNATURE,
-        placement=input.placement.model_dump(),
-        audit_event={
-            "event": "signature_requested",
-            "placement": input.placement.model_dump(),
-            "invalidates_existing_signatures": inspection.existing_signatures,
-        },
-    )
+    try:
+        update_document(
+            input.doc_id,
+            input.user_id,
+            new_status=PdfDocStatus.AWAITING_SIGNATURE,
+            placement=input.placement.model_dump(),
+            audit_event={
+                "event": "signature_requested",
+                "placement": input.placement.model_dump(),
+                "invalidates_existing_signatures": inspection.existing_signatures,
+            },
+        )
+    except PdfInvalidTransitionError:
+        # Concurrent request won the open -> awaiting race (the repo's row
+        # lock makes the transition atomic). Its placement stands; behave
+        # exactly like the idempotent re-request branch above.
+        return PdfRequestSignatureResult(
+            doc_id=input.doc_id,
+            status="awaiting_user_signature",
+            guidance=_AWAITING_GUIDANCE,
+        )
     return PdfRequestSignatureResult(
         doc_id=input.doc_id,
         status="awaiting_user_signature",

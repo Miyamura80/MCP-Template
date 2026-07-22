@@ -182,11 +182,23 @@ class TestPerformSigning(PdfSigningTestBase):
     def test_signed_output_reports_seal_on_reinspection(self):
         # Round-trip: our own sealed output, re-opened, must surface as a
         # document carrying an existing signature (gap-2 detection works on
-        # real pyHanko signatures, not just synthetic /V dicts).
+        # real pyHanko signatures, not just synthetic /V dicts). Field-based
+        # placement signs the USER'S chosen field, not a separate seal field.
         from services.pdf_inspect import inspect_pdf  # noqa: PLC0415 - test-local
 
         doc_id = self._open_awaiting()
         doc, _ = self._sign(doc_id)
+        inspection = inspect_pdf(doc.current_bytes, include_text_layout=False)
+        assert inspection.existing_signatures == ["signature"]
+
+    def test_coordinate_placement_seals_platform_field(self):
+        # Flat PDFs have no signature field to sign into; the seal creates
+        # the platform field.
+        from services.pdf_inspect import inspect_pdf  # noqa: PLC0415 - test-local
+
+        opened = self._open(make_flat_pdf())
+        self._request(opened.doc_id, SignaturePlacement(page=1, x=140.0, y=545.0))
+        doc, _ = self._sign(opened.doc_id)
         inspection = inspect_pdf(doc.current_bytes, include_text_layout=False)
         assert inspection.existing_signatures == ["MyMCP-Seal"]
 

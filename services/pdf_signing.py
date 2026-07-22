@@ -31,6 +31,7 @@ import datetime as dt
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,7 @@ def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
         raise PdfSigningStateError(doc_id=doc.doc_id, status=doc.status)
     name = typed_name.strip()
     if not name:
+        _audit_rejection(doc, "empty_typed_name")
         raise PdfSigningInputError("typed_name must be the signer's full legal name.")
     if bad := unencodable_pdf_text(name):
         # The stamp draws with standard-14 Helvetica (Latin-1 only); silently
@@ -106,6 +108,7 @@ def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
         # so refuse and ask for a renderable form of the name. The audit
         # trail could store the original faithfully, but a stamp that
         # contradicts the audit is worse than an honest error.
+        _audit_rejection(doc, "unrenderable_typed_name")
         raise PdfSigningInputError(
             f"typed_name contains characters the signature stamp cannot "
             f"render: {bad!r}. The stamp uses a Latin-1 (standard-14) font - "
@@ -113,11 +116,25 @@ def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
             "romanized spelling)."
         )
     if not consent:
+        _audit_rejection(doc, "consent_not_given")
         raise PdfSigningInputError(
             "consent must be true: the signer has to explicitly agree that "
             "typing their name constitutes their electronic signature."
         )
     return name
+
+
+def _audit_rejection(doc: PdfDocument, reason: str) -> None:
+    """Record a rejected ceremony submission (PRD: failed attempts audited).
+
+    Status is untouched - the document stays ``awaiting_signature`` so the
+    user can correct the input and retry.
+    """
+    update_document(
+        doc.doc_id,
+        doc.user_id,
+        audit_event={"event": "sign_rejected", "reason": reason},
+    )
 
 
 def _dev_cert_paths() -> tuple[Path, Path]:
@@ -169,14 +186,22 @@ def _generate_dev_cert(cert_path: Path, key_path: Path) -> None:
         .sign(key, hashes.SHA256())
     )
     cert_path.parent.mkdir(parents=True, exist_ok=True)
-    key_path.write_bytes(
+    # Publish the pair atomically (temp files + rename, key first): two
+    # processes generating concurrently must never interleave into a
+    # mismatched key/cert pair, which would break every subsequent seal load.
+    pid_suffix = f".tmp-{os.getpid()}"
+    key_tmp = key_path.with_name(key_path.name + pid_suffix)
+    cert_tmp = cert_path.with_name(cert_path.name + pid_suffix)
+    key_tmp.write_bytes(
         key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
         )
     )
-    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    cert_tmp.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_tmp.replace(key_path)
+    cert_tmp.replace(cert_path)
 
 
 def sealing_cert_paths() -> tuple[Path, Path]:
@@ -281,8 +306,13 @@ def _apply_stamp_and_audit(
     return buffer.getvalue()
 
 
-def _apply_pades_seal(data: bytes) -> bytes:
+def _apply_pades_seal(data: bytes, field_name: str) -> bytes:
     """Append the PAdES B-B platform seal as an incremental update.
+
+    ``field_name`` is the signature field the seal lands in: the user's
+    chosen AcroForm signature field for field-based placements (so the field
+    they picked actually carries the signature), or ``_SEAL_FIELD_NAME`` -
+    created fresh - for coordinate placements on flat PDFs.
 
     Synchronous and blocking (pyHanko's sync API owns its own event loop
     internally) - async callers must run :func:`perform_signing` via
@@ -306,7 +336,7 @@ def _apply_pades_seal(data: bytes) -> bytes:
     out = signers.sign_pdf(
         writer,
         signers.PdfSignatureMetadata(
-            field_name=_SEAL_FIELD_NAME,
+            field_name=field_name,
             subfilter=fields.SigSeedSubFilter.PADES,
             md_algorithm="sha256",
             reason="Electronic signature ceremony completed by the signer",
@@ -358,7 +388,7 @@ def perform_signing(
         "filename": doc.filename,
     }
     stamped = _apply_stamp_and_audit(doc.current_bytes, placement, audit)
-    sealed = _apply_pades_seal(stamped)
+    sealed = _apply_pades_seal(stamped, placement.field_name or _SEAL_FIELD_NAME)
     updated = update_document(
         doc_id,
         user_id,

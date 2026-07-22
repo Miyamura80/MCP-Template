@@ -20,7 +20,7 @@ import io
 from pypdf import PdfReader, PdfWriter
 
 from models.pdf_forms import AddTextOp, PdfEditOp, PdfFormField, SetFieldOp
-from services.pdf_inspect import inspect_pdf
+from services.pdf_inspect import _qualified_name, inspect_pdf
 from services.pdf_overlay import (
     build_text_overlay_page,
     escape_pdf_text,
@@ -56,6 +56,13 @@ def _validate_set_field(
         return (
             f"field {op.name!r} is a signature field; signatures are applied "
             "only by the user via pdf_request_signature, never by set_field"
+        )
+    if field.field_type not in ("text", "checkbox", "radio", "choice"):
+        # Pushbuttons and unrecognized widget types hold no fillable value.
+        return (
+            f"field {op.name!r} is a {field.field_type} widget and cannot "
+            "hold a value; only text, checkbox, radio and choice fields are "
+            "editable"
         )
     if field.field_type in ("checkbox", "radio", "choice"):
         options = field.options or []
@@ -109,6 +116,42 @@ def _overlay_page(width: float, height: float, items: list[AddTextOp]):
     )
 
 
+def _apply_field_values(
+    writer: PdfWriter,
+    ops: list[PdfEditOp],
+    fields_by_name: dict[str, PdfFormField],
+) -> None:
+    """Write set_field values onto EVERY page carrying a widget for the field.
+
+    A field can repeat its widget across pages (e.g. "sign each page"
+    initials), and with appearance regeneration off, pages the update never
+    visits would keep their stale appearance.
+    """
+    values_by_name: dict[str, str] = {}
+    for op in ops:
+        if not isinstance(op, SetFieldOp):
+            continue
+        field = fields_by_name[op.name]
+        value = op.value
+        if field.field_type in ("checkbox", "radio"):
+            value = _normalize_state(value)
+        values_by_name[op.name] = value
+    if not values_by_name:
+        return
+    for page in writer.pages:
+        on_page = {
+            name
+            for ref in page.get("/Annots") or []
+            if (name := _qualified_name(ref.get_object())) in values_by_name
+        }
+        if on_page:
+            writer.update_page_form_field_values(
+                page,
+                {n: values_by_name[n] for n in on_page},
+                auto_regenerate=False,
+            )
+
+
 def apply_ops(data: bytes, ops: list[PdfEditOp]) -> bytes:
     """Validate the whole batch, then apply it; returns the new bytes."""
     inspection = inspect_pdf(data, include_text_layout=False)
@@ -120,21 +163,7 @@ def apply_ops(data: bytes, ops: list[PdfEditOp]) -> bytes:
     reader = PdfReader(io.BytesIO(data))
     writer = PdfWriter(clone_from=reader)
 
-    # Field values, grouped per page so update_page_form_field_values gets
-    # one call per page.
-    by_page: dict[int, dict[str, str]] = {}
-    for op in ops:
-        if not isinstance(op, SetFieldOp):
-            continue
-        field = fields_by_name[op.name]
-        value = op.value
-        if field.field_type in ("checkbox", "radio"):
-            value = _normalize_state(value)
-        by_page.setdefault(field.page or 1, {})[op.name] = value
-    for page_no, values in by_page.items():
-        writer.update_page_form_field_values(
-            writer.pages[page_no - 1], values, auto_regenerate=False
-        )
+    _apply_field_values(writer, ops, fields_by_name)
 
     # Text overlays, grouped per page into one merged content stream each.
     overlays: dict[int, list[AddTextOp]] = {}

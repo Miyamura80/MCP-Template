@@ -222,8 +222,11 @@ with layered guarantees that no model ever signs.
       non-empty; (3) when the client supports elicitation, elicit
       "Sign {filename} as '{typed_name}'?" and abort (back to
       `awaiting_signature`... remains) on decline/cancel; (4) only then sign.
-- [ ] Signing = visible stamp at the recorded placement (script-style font
-      rendering of typed name + printed name + ISO date), audit trail
+- [ ] Signing = visible stamp at the recorded placement (typed name in an
+      italic face + printed name + ISO date; REVISED for v1: the open
+      question below resolved to standard-14 Helvetica-Oblique instead of a
+      bundled script font - zero licensing surface, renders everywhere),
+      audit trail
       embedded in the PDF (typed name, UTC timestamp, SHA-256 of the
       pre-signature bytes, consent, elicitation-confirmed flag) and stored
       in the `audit` column, then PAdES seal via pyHanko with the server

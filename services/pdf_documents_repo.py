@@ -151,6 +151,13 @@ def update_document(
         doc = (
             session.query(PdfDocument)
             .filter(PdfDocument.doc_id == doc_id, PdfDocument.user_id == user_id)
+            # Row lock so the transition check and the write are atomic:
+            # without it, two concurrent sign calls could both read
+            # 'awaiting_signature' and both seal, the loser silently
+            # overwriting the winner's bytes + audit. Postgres honors
+            # FOR UPDATE; SQLite ignores it but serializes writers at the
+            # file level, so the guarantee holds on both backends.
+            .with_for_update()
             .one_or_none()
         )
         if doc is None:

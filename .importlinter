@@ -115,8 +115,10 @@ source_modules =
     mcp_server.enhancers.pdf_forms
 # MAINTENANCE: import-linter wildcards can only replace a whole segment
 # (services.* would forbid far too much), so the Gmail modules are listed by
-# name. Any NEW services/gmail_*.py module MUST be added here or it silently
-# escapes the contract.
+# name. Any NEW Gmail module (services/gmail_*.py, models/gmail_*.py, ...)
+# MUST be added here or it silently escapes the contract - and when touching
+# this list, re-check the services/ and models/ trees for existing Gmail
+# modules that are missing.
 forbidden_modules =
     services.pdf_gmail_bridge
     services.gmail_svc
@@ -125,7 +127,10 @@ forbidden_modules =
     services.gmail_draft_helpers
     services.gmail_attachments_svc
     services.gmail_curate_svc
+    services.gmail_watch_svc
+    services._gmail_fake_backend
     models.gmail
+    models.gmail_watch
 
 [importlinter:contract:no_imports_from_tests]
 name = Tests are not imported by app code

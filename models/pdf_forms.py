@@ -215,12 +215,18 @@ class AddTextOp(BaseModel):
 
     op: Literal["add_text"] = "add_text"
     page: int = Field(ge=1, description="1-based page number")
-    x: float = Field(description="Left edge of the text, PDF user space (points)")
+    # allow_inf_nan=False throughout: a NaN/inf coordinate would serialize
+    # into the content stream as 'nan'/'inf', producing a broken PDF.
+    x: float = Field(
+        allow_inf_nan=False,
+        description="Left edge of the text, PDF user space (points)",
+    )
     y: float = Field(
-        description="Baseline of the text, PDF user space (origin bottom-left)"
+        allow_inf_nan=False,
+        description="Baseline of the text, PDF user space (origin bottom-left)",
     )
     text: str = Field(min_length=1)
-    font_size: float = Field(default=10.0, gt=0, le=72)
+    font_size: float = Field(default=10.0, gt=0, le=72, allow_inf_nan=False)
 
 
 PdfEditOp = Annotated[SetFieldOp | AddTextOp, Field(discriminator="op")]
@@ -283,10 +289,13 @@ class SignaturePlacement(BaseModel):
         default=None, ge=1, description="1-based page for flat-PDF placement"
     )
     x: float | None = Field(
-        default=None, description="Left edge of the stamp, PDF user space"
+        default=None,
+        allow_inf_nan=False,
+        description="Left edge of the stamp, PDF user space",
     )
     y: float | None = Field(
         default=None,
+        allow_inf_nan=False,
         description="Baseline of the stamp, PDF user space (origin bottom-left)",
     )
 

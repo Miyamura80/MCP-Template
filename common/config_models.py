@@ -8,7 +8,7 @@ type validation and structure for the configuration data.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ExampleParent(BaseModel):
@@ -337,6 +337,18 @@ class PdfSigningConfig(BaseModel):
             "self-signed certificate is cached when cert_path is unset."
         ),
     )
+
+    @model_validator(mode="after")
+    def _cert_pair_complete(self) -> "PdfSigningConfig":
+        # A partial pair would silently fall back to the untrusted dev cert -
+        # a production deployment must find out at startup, not in a signed
+        # document's validation report.
+        if bool(self.cert_path) != bool(self.key_path):
+            raise ValueError(
+                "pdf_forms.signing: cert_path and key_path must be set "
+                "together (or both left null for the dev self-signed cert)."
+            )
+        return self
 
 
 class PdfFormsConfig(BaseModel):

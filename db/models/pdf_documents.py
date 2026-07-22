@@ -47,9 +47,12 @@ class PdfDocument(Base):
         nullable=False,
         default=lambda: datetime.now(UTC),
     )
+    # index=True mirrors ix_pdf_documents_updated_at in the migration (the
+    # TTL-sweep index); without it a future autogenerate would drop the index.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+        index=True,
     )

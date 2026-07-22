@@ -69,8 +69,8 @@ def _read_sse_first_message(response) -> dict:
     JSON string payloads (e.g. the pdf_signer app bundle's inlined pdf.js
     worker), truncating the frame. The SSE spec ends lines on CR/LF only.
     """
-    for line in response.text.split("\n"):
-        line = line.rstrip("\r")
+    normalized = response.text.replace("\r\n", "\n").replace("\r", "\n")
+    for line in normalized.split("\n"):
         if line.startswith("data:"):
             return json.loads(line.removeprefix("data:").strip())
     raise AssertionError("no SSE data frame in response")

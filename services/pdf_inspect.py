@@ -60,6 +60,16 @@ class PdfEncryptedError(Exception):
         )
 
 
+class PdfCorruptError(Exception):
+    """Raised when bytes that look like a PDF cannot actually be parsed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The PDF could not be parsed - the file appears corrupt or "
+            "truncated. Re-download or re-export the document and try again."
+        )
+
+
 def ensure_pdf_magic(data: bytes) -> None:
     """Reject non-PDF bytes with the detected type named in the error."""
     if data.startswith(b"%PDF-"):
@@ -111,17 +121,22 @@ def _has_xfa(reader: PdfReader) -> bool:
 def inspect_pdf(data: bytes, *, include_text_layout: bool = True) -> PdfInspection:
     """Read a PDF's geometry, AcroForm inventory and (for flat PDFs) text layout."""
     ensure_pdf_magic(data)
-    reader = PdfReader(io.BytesIO(data))
-    _ensure_decrypted(reader)
-    page_sizes = [
-        PdfPageSize(
-            page=i + 1,
-            width=float(p.mediabox.width),
-            height=float(p.mediabox.height),
-        )
-        for i, p in enumerate(reader.pages)
-    ]
-    fields = _collect_fields(reader)
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        _ensure_decrypted(reader)
+        page_sizes = [
+            PdfPageSize(
+                page=i + 1,
+                width=float(p.mediabox.width),
+                height=float(p.mediabox.height),
+            )
+            for i, p in enumerate(reader.pages)
+        ]
+        fields = _collect_fields(reader)
+    except PdfReadError as exc:
+        # Truncated/corrupt bytes that still start with %PDF- surface here;
+        # translate the raw pypdf error into the pdf_open error contract.
+        raise PdfCorruptError() from exc
     inspection = PdfInspection(
         page_count=len(reader.pages),
         page_sizes=page_sizes,
@@ -147,7 +162,9 @@ def _qualified_name(obj: DictionaryObject) -> str | None:
     """Build the fully-qualified field name by walking the /Parent chain."""
     parts: list[str] = []
     node: DictionaryObject | None = obj
-    while node is not None:
+    seen: set[int] = set()  # a malformed cyclic /Parent chain must not hang us
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
         t = node.get("/T")
         if t is not None:
             parts.append(str(t))
@@ -161,7 +178,9 @@ def _qualified_name(obj: DictionaryObject) -> str | None:
 def _inherited(obj: DictionaryObject, key: str):
     """Read a field attribute, falling back up the /Parent chain."""
     node: DictionaryObject | None = obj
-    while node is not None:
+    seen: set[int] = set()  # a malformed cyclic /Parent chain must not hang us
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
         if key in node:
             return node[key]
         parent = node.get("/Parent")
@@ -207,6 +226,26 @@ def _choice_options(obj: DictionaryObject) -> list[str]:
     return result
 
 
+def _field_value(ftype: str, obj: DictionaryObject) -> str | None:
+    """The field's current /V, normalized for the LLM-visible inventory.
+
+    Signature fields: /V is the signature dictionary; surface the signer's
+    name rather than the stringified dict (which would leak raw DER/ByteRange
+    noise). Some producers encode "unsigned" as ``/V null`` or other
+    non-dictionary values - treat those as no signature.
+    """
+    value = _inherited(obj, "/V")
+    if value is None:
+        return None
+    if ftype != "signature":
+        return str(value)
+    sig_dict = value.get_object()
+    if not isinstance(sig_dict, DictionaryObject):
+        return None
+    signer = sig_dict.get("/Name")
+    return str(signer) if signer is not None else "(signed)"
+
+
 def _collect_fields(reader: PdfReader) -> list[PdfFormField]:
     """Walk widget annotations page-by-page, aggregating widgets per field name."""
     by_name: dict[str, PdfFormField] = {}
@@ -229,14 +268,7 @@ def _collect_fields(reader: PdfReader) -> list[PdfFormField]:
                     existing.options = merged
                 continue
             flags = int(_inherited(obj, "/Ff") or 0)
-            value = _inherited(obj, "/V")
-            if ftype == "signature" and value is not None:
-                # /V is the signature dictionary; surface the signer's name
-                # rather than the stringified dict (which would leak raw
-                # DER/ByteRange noise into the LLM-visible inventory).
-                sig_dict = value.get_object()
-                signer = sig_dict.get("/Name")
-                value = str(signer) if signer is not None else "(signed)"
+            value = _field_value(ftype, obj)
             options: list[str] | None = None
             if ftype == "choice":
                 options = _choice_options(obj) or None

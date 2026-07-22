@@ -48,12 +48,15 @@ bottom-left corner, units in points (1/72 inch).
                                                        │           │
                                              user signs│           │user cancels
                                                        ▼           ▼
-                                                    signed ──►   open
-                                                  (immutable)
+                                                    signed        open
+                                                  (immutable)  (editable again)
 ```
 
-- `pdf_edit` and `pdf_request_signature` are rejected once a document is
-  `awaiting_signature` or `signed`.
+- `pdf_edit` is rejected once a document is `awaiting_signature` or
+  `signed`. `pdf_request_signature` is rejected on `signed` documents, but
+  retrying it while `awaiting_signature` is **idempotent**: the recorded
+  placement stands and the signing handoff is re-emitted (re-opening the
+  signing app).
 - `pdf_export` is rejected while `awaiting_signature` (finish or cancel
   signing first) and defaults the filename to `{stem}-signed.pdf` /
   `{stem}-filled.pdf`.

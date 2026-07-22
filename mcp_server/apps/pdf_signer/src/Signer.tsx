@@ -114,7 +114,11 @@ async function renderAllPages(dataBase64: string): Promise<RenderedPage[]> {
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    if (!ctx) {
+      // Never silently skip a page: the user must review the FULL document
+      // before signing, so a page that cannot render fails the whole load.
+      throw new Error(`could not create a rendering context for page ${pageNo}`);
+    }
     await page.render({
       canvasContext: ctx,
       viewport,
@@ -134,7 +138,13 @@ async function renderAllPages(dataBase64: string): Promise<RenderedPage[]> {
   return pages;
 }
 
-export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
+export function Signer({
+  mcpApp,
+  resultBuffer,
+}: {
+  mcpApp: McpAppLike;
+  resultBuffer?: { drainInto: (handler: (raw: unknown) => void) => void };
+}) {
   const [phase, setPhase] = useState<Phase>("waiting");
   const [doc, setDoc] = useState<SignerDocument | null>(null);
   const [pages, setPages] = useState<RenderedPage[]>([]);
@@ -143,9 +153,15 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
   const [outcome, setOutcome] = useState<SignOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadedDocId = useRef<string | null>(null);
+  // Monotonic load generation: a newer signing request invalidates any load
+  // still awaiting, so stale pages can never render under a newer doc/sign
+  // target (the user must only ever sign what they are looking at).
+  const loadGeneration = useRef(0);
 
   const loadDocument = useCallback(
     async (docId: string) => {
+      const generation = ++loadGeneration.current;
+      const stale = () => generation !== loadGeneration.current;
       setPhase("loading");
       setError(null);
       try {
@@ -153,13 +169,16 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
           name: "pdf_signer.get_document",
           arguments: { doc_id: docId },
         });
+        if (stale()) return;
         const data = extractStructuredContent<SignerDocument>(raw);
         if (data === null) {
           throw new Error("malformed pdf_signer.get_document result");
         }
+        const rendered = await renderAllPages(data.data_base64);
+        if (stale()) return;
         setDoc(data);
         loadedDocId.current = data.doc_id;
-        setPages(await renderAllPages(data.data_base64));
+        setPages(rendered);
         if (data.status === "signed") {
           setOutcome({ status: "signed", message: "This document is already signed." });
           setPhase("signed");
@@ -167,6 +186,7 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
           setPhase("review");
         }
       } catch (err) {
+        if (stale()) return;
         setError(`Could not load the document: ${err}`);
         setPhase("error");
       }
@@ -174,7 +194,9 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
     [mcpApp]
   );
 
-  // The pdf_request_signature tool result carries the doc_id to review.
+  // The pdf_request_signature tool result carries the doc_id to review. The
+  // entry point buffers results delivered before this effect runs (host can
+  // race the mount); drainInto replays them and takes over live delivery.
   useEffect(() => {
     const handler = (result: unknown) => {
       const data = extractStructuredContent<{ doc_id?: unknown }>(result);
@@ -183,11 +205,15 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
         void loadDocument(docId);
       }
     };
-    mcpApp.ontoolresult = handler;
+    if (resultBuffer) {
+      resultBuffer.drainInto(handler);
+    } else {
+      mcpApp.ontoolresult = handler;
+    }
     return () => {
       if (mcpApp.ontoolresult === handler) mcpApp.ontoolresult = undefined;
     };
-  }, [mcpApp, loadDocument]);
+  }, [mcpApp, resultBuffer, loadDocument]);
 
   const canSign = typedName.trim().length > 0 && consent && phase === "review";
 
@@ -238,10 +264,16 @@ export function Signer({ mcpApp }: { mcpApp: McpAppLike }) {
   const handleCancel = async () => {
     if (!doc) return;
     try {
-      await mcpApp.callServerTool({
+      const raw = await mcpApp.callServerTool({
         name: "pdf_signer.cancel",
         arguments: { doc_id: doc.doc_id },
       });
+      // A resolved-but-error tool result (isError) must not show as
+      // cancelled: only the server confirming status "open" reopens the doc.
+      const result = extractStructuredContent<{ status?: string }>(raw);
+      if (result?.status !== "open") {
+        throw new Error("the server did not confirm the cancellation");
+      }
       setPhase("cancelled");
     } catch (err) {
       setError(`Could not cancel: ${err}`);

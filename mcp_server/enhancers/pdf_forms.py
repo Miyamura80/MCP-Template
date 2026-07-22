@@ -19,6 +19,7 @@ Part of the PDF core (isolation seam): no Gmail imports.
 import asyncio
 
 from mcp.server.elicitation import AcceptedElicitation
+from mcp.shared.exceptions import McpError
 from pydantic import BaseModel, Field
 
 from mcp_server.enhancers import enhance
@@ -52,7 +53,8 @@ def _move_page_images_to_content[T: PdfOpenResult | PdfEditResult](
 async def pdf_open_enhanced(
     tool: EnhancedTool[PdfOpenInput, PdfOpenResult],
 ) -> PdfOpenResult:
-    result = tool.call()
+    # Blocking work (pypdf parse + optional pypdfium2 render) off the loop.
+    result = await asyncio.to_thread(tool.call)
     return _move_page_images_to_content(tool, result)
 
 
@@ -60,7 +62,8 @@ async def pdf_open_enhanced(
 async def pdf_edit_enhanced(
     tool: EnhancedTool[PdfEditInput, PdfEditResult],
 ) -> PdfEditResult:
-    result = tool.call()
+    # Blocking work (pypdf rewrite + optional pypdfium2 render) off the loop.
+    result = await asyncio.to_thread(tool.call)
     return _move_page_images_to_content(tool, result)
 
 
@@ -79,7 +82,7 @@ class _ElicitedSignature(BaseModel):
 async def pdf_request_signature_enhanced(
     tool: EnhancedTool[PdfRequestSignatureInput, PdfRequestSignatureResult],
 ) -> PdfRequestSignatureResult:
-    result = tool.call()
+    result = await asyncio.to_thread(tool.call)
     if result.status != "awaiting_user_signature":
         return result
     if tool.can_show_app:
@@ -89,14 +92,38 @@ async def pdf_request_signature_enhanced(
     user_id = tool.input.user_id
     if tool.can_elicit:
         doc = load_document(doc_id, user_id)
-        elicited = await tool.elicit(
-            message=(
-                f"'{doc.filename}' is ready to sign. Type your full legal "
-                "name to sign it - this applies your electronic signature "
-                "and seals the document."
-            ),
-            schema=_ElicitedSignature,
-        )
+        try:
+            elicited = await tool.elicit(
+                message=(
+                    f"'{doc.filename}' is ready to sign. Type your full legal "
+                    "name to sign it - this applies your electronic signature "
+                    "and seals the document."
+                ),
+                schema=_ElicitedSignature,
+            )
+        except McpError:
+            # Declared-but-broken host (see pdf_signer.sign for the Goose
+            # variant). Letting this propagate would trip the enhancer's
+            # headless fallback, whose idempotent awaiting branch returns
+            # "awaiting" forever - leaving the document locked with no
+            # signing surface. Roll back instead.
+            abort_signing(
+                doc_id=doc_id,
+                user_id=user_id,
+                reason="elicitation_failed",
+                channel="elicitation",
+                back_to_open=True,
+            )
+            return PdfRequestSignatureResult(
+                doc_id=doc_id,
+                status="signing_unavailable",
+                guidance=(
+                    "This client advertised elicitation but failed to show "
+                    "the signing prompt, so signing is unavailable here. The "
+                    "document is editable again; the filled PDF can be "
+                    "exported with pdf_export and signed elsewhere."
+                ),
+            )
         # The result union isn't parameterized by the schema, so re-validate
         # the accepted payload into the schema model at this boundary.
         signature = (
