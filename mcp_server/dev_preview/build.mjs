@@ -63,17 +63,38 @@ const page = `<!doctype html>
     align-items:flex-start; box-sizing:border-box; }
   /* The widget frame: white surface, rounded, hairline + soft shadow - the
      framing hosts apply. The app light UI keeps a light surface in both themes. */
-  .widget { width:${WIDTH}px; max-width:100%; background:var(--surface);
+  .col { display:flex; flex-direction:column; gap:14px; width:${WIDTH}px; max-width:100%; }
+  .widget { width:100%; background:var(--surface);
     border:1px solid var(--hair); border-radius:16px; overflow:hidden;
     box-shadow:0 1px 2px rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.12); }
   iframe { width:100%; height:520px; border:0; display:block; background:var(--surface); }
+  /* Host-side log of app-initiated ui/update-model-context pushes: a real host
+     appends these to the LLM's context invisibly, the preview makes them
+     visible so send/discard flows can be smoke tested end to end. */
+  .ctx { background:var(--surface); border:1px dashed var(--hair);
+    border-radius:12px; padding:12px 14px; }
+  .ctx-head { font:600 12px -apple-system, BlinkMacSystemFont, sans-serif;
+    color:#334155; margin-bottom:8px; }
+  .ctx-sub { font-weight:400; color:#94a3b8; }
+  .ctx pre { white-space:pre-wrap; overflow-wrap:anywhere;
+    font:11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background:#f8fafc; border:1px solid var(--hair); border-radius:8px;
+    padding:10px; margin:0 0 8px; color:#0f172a; }
   #err { color:#c0392b; white-space:pre-wrap; font:12px ui-monospace, monospace;
     max-width:${WIDTH}px; margin:8px auto 0; }
 </style>
 </head>
 <body>
 <div class="stage">
-  <div class="widget"><iframe id="app" title="${APP} MCP App"></iframe></div>
+  <div class="col">
+    <div class="widget"><iframe id="app" title="${APP} MCP App"></iframe></div>
+    <div id="ctx" class="ctx" style="display:none">
+      <div class="ctx-head">Model context updates
+        <span class="ctx-sub">- what the app pushed to the LLM via ui/update-model-context</span>
+      </div>
+      <div id="ctx-items"></div>
+    </div>
+  </div>
 </div>
 <div id="err"></div>
 <script>

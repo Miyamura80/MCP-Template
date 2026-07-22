@@ -79,7 +79,13 @@ def _success_page(email: str) -> HTMLResponse:
         content=(
             "<!doctype html><html><body>"
             "<h1>Connected ✓</h1>"
-            f"<p>Gmail is now linked to {email}. You can close this tab.</p>"
+            f"<p>Gmail is now linked to {email}.</p>"
+            # Under stateless HTTP the server cannot push a completion
+            # notification to the MCP client (SEP-1036
+            # notifications/elicitation/complete), so this page is the user's
+            # only completion signal - it must say what to do next.
+            "<p>Return to your chat and ask the assistant to retry - "
+            "it can use Gmail now. You can close this tab.</p>"
             "</body></html>"
         ),
     )
@@ -179,7 +185,11 @@ async def callback(
         return _error_page("Missing OAuth state parameter.")
     user_id = _verify_state(state)
     if user_id is None:
-        return _error_page("Invalid or expired OAuth state.")
+        return _error_page(
+            "Invalid or expired OAuth state. Authorization links are only "
+            "valid for 10 minutes - go back to your chat and retry the "
+            "request to get a fresh link."
+        )
     if not code:
         return _error_page("Missing authorization code.")
 

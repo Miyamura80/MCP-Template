@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { extractStructuredContent } from "./mcpResult";
+import { extractStructuredContent, splitHtmlAtQuote } from "./helpers";
 import { sanitizeEmailHtml } from "./remoteImages";
 
 /** Minimal slice of the ext-apps App surface this component needs. */
@@ -32,22 +32,6 @@ export type ServerToolCaller = {
 // into hundreds of parallel gmail_inbox.fetch_image calls. Remaining images
 // stay blocked and the banner offers another round.
 const MAX_REMOTE_IMAGES_PER_FETCH = 20;
-
-/**
- * Split reply HTML into the fresh part and the quoted-history part (Gmail
- * quote containers, or a trailing "On ... wrote:" marker).
- */
-export function splitHtmlAtQuote(html: string): { main: string; quoted: string | null } {
-  const markers = ['<div class="gmail_quote"', '<blockquote class="gmail_quote"', '<div class=3D"gmail_quote"'];
-  for (const marker of markers) {
-    const idx = html.indexOf(marker);
-    if (idx > 0) return { main: html.slice(0, idx), quoted: html.slice(idx) };
-  }
-  const onWroteRe = /(<br\s*\/?>[\s\S]{0,20}?On\s.{10,80}\s+wrote:\s*<br\s*\/?>)/i;
-  const m = onWroteRe.exec(html);
-  if (m && m.index > 50) return { main: html.slice(0, m.index), quoted: html.slice(m.index) };
-  return { main: html, quoted: null };
-}
 
 export function HtmlEmailBody({
   html,

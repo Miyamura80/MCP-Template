@@ -13,6 +13,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 from collections.abc import Generator
@@ -40,15 +41,53 @@ from models.gmail import (
     GmailStatusResult,
     InlineImageUpload,
 )
-from services import service
+from services import ConnectRequiredError, service
+from services._gmail_fake_backend import build_fake_gmail_client
 
 # ---------------------------------------------------------------------------
 # Domain errors
 # ---------------------------------------------------------------------------
 
 
-class GmailNotConnectedError(Exception):
-    """Raised when a Gmail-API service is invoked for a user with no active token row."""
+class GoogleOAuthNotConfiguredError(RuntimeError):
+    """GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI missing.
+
+    Subclasses RuntimeError so pre-existing callers catching the old bare
+    ``RuntimeError("Google OAuth not configured")`` keep working.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Google OAuth not configured")
+
+
+class GmailNotConnectedError(ConnectRequiredError):
+    """Raised when a Gmail-API service is invoked for a user with no active token row.
+
+    The message doubles as the recovery script for the calling host/LLM: over
+    MCP it is surfaced verbatim as the ``isError`` tool-result text, which is
+    the only channel guaranteed to reach the caller at failure time - so it
+    must say what to do next (gmail_connect -> show auth_url -> retry), not
+    just what went wrong. Every Gmail-connection-dependent service raises this
+    class, so the recovery text lives here rather than at each raise site.
+    """
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(
+            user_id,
+            f"No Gmail account is linked for user_id={user_id!r}. "
+            "To recover: call the gmail_connect tool, present the returned "
+            "auth_url to the user as a clickable link so they can complete "
+            "Google's consent flow, then retry this tool. gmail_status "
+            "reports whether the connection is active.",
+            elicitation_message="Authorize Gmail access in your browser to continue.",
+        )
+
+    def build_auth_url(self) -> str | None:
+        """Mint the Google consent URL, or None when OAuth is unconfigured here."""
+        try:
+            return gmail_connect(GmailConnectInput(user_id=self.user_id)).auth_url
+        except GoogleOAuthNotConfiguredError:
+            return None
 
 
 class GmailAttachmentTooLargeError(Exception):
@@ -200,10 +239,8 @@ def gmail_connect(input: GmailConnectInput) -> GmailConnectResult:
     """Build the Google OAuth authorization URL for the user."""
     client_id = global_config.GOOGLE_CLIENT_ID
     redirect_uri = global_config.GOOGLE_REDIRECT_URI
-    if not client_id:
-        raise RuntimeError("Google OAuth not configured")
-    if not redirect_uri:
-        raise RuntimeError("Google OAuth not configured")
+    if not client_id or not redirect_uri:
+        raise GoogleOAuthNotConfiguredError
 
     state = _sign_state(input.user_id)
     params = {
@@ -321,7 +358,7 @@ def _mint_access_token(refresh_token: str) -> str:
     client_id = global_config.GOOGLE_CLIENT_ID
     client_secret = global_config.GOOGLE_CLIENT_SECRET
     if not client_id or not client_secret:
-        raise RuntimeError("Google OAuth not configured")
+        raise GoogleOAuthNotConfiguredError
 
     with httpx.Client(timeout=20.0) as client:
         resp = client.post(
@@ -345,6 +382,27 @@ _client_cache: dict[str, tuple[float, Any]] = {}
 _CLIENT_TTL_S = 50 * 60  # 50 min; access tokens live ~60 min
 
 
+def _maybe_fake_gmail_client():  # noqa: ANN202 - fake mirrors the dynamic Resource
+    """Return a fixture-serving fake Gmail client when the e2e fake backend is
+    explicitly enabled, else ``None``.
+
+    Gated on ``GMAIL_FAKE_BACKEND=1``. Hard-refuses under ``DEV_ENV=prod`` so the
+    fake can never stand in for a real mailbox in production, no matter how the
+    env is set. Used only by the MCP-App e2e harness to render Gmail apps offline
+    (no linked account / OAuth / network); see ``services/_gmail_fake_backend.py``.
+    """
+    if os.environ.get("GMAIL_FAKE_BACKEND") != "1":
+        return None
+    if global_config.DEV_ENV == "prod":
+        raise RuntimeError(
+            "GMAIL_FAKE_BACKEND must never be set in production (DEV_ENV=prod)"
+        )
+    log.warning(
+        "GMAIL_FAKE_BACKEND active: serving fixture Gmail data, not a real mailbox"
+    )
+    return build_fake_gmail_client()
+
+
 def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource is dynamic
     """Return an authorized ``googleapiclient`` Gmail v1 service for ``user_id``.
 
@@ -354,6 +412,10 @@ def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource 
     Raises ``GmailNotConnectedError`` if no active token row exists. Network
     or Google-side errors propagate so the caller can decide how to surface them.
     """
+    fake = _maybe_fake_gmail_client()
+    if fake is not None:
+        return fake
+
     now = time.time()
     cached = _client_cache.get(user_id)
     if cached is not None:
@@ -373,9 +435,7 @@ def _get_gmail_client(user_id: str):  # noqa: ANN202 - googleapiclient Resource 
     with _get_db_session() as session:
         row = _load_token_row(session, user_id)
         if row is None:
-            raise GmailNotConnectedError(
-                f"No active Gmail connection for user_id={user_id!r}"
-            )
+            raise GmailNotConnectedError(user_id)
         encrypted = row.refresh_token_enc
 
     refresh_token = require_encryption().decrypt(encrypted)

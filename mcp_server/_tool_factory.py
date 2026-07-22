@@ -17,12 +17,14 @@ from typing import Any
 from loguru import logger as log
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
+from mcp.server.session import ServerSession
 from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel
 
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
 from mcp_server.enhancers.base import EnhancedTool, build_app_meta
-from services import ServiceEntry
+from mcp_server.url_elicitation import reraise_with_elicitation
+from services import ConnectRequiredError, ServiceEntry
 from src.utils.current_user import current_user
 
 
@@ -62,6 +64,18 @@ def _check_quota() -> None:
     ensure_daily_limit(user.user_id)
 
 
+def _current_session(mcp: FastMCP) -> ServerSession | None:
+    """Return the live ServerSession, or None outside an MCP request.
+
+    Direct in-process invocations (unit tests calling a tool function) have no
+    request context; None makes capability support read as "unknown".
+    """
+    try:
+        return mcp.get_context().session
+    except (LookupError, ValueError):
+        return None
+
+
 def make_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
     """Register a service as an MCP tool - enhanced if an enhancer exists, else headless."""
     enhancer_entry = get_enhancer(entry.name)
@@ -87,7 +101,12 @@ def _make_headless_tool(mcp: FastMCP, entry: ServiceEntry) -> None:
                 kwargs.setdefault("user_id", "")
         input_obj = input_model(**kwargs)
         _check_quota()
-        return func(input_obj)
+        try:
+            return func(input_obj)
+        except ConnectRequiredError as exc:
+            # MCP-only affordance: upgrade to the SEP-1036 URL-elicitation
+            # error (-32042) so capable hosts open the consent flow natively.
+            reraise_with_elicitation(_current_session(mcp), exc)
 
     _apply_tool_signature(tool_fn, entry, return_annotation=output_model)
     mcp.tool(name=entry.name, description=entry.description)(tool_fn)
@@ -114,6 +133,11 @@ def _make_enhanced_tool(
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
         try:
             result = await enhancer_entry.fn(tool)
+        except ConnectRequiredError as exc:
+            # Expected condition, not an enhancer crash: the headless fallback
+            # would only raise it again. MCP-only affordance: upgrade to the
+            # SEP-1036 URL-elicitation error (-32042) when possible.
+            reraise_with_elicitation(ctx.session, exc)
         except Exception:  # noqa: BLE001
             # Enhancer failures of any kind must fall back to the pure service
             # so MCP clients still get a structured result on the headless path.
@@ -122,7 +146,10 @@ def _make_enhanced_tool(
             log.exception(
                 "enhancer for {!r} crashed; falling back to headless", entry.name
             )
-            result = func(input_obj)
+            try:
+                result = func(input_obj)
+            except ConnectRequiredError as exc:
+                reraise_with_elicitation(ctx.session, exc)
             # Discard any partial output the enhancer accumulated before crashing.
             tool.extra_content = []
             tool.app_resource_uri = None

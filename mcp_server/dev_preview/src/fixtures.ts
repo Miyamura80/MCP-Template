@@ -153,6 +153,10 @@ export function dispatch(name: string, args: Record<string, unknown>): ToolResul
       return ok(THREADS[String(args.thread_id)] ?? {});
     case "gmail_composer.refresh":
       return ok(COMPOSER_DRAFT);
+    case "gmail_composer.send":
+      // A real message_id so the composer's Sent state (and the model-context
+      // push it triggers) carries a plausible identifier.
+      return ok({ message_id: "msg-fixture-0042", thread_id: "t-1002" });
     default:
       // set_focus, mark_read, archive, mark_done, reply, forward, save_draft,
       // send, discard … acknowledged with an empty structured result.

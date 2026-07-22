@@ -43,15 +43,16 @@ hooks = [
 repo = "local"
 
 [[repos.hooks]]
-id = "check-large-files"
-name = "fail if any source file exceeds the line-count error threshold"
+id = "check-file-length"
+name = "fail if any source file exceeds the max line count"
 language = "system"
-entry = "scripts/check_large_files.sh"
-files = "\\.(py)$"
+entry = "uv run python scripts/check_file_length.py"
+files = "\\.(py|ts|tsx)$"
+pass_filenames = false
 
 [[repos.hooks]]
 id = "check-folder-sizes"
 name = "fail if any source folder exceeds the file-count error threshold"
 language = "system"
 entry = "scripts/check_folder_sizes.sh"
-files = "\\.(py)$"
+files = "\\.(py|ts|tsx)$"

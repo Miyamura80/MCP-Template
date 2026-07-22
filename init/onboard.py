@@ -725,7 +725,6 @@ def _pruned_path_groups(config: OnboardingConfig) -> dict[str, list[str]]:
             [
                 "docs",
                 ".github/workflows/docs-lint.yaml",
-                ".github/workflows/jules-find-outdated-docs.yml",
                 ".github/workflows/jules-sync-translations.yml",
             ],
         ),
@@ -2088,10 +2087,6 @@ _JULES_WORKFLOWS: list[tuple[str, str]] = [
     (
         "jules-prune-unnecessary-code.yml",
         "Dead code cleanup (Wednesdays 2pm UTC)",
-    ),
-    (
-        "jules-find-outdated-docs.yml",
-        "Documentation drift check (Wednesdays 4pm UTC)",
     ),
 ]
 
