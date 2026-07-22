@@ -25,6 +25,19 @@ export PLAYWRIGHT="${PLAYWRIGHT:-playwright}"
 
 echo "==================== SCENARIO: $nm ===================="
 echo "playwright: $PLAYWRIGHT"
+
+# Optional per-scenario data seeding: a "seed" key naming a script in this dir
+# runs before the drive, so scenarios that consume state (e.g. the pdf signing
+# ceremony, which moves its document to a terminal 'signed') stay
+# self-contained and re-runnable in any order.
+seed_script="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('seed',''))" "$scfile")"
+if [ -n "$seed_script" ]; then
+  echo "---- seed: $seed_script ----"
+  (cd "$REPO" && uv run python "$SCRIPT_DIR/$seed_script") >/dev/null || {
+    echo "==================== $nm: FAIL (seed script failed) ===================="
+    exit 1
+  }
+fi
 # Snapshot the tool-call-log size BEFORE driving. If the drive produces no new
 # entries, the oracle must not grade stale ones (the false-PASS hole).
 before="$(python3 "$SCRIPT_DIR/mcp_probe.py" calls_count 2>/dev/null || echo 0)"

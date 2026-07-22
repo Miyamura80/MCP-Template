@@ -1,4 +1,5 @@
 {
+  "seed": "seed_pdf_doc.py",
   "prompt": "The NDA is filled in. Please set it up for me to sign.",
   "plan": [
     {

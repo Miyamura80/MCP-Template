@@ -11,9 +11,16 @@
 import "./polyfills";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
+// Static worker import: sandboxed host iframes (Goose's mcp-app-guest) block
+// both spawning a Worker from the inlined data: URL AND the dynamic import
+// pdf.js's "fake worker" fallback would do. Bundling the worker module and
+// pre-seeding globalThis.pdfjsWorker makes the fallback synchronous-safe, so
+// rendering works on the main thread wherever real workers are unavailable.
+import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs";
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { styles } from "./styles";
 
+(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = pdfjsWorker;
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
 export type McpAppLike = {
