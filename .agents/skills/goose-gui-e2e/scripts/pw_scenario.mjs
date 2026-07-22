@@ -52,12 +52,16 @@ const env = {
 
 const interact = sc.interact || null;
 const wantI = (interact && interact.expect_dom_contains) || [];
+// Optional CSS-selector assertions for post-interaction DOM that plain text
+// can't see (e.g. an <img src="data:image/..."> painted after a fetch).
+const wantSel = (interact && interact.expect_selectors) || [];
 const result = {
   scenario: name, rendered: false, matched: [], missing: want, app_uri: sc.app_uri || null, frames: 0,
   // Second-scenario (click -> callServerTool -> re-render) fields. `interacted` is
   // the proof of a USER-initiated round-trip: the iframe called /mcp directly
   // (bypassing the mock LLM) and the returned data re-rendered into the DOM.
   interacted: interact ? false : null, interact_matched: [], interact_missing: wantI,
+  interact_sel_matched: [], interact_sel_missing: wantSel,
 };
 const writeResult = () => writeFileSync(resultPath, JSON.stringify(result, null, 2));
 
@@ -143,15 +147,24 @@ try {
           await btn.click({ timeout: 6000 });
         }
         let ibody = "";
-        for (let i = 0; i < 30 && result.interact_missing.length; i++) {
+        for (let i = 0; i < 30 && (result.interact_missing.length || result.interact_sel_missing.length); i++) {
           ibody = await frame.locator("body").innerText({ timeout: 2000 }).catch(() => "");
           result.interact_matched = wantI.filter((t) => ibody.includes(t));
           result.interact_missing = wantI.filter((t) => !ibody.includes(t));
-          if (!result.interact_missing.length) break;
+          const selHits = [];
+          for (const sel of wantSel)
+            selHits.push(await frame.locator(sel).count().catch(() => 0) > 0 ? sel : null);
+          result.interact_sel_matched = wantSel.filter((s, j) => selHits[j] === s);
+          result.interact_sel_missing = wantSel.filter((s, j) => selHits[j] !== s);
+          if (!result.interact_missing.length && !result.interact_sel_missing.length) break;
           await win.waitForTimeout(700);
         }
-        result.interacted = wantI.length > 0 && result.interact_missing.length === 0;
-        log(`interaction: matched [${result.interact_matched}] missing [${result.interact_missing}]`);
+        result.interacted =
+          (wantI.length > 0 || wantSel.length > 0) &&
+          result.interact_missing.length === 0 &&
+          result.interact_sel_missing.length === 0;
+        log(`interaction: matched [${result.interact_matched}] missing [${result.interact_missing}]` +
+          (wantSel.length ? ` selectors matched [${result.interact_sel_matched}] missing [${result.interact_sel_missing}]` : ""));
         if (shot) { await ownWin.screenshot({ path: shot }); } // reshoot the post-interaction DOM
       } catch (e) {
         log("interaction ERROR", e.message.split("\n")[0]);
