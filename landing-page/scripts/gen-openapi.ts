@@ -21,7 +21,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { site } from "../src/config/landing.ts";
+import { site } from "../src/config/landing";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, "..", "public", "openapi.json");

@@ -1,5 +1,5 @@
 /**
- * Generate the pre-connect discovery documents from src/config/landing.ts.
+ * Generate the pre-connect discovery documents from src/config/landing.
  *
  * Runs before `astro build` (see package.json `build`). Output lands in
  * `public/` so Astro copies it verbatim into `dist/`. `sirv` serves
@@ -22,7 +22,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { serverCard, site } from "../src/config/landing.ts";
+import { serverCard, site } from "../src/config/landing";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(here, "..", "public");
