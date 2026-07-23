@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from email import message_from_bytes
@@ -22,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from common import global_config
+from common.token_encryption import PlaintextEncryption
 from db import engine as db_engine
 from db.base import Base
 from db.models.google_tokens import GoogleToken
@@ -48,7 +50,7 @@ from models.gmail import (
     GmailThread,
     GmailUpdateDraftInput,
 )
-from services import get_registry
+from services import get_registry, gmail_svc
 from services.gmail_attachments_svc import (
     gmail_add_attachment,
     gmail_remove_attachment,
@@ -104,6 +106,17 @@ def _patch_db():
     finally:
         db_engine._engine = orig_engine
         db_engine._SessionLocal = orig_session
+
+
+@pytest.fixture(autouse=True)
+def _clean_client_cache():
+    """``gmail_svc._client_cache`` is module-global state shared by every test
+    in this file, and ``_get_gmail_client``'s per-call token-row check means a
+    leaked entry changes what later tests observe - so isolate the whole file,
+    not just the cache-focused class."""
+    gmail_svc._client_cache.clear()
+    yield
+    gmail_svc._client_cache.clear()
 
 
 def _seed_token(factory, user_id: str = "alice") -> None:
@@ -1063,6 +1076,100 @@ class TestGmailNotConnected(TestTemplate):
         assert "auth_url" in msg
         assert "retry" in msg
         assert "gmail_status" in msg
+
+
+class TestGmailClientCache(TestTemplate):
+    """Bounded/evicting client cache + cross-process disconnect fail-closed.
+
+    Cache isolation comes from the module-level ``_clean_client_cache``
+    autouse fixture above.
+    """
+
+    @staticmethod
+    def _revoke_row(factory, user_id: str = "alice") -> None:
+        """Revoke the token row directly in the DB, as ``gmail_disconnect``
+        running in *another* process would (its ``_invalidate_gmail_client``
+        call never reaches this process's cache)."""
+        s = factory()
+        row = s.query(GoogleToken).filter_by(user_id=user_id).one()
+        row.revoked_at = datetime.now(UTC)
+        s.commit()
+        s.close()
+
+    def _build_patches(self, built_client: MagicMock):
+        return (
+            patch(
+                "common.token_encryption.require_encryption",
+                return_value=PlaintextEncryption(),
+            ),
+            patch("services.gmail_svc._mint_access_token", return_value="at-1"),
+            patch("googleapiclient.discovery.build", return_value=built_client),
+        )
+
+    def test_expired_entries_evicted_on_any_lookup(self):
+        """Expired tuples for *other* users are purged, not left until those
+        users hit again - the cache no longer grows with the user population."""
+        for i in range(5):
+            gmail_svc._client_cache[f"departed-{i}"] = (time.time() - 1, MagicMock())
+        live = MagicMock()
+        gmail_svc._client_cache["alice"] = (time.time() + 60, live)
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            assert _get_gmail_client("alice") is live
+
+        assert set(gmail_svc._client_cache) == {"alice"}
+
+    def test_cache_is_bounded_and_evicts_min_expiry_victim(self):
+        # Distinct expiries so the eviction victim is deterministic: u-0 is
+        # closest to expiry and must be the one displaced.
+        now = time.time()
+        for i in range(gmail_svc._CLIENT_CACHE_MAX):
+            gmail_svc._client_cache[f"u-{i}"] = (now + 3600 + i, MagicMock())
+
+        built = MagicMock()
+        with _patch_db() as factory:
+            _seed_token(factory)
+            p1, p2, p3 = self._build_patches(built)
+            with p1, p2, p3:
+                assert _get_gmail_client("alice") is built
+
+        assert len(gmail_svc._client_cache) == gmail_svc._CLIENT_CACHE_MAX
+        assert "u-0" not in gmail_svc._client_cache  # min-expiry entry evicted
+        assert "u-1" in gmail_svc._client_cache  # everything else survives
+        assert gmail_svc._client_cache["alice"][1] is built
+
+    def test_disconnect_in_other_process_fails_closed_on_cache_hit(self):
+        """Seed a cached client (process A), revoke the row in the DB (process
+        B's disconnect), then the next call in process A must raise
+        ``GmailNotConnectedError`` instead of serving the stale authorized
+        client for up to the 50-minute TTL."""
+        with _patch_db() as factory:
+            _seed_token(factory)
+            stale = MagicMock()
+            gmail_svc._client_cache["alice"] = (
+                time.time() + gmail_svc._CLIENT_TTL_S,
+                stale,
+            )
+            self._revoke_row(factory)
+
+            with pytest.raises(GmailNotConnectedError) as excinfo:
+                _get_gmail_client("alice")
+
+        assert excinfo.value.user_id == "alice"
+        assert "alice" not in gmail_svc._client_cache
+
+    def test_active_row_still_serves_cache_hit(self):
+        """The per-call token-row check must not break the happy path."""
+        with _patch_db() as factory:
+            _seed_token(factory)
+            live = MagicMock()
+            gmail_svc._client_cache["alice"] = (
+                time.time() + gmail_svc._CLIENT_TTL_S,
+                live,
+            )
+            assert _get_gmail_client("alice") is live
+            assert _get_gmail_client("alice") is live
 
 
 class TestDraftRoundTrip(TestTemplate):
