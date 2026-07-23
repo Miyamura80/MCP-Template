@@ -356,3 +356,106 @@ class TestInboxSaveCurationIdempotency(TestTemplate):
             self.ROUTE, json=self._payload(0.1), headers=headers
         )
         assert conflict.status_code == 422
+
+
+class TestGmailComposeIdempotency(TestTemplate):
+    """gmail_compose is mutating=True: its auto-generated route requires
+    Idempotency-Key, and a retried request with the same key replays the cached
+    response instead of creating a second draft (the P0 duplicate-draft bug).
+    """
+
+    ROUTE = "/api/v1/services/gmail_compose"
+
+    def setup_method(self):
+        self.engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+        @contextmanager
+        def _ctx():
+            session = self.SessionLocal()
+            try:
+                yield session
+            finally:
+                session.close()
+
+        app.dependency_overrides[get_authenticated_user] = _override_auth
+
+        # Mocked Gmail client: drafts().create() is the mutation under test.
+        self.mock_svc = MagicMock()
+        self.mock_svc.users().drafts().create().execute.return_value = {"id": "d-new"}
+        # compose re-fetches the saved draft at format=full after create.
+        self.mock_svc.users().drafts().get().execute.return_value = {
+            "id": "d-new",
+            "message": {
+                "id": "m-new",
+                "threadId": "t-new",
+                "payload": {
+                    "mimeType": "text/plain",
+                    "headers": [
+                        {"name": "To", "value": "alice@example.com"},
+                        {"name": "Subject", "value": "Subj"},
+                    ],
+                    "body": {"data": "Qm9keSE"},  # "Body!"
+                },
+            },
+        }
+        # Reset call counts accrued while configuring return values above.
+        self._create_execute = self.mock_svc.users().drafts().create().execute
+        self._create_execute.reset_mock()
+
+        self._patchers = [
+            patch("api_server.idempotency.use_db_session", _ctx),
+            patch("api_server.billing.limits.use_db_session", _ctx),
+            # Disable opportunistic idempotency-key cleanup so it can't race.
+            patch("api_server.idempotency.random.random", return_value=1.0),
+            patch(
+                "services.gmail_drafts_svc._get_gmail_client",
+                return_value=self.mock_svc,
+            ),
+        ]
+        for p in self._patchers:
+            p.start()
+        self.client = TestClient(app)
+
+    def teardown_method(self):
+        for p in self._patchers:
+            p.stop()
+        app.dependency_overrides.clear()
+
+    def _payload(self) -> dict:
+        return {"to": "alice@example.com", "subject": "Subj", "body": "Body!"}
+
+    def test_missing_idempotency_key_422(self):
+        """Without a key the route refuses - and no draft is ever created."""
+        resp = self.client.post(self.ROUTE, json=self._payload())
+        assert resp.status_code == 422
+        assert "Idempotency-Key" in resp.json()["error"]["message"]
+        assert self._create_execute.call_count == 0
+
+    def test_replay_same_key_does_not_duplicate_draft(self):
+        headers = {"Idempotency-Key": "compose-k1"}
+        first = self.client.post(self.ROUTE, json=self._payload(), headers=headers)
+        assert first.status_code == 200, first.text
+        assert first.json()["draft_id"] == "d-new"
+        assert self._create_execute.call_count == 1
+        # Retry with the same key: cached response replayed, no second draft.
+        second = self.client.post(self.ROUTE, json=self._payload(), headers=headers)
+        assert second.status_code == 200
+        assert second.json() == first.json()
+        assert self._create_execute.call_count == 1
+
+    def test_same_key_different_payload_conflicts(self):
+        headers = {"Idempotency-Key": "compose-k2"}
+        first = self.client.post(self.ROUTE, json=self._payload(), headers=headers)
+        assert first.status_code == 200, first.text
+        conflict = self.client.post(
+            self.ROUTE,
+            json={**self._payload(), "subject": "Other"},
+            headers=headers,
+        )
+        assert conflict.status_code == 422
