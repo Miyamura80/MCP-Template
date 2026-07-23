@@ -38,6 +38,15 @@ if [ -n "$seed_script" ]; then
     exit 1
   }
 fi
+# Fresh chat state per drive: accumulated Goose sessions eventually make the
+# desktop boot into a resume screen instead of a new chat (observed after
+# ~10 runs), leaving the prompt undelivered. Wiping is safe here - this is a
+# dedicated e2e environment, and the sessions are throwaway mock chats.
+# Opt out with E2E_KEEP_GOOSE_SESSIONS=1 when debugging a prior session.
+if [ "${E2E_KEEP_GOOSE_SESSIONS:-}" != "1" ]; then
+  rm -rf "$HOME/.local/share/goose/sessions/"* 2>/dev/null || true
+fi
+
 # Snapshot the tool-call-log size BEFORE driving. If the drive produces no new
 # entries, the oracle must not grade stale ones (the false-PASS hole).
 before="$(python3 "$SCRIPT_DIR/mcp_probe.py" calls_count 2>/dev/null || echo 0)"

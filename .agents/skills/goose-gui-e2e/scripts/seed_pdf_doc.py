@@ -27,11 +27,14 @@ DOC_ID = "e2e-nda-doc"
 uri = os.environ["BACKEND_DB_URI"]
 user_id = os.environ.get("E2E_USER_ID", "e2e-user")
 
+# Two pages: scenarios assert the review renders EVERY page (a signer must
+# never sign a document they only saw page 1 of).
 filled = apply_ops(
-    make_flat_pdf(),
+    make_flat_pdf(page_count=2),
     [
         AddTextOp(page=1, x=110.0, y=650.0, text="Eito Miyamura"),
         AddTextOp(page=1, x=105.0, y=600.0, text="2026-07-22"),
+        AddTextOp(page=2, x=110.0, y=650.0, text="Eito Miyamura"),
     ],
 )
 

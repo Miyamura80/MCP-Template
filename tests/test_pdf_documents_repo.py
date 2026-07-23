@@ -147,10 +147,16 @@ class TestPdfDocumentsRepo(SqlitePdfRepoTestBase):
         loaded = repo.load_document(doc.doc_id, "u1")
         assert loaded.current_bytes == _PDF
 
-    def test_same_status_is_noop_not_error(self):
+    def test_same_status_transition_rejected(self):
+        # Self-transitions are invalid (no X -> X edges): treating them as a
+        # no-op let a racer that loaded the row after a winner sealed it
+        # slip past the CAS and overwrite the winner's bytes + audit (see
+        # tests/test_pdf_concurrency.py). No caller requests X -> X on
+        # purpose, so observing one always means a lost race.
         doc = self._create()
-        doc = repo.update_document(doc.doc_id, "u1", new_status=repo.PDF_STATUS_OPEN)
-        assert doc.status == repo.PDF_STATUS_OPEN
+        with pytest.raises(repo.PdfInvalidTransitionError):
+            repo.update_document(doc.doc_id, "u1", new_status=repo.PDF_STATUS_OPEN)
+        assert repo.load_document(doc.doc_id, "u1").status == repo.PDF_STATUS_OPEN
 
     def test_placement_set_and_clear(self):
         doc = self._create()

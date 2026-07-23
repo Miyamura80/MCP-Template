@@ -28,22 +28,11 @@
     "interaction_rendered": true
   },
   "interact": {
-    "fill": {
-      "selector": "#sign-as",
-      "value": "Eito Miyamura"
-    },
-    "check": {
-      "selector": "input[type=checkbox]"
-    },
     "click": {
-      "text": "Sign document"
+      "text": "Cancel"
     },
     "expect_dom_contains": [
-      "Signed by Eito Miyamura"
-    ],
-    "expect_selectors": [
-      "img[alt='Page 1']",
-      "img[alt='Page 2']"
+      "Signing cancelled"
     ]
   }
 }
