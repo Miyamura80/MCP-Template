@@ -155,7 +155,11 @@ try {
           const btn = interact.click.selector
             ? frame.locator(interact.click.selector).first()
             : frame.getByText(interact.click.text, { exact: false }).first();
-          await btn.click({ timeout: 6000 });
+          // Host auto-resizes the iframe while pages render; a first click
+          // can land on stale coordinates. Same fallback as the check step.
+          await btn.click({ timeout: 6000 }).catch(() =>
+            btn.click({ timeout: 6000, force: true })
+          );
         }
         let ibody = "";
         for (let i = 0; i < 30 && (result.interact_missing.length || result.interact_sel_missing.length); i++) {

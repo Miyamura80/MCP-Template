@@ -146,7 +146,11 @@ def _build_update_values(
     type, whose key union is wider than ``str``.
     """
     values: dict[Any, Any] = {"updated_at": datetime.now(UTC)}
-    if new_status is not None and new_status != doc.status:
+    if new_status is not None:
+        # Self-transitions are invalid too (no X -> X edges exist): a racer
+        # that loads the row AFTER a winner sealed it would otherwise see
+        # signed == signed, skip the transition entirely, and silently
+        # overwrite the winner's bytes + audit.
         current = PdfDocStatus(doc.status)
         if new_status not in _VALID_TRANSITIONS[current]:
             raise PdfInvalidTransitionError(
@@ -221,7 +225,7 @@ def update_document(
         query = session.query(PdfDocument).filter(
             PdfDocument.doc_id == doc_id, PdfDocument.user_id == user_id
         )
-        if "status" in values or audit_only_if_status is not None:
+        if new_status is not None or audit_only_if_status is not None:
             # CAS: only the writer that still sees the observed status wins.
             query = query.filter(PdfDocument.status == observed_status)
         updated = query.update(values, synchronize_session=False)
