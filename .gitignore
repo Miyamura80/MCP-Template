@@ -185,3 +185,6 @@ mcp_conformance_results/
 
 # Auto-generated dev PDF sealing certificate (services/pdf_signing.py)
 .pdf_signing/
+
+# Claude Code subagent worktrees (transient session workspaces)
+.claude/worktrees/
