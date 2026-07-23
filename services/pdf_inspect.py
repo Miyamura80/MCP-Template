@@ -133,28 +133,30 @@ def inspect_pdf(data: bytes, *, include_text_layout: bool = True) -> PdfInspecti
             for i, p in enumerate(reader.pages)
         ]
         fields = _collect_fields(reader)
-    except PdfReadError as exc:
-        # Truncated/corrupt bytes that still start with %PDF- surface here;
-        # translate the raw pypdf error into the pdf_open error contract.
-        raise PdfCorruptError() from exc
-    inspection = PdfInspection(
-        page_count=len(reader.pages),
-        page_sizes=page_sizes,
-        has_acroform=bool(fields),
-        fields=fields,
-        existing_signatures=[
-            f.name
-            for f in fields
-            if f.field_type == "signature" and f.value is not None
-        ],
-        has_xfa=_has_xfa(reader),
-    )
-    # Layout is the overlay anchor for flat PDFs; AcroForm docs are filled by
-    # field name, so skipping layout there keeps responses bounded.
-    if include_text_layout and not inspection.has_acroform:
-        inspection.text_layout, inspection.text_layout_truncated = _extract_layout(
-            reader
+        inspection = PdfInspection(
+            page_count=len(reader.pages),
+            page_sizes=page_sizes,
+            has_acroform=bool(fields),
+            fields=fields,
+            existing_signatures=[
+                f.name
+                for f in fields
+                if f.field_type == "signature" and f.value is not None
+            ],
+            has_xfa=_has_xfa(reader),
         )
+        # Layout is the overlay anchor for flat PDFs; AcroForm docs are
+        # filled by field name, so skipping layout there keeps responses
+        # bounded.
+        if include_text_layout and not inspection.has_acroform:
+            inspection.text_layout, inspection.text_layout_truncated = _extract_layout(
+                reader
+            )
+    except PdfReadError as exc:
+        # Truncated/corrupt bytes that still start with %PDF- can surface
+        # from ANY of the lazy pypdf reads above (structure, XFA lookup,
+        # text extraction); translate them all into the pdf_open contract.
+        raise PdfCorruptError() from exc
     return inspection
 
 

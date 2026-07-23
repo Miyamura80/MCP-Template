@@ -128,12 +128,16 @@ def _audit_rejection(doc: PdfDocument, reason: str) -> None:
     """Record a rejected ceremony submission (PRD: failed attempts audited).
 
     Status is untouched - the document stays ``awaiting_signature`` so the
-    user can correct the input and retry.
+    user can correct the input and retry. Conditional on the row still being
+    ``awaiting_signature``: a rejection racing a successful seal must not
+    append events after ``signed`` and muddy the sealed document's audit
+    chronology.
     """
     update_document(
         doc.doc_id,
         doc.user_id,
         audit_event={"event": "sign_rejected", "reason": reason},
+        audit_only_if_status=PdfDocStatus.AWAITING_SIGNATURE,
     )
 
 
@@ -185,10 +189,10 @@ def _generate_dev_cert(cert_path: Path, key_path: Path) -> None:
         )
         .sign(key, hashes.SHA256())
     )
-    cert_path.parent.mkdir(parents=True, exist_ok=True)
-    # Publish the pair atomically (temp files + rename, key first): two
-    # processes generating concurrently must never interleave into a
-    # mismatched key/cert pair, which would break every subsequent seal load.
+    # Per-file atomic replace (temp + rename) prevents partial reads; the
+    # exclusive lock in sealing_cert_paths() serializes whole-pair
+    # generation, so concurrent processes can never interleave into a
+    # mismatched key/cert pair (which would break every later seal load).
     pid_suffix = f".tmp-{os.getpid()}"
     key_tmp = key_path.with_name(key_path.name + pid_suffix)
     cert_tmp = cert_path.with_name(cert_path.name + pid_suffix)
@@ -205,13 +209,30 @@ def _generate_dev_cert(cert_path: Path, key_path: Path) -> None:
 
 
 def sealing_cert_paths() -> tuple[Path, Path]:
-    """Resolve (cert, key) PEM paths, generating the dev pair if needed."""
+    """Resolve (cert, key) PEM paths, generating the dev pair if needed.
+
+    First-time dev generation is serialized with an exclusive file lock
+    (dev/POSIX-only path - production supplies cert_path/key_path): two
+    processes generating concurrently could otherwise each replace one half
+    of the pair, leaving a mismatched key/cert on disk. The winner generates;
+    losers block on the lock, then see the finished pair on the recheck.
+    """
+    import fcntl  # noqa: PLC0415 - POSIX-only, dev-cert path only
+
     cfg = global_config.pdf_forms.signing
     if cfg.cert_path and cfg.key_path:
         return Path(cfg.cert_path), Path(cfg.key_path)
     cert_path, key_path = _dev_cert_paths()
-    if not (cert_path.exists() and key_path.exists()):
-        _generate_dev_cert(cert_path, key_path)
+    if cert_path.exists() and key_path.exists():
+        return cert_path, key_path
+    cert_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = cert_path.parent / ".dev_cert.lock"
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        # Recheck under the lock: a concurrent process may have generated
+        # the pair while this one waited.
+        if not (cert_path.exists() and key_path.exists()):
+            _generate_dev_cert(cert_path, key_path)
     return cert_path, key_path
 
 

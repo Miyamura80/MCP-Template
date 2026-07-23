@@ -167,6 +167,26 @@ class TestPerformSigning(PdfSigningTestBase):
         with pytest.raises(pdf_signing.PdfSigningInputError):
             self._sign(doc_id, consent=False)
 
+    def test_stale_rejection_never_audits_after_signed(self):
+        # Race: a rejected submission carrying a stale 'awaiting' row must
+        # not append sign_rejected to a document that has since been sealed.
+        doc_id = self._open_awaiting()
+        stale = repo.load_document(doc_id, "u1")
+        self._sign(doc_id)
+        with pytest.raises(pdf_signing.PdfSigningInputError):
+            pdf_signing.validate_ceremony(stale, "   ", True)
+        events = [e["event"] for e in repo.load_document(doc_id, "u1").audit or []]
+        assert "sign_rejected" not in events
+        assert events[-1] == "signed"
+
+    def test_rejected_submission_is_audited_while_awaiting(self):
+        doc_id = self._open_awaiting()
+        doc = repo.load_document(doc_id, "u1")
+        with pytest.raises(pdf_signing.PdfSigningInputError):
+            pdf_signing.validate_ceremony(doc, "", True)
+        events = [e["event"] for e in repo.load_document(doc_id, "u1").audit or []]
+        assert events[-1] == "sign_rejected"
+
     def test_non_latin1_name_rejected(self):
         # The stamp face is standard-14 Helvetica (Latin-1): a CJK name would
         # silently render as '?' on a legal document, so it must be refused.
