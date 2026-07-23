@@ -36,6 +36,18 @@ def _service(input: _Input) -> _Output:
     return _Output(doubled=input.n * 2)
 
 
+async def _crash_after_call(tool):
+    """Enhancer that runs the service, emits partial output, then crashes."""
+    tool.call()
+    tool.send_text("DO NOT SHIP THIS")
+    raise RuntimeError("crash after service ran")
+
+
+async def _crash_before_call(tool):
+    """Enhancer that crashes before ever invoking the service."""
+    raise RuntimeError("crash before service")
+
+
 def _make_mock_ctx(*, can_elicit: bool = True, elicit_result: Any = None) -> MagicMock:
     ctx = MagicMock()
     ctx.session.check_client_capability = MagicMock(return_value=can_elicit)
@@ -179,8 +191,13 @@ class TestEnhancerRegistry(TestTemplate):
 class TestEnhancerCrashFallback(TestTemplate):
     """Verify @enhance(fallback=...) handling when the enhancer raises."""
 
-    def _register_test_service_and_get_tool_fn(self, fallback_mode, enhancer_fn):
-        """Register a throwaway service + enhancer, register the tool, return the wrapped fn."""
+    def _register_test_service_and_get_tool_fn(
+        self, fallback_mode, enhancer_fn, *, mutating=False
+    ):
+        """Register a throwaway service + enhancer, register the tool.
+
+        Returns (tool_fn, calls, cleanup); `calls["count"]` tracks how many
+        times the pure service actually executed."""
 
         class _CrashIn(BaseModel):
             x: int = 0
@@ -189,14 +206,17 @@ class TestEnhancerCrashFallback(TestTemplate):
             value: int
 
         svc_name = f"__crash_test_{fallback_mode}"
+        calls = {"count": 0}
 
         @service(
             name=svc_name,
             description="test",
             input_model=_CrashIn,
             output_model=_CrashOut,
+            mutating=mutating,
         )
         def _svc(input: _CrashIn) -> _CrashOut:
+            calls["count"] += 1
             return _CrashOut(value=input.x * 100)
 
         enhance(svc_name, fallback=fallback_mode)(enhancer_fn)
@@ -210,13 +230,13 @@ class TestEnhancerCrashFallback(TestTemplate):
             _registry[:] = [e for e in _registry if e.name != svc_name]
             _enhancers.pop(svc_name, None)
 
-        return tool_fn, cleanup
+        return tool_fn, calls, cleanup
 
     def test_crash_with_headless_fallback_returns_pure_service_result(self):
         async def crashing_enhancer(tool):
             raise RuntimeError("simulated enhancer failure")
 
-        tool_fn, cleanup = self._register_test_service_and_get_tool_fn(
+        tool_fn, _calls, cleanup = self._register_test_service_and_get_tool_fn(
             "headless", crashing_enhancer
         )
         try:
@@ -231,7 +251,7 @@ class TestEnhancerCrashFallback(TestTemplate):
         async def crashing_enhancer(tool):
             raise RuntimeError("boom")
 
-        tool_fn, cleanup = self._register_test_service_and_get_tool_fn(
+        tool_fn, _calls, cleanup = self._register_test_service_and_get_tool_fn(
             "error", crashing_enhancer
         )
         try:
@@ -250,7 +270,7 @@ class TestEnhancerCrashFallback(TestTemplate):
             tool.send_app("ui://should-be-discarded")
             raise RuntimeError("crash after partial")
 
-        tool_fn, cleanup = self._register_test_service_and_get_tool_fn(
+        tool_fn, _calls, cleanup = self._register_test_service_and_get_tool_fn(
             "headless", crashing_after_partial
         )
         try:
@@ -262,6 +282,51 @@ class TestEnhancerCrashFallback(TestTemplate):
                 "DO NOT SHIP" not in c.text for c in result.content if c.type == "text"
             )
             assert result.meta is None
+        finally:
+            cleanup()
+
+    def test_crash_after_call_reuses_result_and_runs_service_once(self):
+        """If the enhancer crashes *after* tool.call() completed, the fallback
+        must reuse the stashed result - never execute the service twice."""
+        tool_fn, calls, cleanup = self._register_test_service_and_get_tool_fn(
+            "headless", _crash_after_call, mutating=True
+        )
+        try:
+            ctx = _make_mock_ctx()
+            result = asyncio.run(tool_fn(ctx=ctx, x=4))
+            assert result.structuredContent == {"value": 400}
+            assert calls["count"] == 1
+            # Partial enhancer output from before the crash is still discarded.
+            assert all(
+                "DO NOT SHIP" not in c.text for c in result.content if c.type == "text"
+            )
+        finally:
+            cleanup()
+
+    def test_crash_before_call_on_mutating_service_propagates(self):
+        """No completed result + mutating service: re-execution is forbidden,
+        so the enhancer error must propagate and the service must never run."""
+        tool_fn, calls, cleanup = self._register_test_service_and_get_tool_fn(
+            "headless", _crash_before_call, mutating=True
+        )
+        try:
+            ctx = _make_mock_ctx()
+            with pytest.raises(RuntimeError, match="crash before service"):
+                asyncio.run(tool_fn(ctx=ctx, x=4))
+            assert calls["count"] == 0
+        finally:
+            cleanup()
+
+    def test_crash_before_call_on_non_mutating_service_retries_headless(self):
+        """Non-mutating services keep the headless retry: service runs once."""
+        tool_fn, calls, cleanup = self._register_test_service_and_get_tool_fn(
+            "headless", _crash_before_call
+        )
+        try:
+            ctx = _make_mock_ctx()
+            result = asyncio.run(tool_fn(ctx=ctx, x=5))
+            assert result.structuredContent == {"value": 500}
+            assert calls["count"] == 1
         finally:
             cleanup()
 
