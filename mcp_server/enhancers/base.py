@@ -61,6 +61,17 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
 
     @property
     def can_elicit(self) -> bool:
+        """True only when the client DECLARED the elicitation capability.
+
+        Deliberately conservative: under ``stateless_http=True`` (the
+        production default) the per-request session never sees the client's
+        ``initialize`` params, so this returns False even for
+        elicitation-capable hosts - which is correct, because in-band
+        elicitation cannot complete stateless (the client's response POST is
+        uncorrelatable; ``ctx.elicit()`` would hang). Do NOT change this to
+        attempt-when-unknown. See the transport comment in
+        ``mcp_server/server.py``.
+        """
         return self._ctx.session.check_client_capability(
             ClientCapabilities(elicitation=ElicitationCapability())
         )

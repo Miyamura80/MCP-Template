@@ -111,6 +111,11 @@ server:
   port: 8080
   allowed_origins:
     - "http://localhost:3000"
+  # /mcp session mode. true = self-contained requests (safe for multi-replica
+  # and spin-down hosting; in-band elicitation unavailable). false = stateful
+  # sessions (single replica only; enables host-native elicitation, e.g. the
+  # PDF signing confirmation dialog). See mcp_server/server.py.
+  mcp_stateless_http: true
 
 ########################################################
 # Registry branding (pre-connect discovery)

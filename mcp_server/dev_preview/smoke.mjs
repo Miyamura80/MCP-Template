@@ -50,6 +50,7 @@ await page.waitForTimeout(1200);
 const MARKER = {
   gmail_inbox: "Curated inbox",
   gmail_composer: "priya@peoplehq.io",
+  pdf_signer: "Awaiting your signature",
 };
 const marker = MARKER[APP] ?? "";
 const frame = page.frames().find((f) => f !== page.mainFrame());

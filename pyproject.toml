@@ -70,6 +70,9 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "rank-bm25>=0.2.2",
     "sse-starlette>=3.4.5",
+    "pypdf>=6.14.2",
+    "pyhanko>=0.35.1",
+    "pypdfium2>=5.10.1",
 ]
 readme = "README.md"
 requires-python = ">= 3.12"
@@ -97,7 +100,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src", "common", "utils", "services", "models", "mcp_server", "db", "api_server"]
-force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html", "mcp_server/apps/settings/dist/mcp-app.html" = "mcp_server/apps/settings/dist/mcp-app.html", "docs/content/docs" = "docs/content/docs"}
+force-include = {"mcp_server/apps/gmail_composer/dist/mcp-app.html" = "mcp_server/apps/gmail_composer/dist/mcp-app.html", "mcp_server/apps/gmail_inbox/dist/mcp-app.html" = "mcp_server/apps/gmail_inbox/dist/mcp-app.html", "mcp_server/apps/settings/dist/mcp-app.html" = "mcp_server/apps/settings/dist/mcp-app.html", "mcp_server/apps/pdf_signer/dist/mcp-app.html" = "mcp_server/apps/pdf_signer/dist/mcp-app.html", "docs/content/docs" = "docs/content/docs"}
 
 [tool.ruff]
 line-length = 88
@@ -210,6 +213,13 @@ exclude = [
     "tests/test_mcp_oauth.py",
     "tests/test_mcp_e2e.py",
     "tests/test_apps_e2e.py",
+    "tests/test_pdf_documents_repo.py",
+    "tests/test_pdf_gmail_bridge.py",
+    "tests/test_pdf_forms_svc.py",
+    "tests/test_pdf_signing.py",
+    "tests/test_pdf_signer_flows.py",
+    "tests/pdf_fixtures.py",
+    "tests/pdf_harness.py",
 ]
 
 [tool.file_length]
