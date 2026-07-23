@@ -56,6 +56,7 @@ from services.gmail_attachments_svc import (
     gmail_remove_attachment,
 )
 from services.gmail_curate_svc import gmail_curate_inbox
+from services.gmail_draft_helpers import draft_thread_map, find_draft_id_for_thread
 from services.gmail_drafts_svc import (
     GmailReplyInput,
     gmail_compose,
@@ -854,6 +855,126 @@ class TestGmailGetThread(TestTemplate):
         }
         thread, _mock = self._run_get_thread(thread_payload)
         assert "old line" in (thread.messages[0].body_text or "")
+
+    def test_draft_on_second_drafts_page_is_found(self):
+        """Regression: with >50 drafts, a draft past page 1 must still be found.
+
+        The old inline scan called ``drafts().list(maxResults=50)`` with no
+        ``nextPageToken`` follow-up, so a draft attached to the thread but
+        listed on a later page was silently reported as "no draft".
+        """
+        thread_payload = {
+            "id": "t-deep",
+            "messages": [
+                _plain_message(
+                    message_id="m-1",
+                    thread_id="t-deep",
+                    headers={"From": "a@x", "To": "b@y", "Subject": "hi"},
+                    body="original",
+                ),
+                # threads().get(format=full) includes the draft's underlying
+                # message; its DRAFT label is what gates the drafts().list scan.
+                _plain_message(
+                    message_id="m-d-deep",
+                    thread_id="t-deep",
+                    headers={"To": "b@y", "Subject": "hi"},
+                    body="draft reply",
+                    label_ids=["DRAFT"],
+                ),
+            ],
+        }
+        page1 = {
+            "drafts": [
+                {
+                    "id": f"d-{i}",
+                    "message": {"id": f"m-d-{i}", "threadId": f"t-other-{i}"},
+                }
+                for i in range(50)
+            ],
+            "nextPageToken": "page-2",
+        }
+        page2 = {
+            "drafts": [
+                {"id": "d-deep", "message": {"id": "m-d-deep", "threadId": "t-deep"}}
+            ]
+        }
+        target_draft = _draft_resource(
+            draft_id="d-deep", thread_id="t-deep", body="draft reply"
+        )
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().threads().get().execute.return_value = thread_payload
+            mock.users().drafts().list().execute.side_effect = [page1, page2]
+            mock.users().drafts().get().execute.return_value = target_draft
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                thread = gmail_get_thread(
+                    GmailGetThreadInput(user_id="alice", thread_id="t-deep")
+                )
+            finally:
+                _stop(patches)
+
+        assert thread.draft is not None
+        assert thread.draft.draft_id == "d-deep"
+        assert thread.draft.body == "draft reply"
+        # The draft's underlying message is not doubled into the thread.
+        assert [m.message_id for m in thread.messages] == ["m-1"]
+        # The scan actually followed nextPageToken onto page 2.
+        list_kwargs = [
+            c.kwargs for c in mock.users().drafts().list.call_args_list if c.kwargs
+        ]
+        assert any(k.get("pageToken") == "page-2" for k in list_kwargs)
+
+    def test_no_draft_thread_skips_drafts_scan(self):
+        """A thread with no DRAFT-labeled message costs zero drafts API calls."""
+        thread_payload = {
+            "id": "t-x",
+            "messages": [
+                _plain_message(message_id="m-1", thread_id="t-x", body="hello")
+            ],
+        }
+        thread, mock = self._run_get_thread(thread_payload)
+        assert thread.draft is None
+        mock.users().drafts().list().execute.assert_not_called()
+
+
+class TestDraftThreadMapHelpers(TestTemplate):
+    """Direct tests for the shared paginated thread→draft scan."""
+
+    def _two_page_mock(self) -> MagicMock:
+        """Two drafts on the same thread, split across two drafts.list pages."""
+        page1 = {
+            "drafts": [
+                {"id": "d-first", "message": {"id": "m-1", "threadId": "t-dup"}},
+                {"id": "d-other", "message": {"id": "m-2", "threadId": "t-other"}},
+            ],
+            "nextPageToken": "page-2",
+        }
+        page2 = {
+            "drafts": [
+                {"id": "d-second", "message": {"id": "m-3", "threadId": "t-dup"}}
+            ]
+        }
+        mock = MagicMock()
+        mock.users().drafts().list().execute.side_effect = [page1, page2]
+        return mock
+
+    def test_find_draft_id_first_match_wins_and_early_exits(self):
+        mock = self._two_page_mock()
+        assert find_draft_id_for_thread(mock, "t-dup") == "d-first"
+        # Early exit: page 2 was never fetched.
+        assert mock.users().drafts().list().execute.call_count == 1
+
+    def test_draft_thread_map_first_match_wins(self):
+        mock = self._two_page_mock()
+        mapping = draft_thread_map(mock)
+        assert mapping["t-dup"] == "d-first"
+        assert mapping["t-other"] == "d-other"
+        # The full map consumed both pages.
+        assert mock.users().drafts().list().execute.call_count == 2
 
 
 class TestGmailGetAttachment(TestTemplate):

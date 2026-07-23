@@ -32,7 +32,10 @@ from models.gmail import (
 )
 from services import service
 from services.curation_ledger import mark_state_best_effort
-from services.gmail_draft_helpers import _draft_resource_to_model
+from services.gmail_draft_helpers import (
+    _draft_resource_to_model,
+    find_draft_id_for_thread,
+)
 from services.gmail_svc import (
     GmailAttachmentTooLargeError,
     _b64url_to_std,
@@ -355,22 +358,27 @@ def gmail_get_thread(input: GmailGetThreadInput) -> GmailThread:
     # the messages list so we can exclude the draft's underlying message.
     draft: GmailDraft | None = None
     draft_message_id: str | None = None
-    try:
-        drafts_resp = svc.users().drafts().list(userId="me", maxResults=50).execute()
-        for d in drafts_resp.get("drafts", []) or []:
-            d_msg = d.get("message") or {}
-            if d_msg.get("threadId") == input.thread_id:
-                full_draft = (
-                    svc.users()
-                    .drafts()
-                    .get(userId="me", id=d["id"], format="full")
-                    .execute()
-                )
-                draft = _draft_resource_to_model(full_draft)
-                draft_message_id = (full_draft.get("message") or {}).get("id")
-                break
-    except Exception:  # noqa: BLE001  # draft lookup is best-effort
-        pass
+    # threads().get(format=full) already includes draft messages, so gate the
+    # drafts().list scan on the thread actually carrying a DRAFT-labeled
+    # message - the common no-draft case then costs zero extra API calls.
+    has_draft_message = any(
+        "DRAFT" in (m.get("labelIds") or []) for m in thread.get("messages", []) or []
+    )
+    draft_id = (
+        find_draft_id_for_thread(svc, input.thread_id) if has_draft_message else None
+    )
+    if draft_id:
+        try:
+            full_draft = (
+                svc.users()
+                .drafts()
+                .get(userId="me", id=draft_id, format="full")
+                .execute()
+            )
+            draft = _draft_resource_to_model(full_draft)
+            draft_message_id = (full_draft.get("message") or {}).get("id")
+        except Exception:  # noqa: BLE001  # draft lookup is best-effort
+            pass
 
     messages: list[GmailThreadMessage] = []
     for m in thread.get("messages", []) or []:
