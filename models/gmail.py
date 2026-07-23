@@ -465,3 +465,21 @@ class GmailCuratedThread(BaseModel):
 
 class GmailCurateInboxResult(BaseModel):
     threads: list[GmailCuratedThread]
+
+
+# ---------------------------------------------------------------------------
+# Remote image proxy (inbox reader app)
+# ---------------------------------------------------------------------------
+
+
+class GmailFetchImageResult(BaseModel):
+    """A remote email image fetched server-side and returned as base64.
+
+    Strict-CSP MCP hosts (e.g. claude.ai) block ``img-src`` for arbitrary
+    remote origins inside the app iframe, so the reader app asks the server
+    to fetch the bytes and renders them as a ``data:`` URI instead.
+    """
+
+    url: str
+    mime_type: str
+    data_base64: str

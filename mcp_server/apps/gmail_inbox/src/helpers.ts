@@ -6,7 +6,46 @@ import type {
   ExistingAttachment,
   FileAttachment,
   LabelChip,
+  McpAppLike,
 } from "./types";
+
+export type ToolResultBuffer = {
+  /**
+   * Take over live `ontoolresult` delivery with `handler`, first replaying (oldest
+   * first) any results the host delivered before this call.
+   */
+  drainInto: (handler: (raw: unknown) => void) => void;
+};
+
+/**
+ * Capture `ontoolresult` deliveries from the earliest possible moment.
+ *
+ * The host can deliver the initiating tool result before the React component's
+ * mount effect runs and assigns its `ontoolresult` handler; that result would
+ * otherwise be lost, and for a thread-open the app would fall back to a curated-
+ * inbox refresh instead of showing the requested thread. Installing this buffer
+ * in the entry point (before `connect()`/render) means the result is captured no
+ * matter when it arrives; the component then calls `drainInto(handler)` on mount
+ * to replay it through its real handler and take over live delivery.
+ *
+ * Replay-then-assign is gapless: there is no `await` between the two, so no
+ * postMessage-driven `ontoolresult` can interleave and be dropped.
+ */
+export function bufferToolResults(
+  app: Pick<McpAppLike, "ontoolresult">,
+): ToolResultBuffer {
+  const pending: unknown[] = [];
+  app.ontoolresult = (raw) => {
+    pending.push(raw);
+  };
+  return {
+    drainInto(handler) {
+      const buffered = pending.splice(0, pending.length);
+      for (const raw of buffered) handler(raw);
+      app.ontoolresult = handler;
+    },
+  };
+}
 
 const BUCKET_CHIP: Record<string, LabelChip> = {
   needs_reply: { name: "Needs reply", bg_color: "#fce8e6", text_color: "#c5221f" },
@@ -43,10 +82,8 @@ export function curationToThreads(records: CurationRecord[]): CuratedThread[] {
 }
 
 export function extractDraft(raw: unknown): ComposerDraft | null {
-  if (!raw || typeof raw !== "object") return null;
-  const wrapper = raw as { structuredContent?: unknown };
-  const data = (wrapper.structuredContent ?? raw) as Record<string, unknown>;
-  if (!data || typeof data !== "object") return null;
+  const data = extractStructuredContent<Record<string, unknown>>(raw);
+  if (!data) return null;
   const draftId = data["draft_id"];
   if (typeof draftId !== "string") return null;
   return {
@@ -93,6 +130,14 @@ export function splitTextAtQuote(text: string): { main: string; quoted: string |
   return { main: text, quoted: null };
 }
 
+// Unwrap an MCP CallToolResult to its structured payload: prefer
+// `structuredContent`, else parse a JSON `TextContent` item. Returns null when
+// neither is present - never the raw envelope - so a malformed result can't
+// masquerade as a draft/thread and content-only JSON results aren't dropped.
+//
+// Keep in sync with gmail_composer/src/draft.ts:extractStructuredContent - the
+// apps are isolated bun packages and can't share this; #170 tracks folding the
+// per-app boilerplate into a shared source once that's designed.
 export function extractStructuredContent<T>(raw: unknown): T | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
@@ -101,12 +146,16 @@ export function extractStructuredContent<T>(raw: unknown): T | null {
   }
   if (Array.isArray(obj.content)) {
     for (const item of obj.content) {
-      if (item && typeof item === "object" && "text" in (item as Record<string, unknown>)) {
-        try {
-          const parsed = JSON.parse((item as { text: string }).text);
-          if (parsed && typeof parsed === "object") return parsed as T;
-        } catch { /* not JSON text content */ }
-      }
+      if (!item || typeof item !== "object") continue;
+      // Only a real MCP TextContent block qualifies: a `type: "text"`
+      // discriminator with a string `text`. Without this an image/resource/other
+      // block that happens to carry a `text` field could smuggle JSON through.
+      const candidate = item as { type?: unknown; text?: unknown };
+      if (candidate.type !== "text" || typeof candidate.text !== "string") continue;
+      try {
+        const parsed = JSON.parse(candidate.text);
+        if (parsed && typeof parsed === "object") return parsed as T;
+      } catch { /* not JSON text content */ }
     }
   }
   return null;

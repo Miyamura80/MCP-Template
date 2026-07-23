@@ -11,7 +11,7 @@ import { createServer, type ServerResponse } from "node:http";
 import sirv from "sirv";
 
 import { buildAgentsMd } from "./src/agent/content.ts";
-import { site } from "./src/config/landing.ts";
+import { site } from "./src/config/landing";
 
 const PORT = Number(process.env.PORT ?? 8080);
 

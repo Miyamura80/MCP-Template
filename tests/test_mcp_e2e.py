@@ -62,10 +62,15 @@ def _patch_db():
 
 
 def _read_sse_first_message(response) -> dict:
-    """Parse the first ``data:`` line from an MCP SSE response."""
-    for line in response.iter_lines():
-        if isinstance(line, bytes):
-            line = line.decode()
+    """Parse the first ``data:`` line from an MCP SSE response.
+
+    Deliberately NOT ``iter_lines()``: that splits on Unicode line
+    boundaries (U+2028, NEL, ...) which legally appear unescaped inside
+    JSON string payloads (e.g. the pdf_signer app bundle's inlined pdf.js
+    worker), truncating the frame. The SSE spec ends lines on CR/LF only.
+    """
+    normalized = response.text.replace("\r\n", "\n").replace("\r", "\n")
+    for line in normalized.split("\n"):
         if line.startswith("data:"):
             return json.loads(line.removeprefix("data:").strip())
     raise AssertionError("no SSE data frame in response")
@@ -346,3 +351,80 @@ class TestMCPWireE2E(TestTemplate):
             _registry[:] = [e for e in _registry if e.name != svc_name]
             _enhancers.pop(svc_name, None)
             mcp._tool_manager._tools.pop(svc_name, None)
+
+
+class TestPdfToolsWireE2E(TestTemplate):
+    """US-004/FR-10: page images cross the wire as ImageContent, and no PDF
+    bytes ever appear in an LLM-visible tool result."""
+
+    def test_pdf_open_renders_image_content_and_leaks_no_pdf_bytes(self):
+        from models.pdf_forms import PdfOpenResult  # noqa: PLC0415 - test-local
+        from services.pdf_ports import ResolvedPdfSource  # noqa: PLC0415 - test-local
+        from tests.pdf_fixtures import make_flat_pdf  # noqa: PLC0415 - test-local
+
+        pdf_bytes = make_flat_pdf()
+
+        def _stub_resolver(user_id, source):
+            return ResolvedPdfSource(filename="nda.pdf", data=pdf_bytes)
+
+        with (
+            patch("services.pdf_forms_svc.resolve_source", _stub_resolver),
+            _wire_session("u-e2e-pdf") as session,
+        ):
+            result = session.request(
+                "tools/call",
+                {
+                    "name": "pdf_open",
+                    "arguments": {
+                        "source": {
+                            "type": "gmail_attachment",
+                            "message_id": "m1",
+                            "attachment_id": "a1",
+                        },
+                        "render_pages": [1],
+                    },
+                },
+            )
+            assert result["isError"] is False
+            structured = result["structuredContent"]
+            assert structured["doc_id"]
+            assert structured["has_acroform"] is False
+            assert structured["page_count"] == 1
+            # Valid per outputSchema: the enhancer moved the PNGs out of the
+            # structured result into ImageContent blocks.
+            PdfOpenResult.model_validate(structured)
+            assert structured["page_images"] == []
+            images = [b for b in result["content"] if b["type"] == "image"]
+            assert len(images) == 1
+            assert images[0]["mimeType"] == "image/png"
+
+            # FR-10: no PDF bytes in any LLM-visible form - neither raw nor
+            # base64 ("%PDF" encodes to "JVBERi" at offset 0).
+            wire_payload = json.dumps(result)
+            assert "%PDF" not in wire_payload
+            assert "JVBERi" not in wire_payload
+
+    def test_pdf_tools_are_listed_with_output_schema(self):
+        with _wire_session("u-e2e-pdf-list") as session:
+            tools = {t["name"]: t for t in session.request("tools/list")["tools"]}
+            for name in ("pdf_open", "pdf_edit", "pdf_export"):
+                assert name in tools, f"{name} missing from tools/list"
+                assert tools[name]["outputSchema"]["type"] == "object"
+            # The signing gate declares the pdf_signer app in tools/list so
+            # hosts can pre-fetch the iframe HTML.
+            gate = tools["pdf_request_signature"]
+            assert gate["_meta"]["ui"]["resourceUri"] == "ui://mymcp/pdf_signer"
+            # App-only ceremony tools carry the visibility hint on the wire.
+            sign_tool = tools["pdf_signer.sign"]
+            assert sign_tool["_meta"]["ui"]["visibility"] == ["app"]
+
+    def test_pdf_signer_app_resource_serves_built_html(self):
+        with _wire_session("u-e2e-pdf-app") as session:
+            contents = session.request(
+                "resources/read", {"uri": "ui://mymcp/pdf_signer"}
+            )["contents"]
+            assert contents[0]["mimeType"] == "text/html;profile=mcp-app"
+            html = contents[0]["text"]
+            assert html.lstrip().lower().startswith("<!doctype html>")
+            # The committed bundle is the built app, not the placeholder.
+            assert "not built" not in html

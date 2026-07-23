@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { sanitizeHtml } from "./sanitize";
-import type { ComposerSaveStatus, Thread, ThreadMessage } from "./types";
-import { relativeTime, splitHtmlAtQuote, splitTextAtQuote } from "./helpers";
+import { HtmlEmailBody } from "./HtmlEmailBody";
+import type { ComposerSaveStatus, McpAppLike, Thread, ThreadMessage } from "./types";
+import { relativeTime, splitTextAtQuote } from "./helpers";
 import { SenderAvatar } from "./MessageComponents";
 import {
   composerBodyHtmlStyle,
@@ -12,17 +12,17 @@ import {
   composerThreadPanelStyle,
 } from "./composerStyles";
 
-export function ComposerThreadPanel({ thread }: { thread: Thread }) {
+export function ComposerThreadPanel({ thread, mcpApp }: { thread: Thread; mcpApp: McpAppLike }) {
   return (
     <div style={composerThreadPanelStyle}>
       {thread.messages.map((m, i) => (
-        <ComposerThreadMsg key={m.message_id} message={m} defaultExpanded={i === thread.messages.length - 1} />
+        <ComposerThreadMsg key={m.message_id} message={m} mcpApp={mcpApp} defaultExpanded={i === thread.messages.length - 1} />
       ))}
     </div>
   );
 }
 
-function ComposerThreadMsg({ message, defaultExpanded }: { message: ThreadMessage; defaultExpanded: boolean }) {
+function ComposerThreadMsg({ message, mcpApp, defaultExpanded }: { message: ThreadMessage; mcpApp: McpAppLike; defaultExpanded: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   if (!expanded) {
@@ -50,28 +50,22 @@ function ComposerThreadMsg({ message, defaultExpanded }: { message: ThreadMessag
         </div>
         <span style={{ fontSize: 12, color: "#5f6368" }}>{relativeTime(message.date)}</span>
       </div>
-      <ComposerMsgBody message={message} />
+      <ComposerMsgBody message={message} mcpApp={mcpApp} />
     </div>
   );
 }
 
-function ComposerMsgBody({ message }: { message: ThreadMessage }) {
+function ComposerMsgBody({ message, mcpApp }: { message: ThreadMessage; mcpApp: McpAppLike }) {
   const [showQuoted, setShowQuoted] = useState(false);
 
   if (message.body_html) {
-    const { main, quoted } = splitHtmlAtQuote(message.body_html);
     return (
-      <div>
-        <div style={composerBodyHtmlStyle} dangerouslySetInnerHTML={{ __html: sanitizeHtml(main) }} />
-        {quoted && (
-          <>
-            <button onClick={() => setShowQuoted((v) => !v)} style={composerQuoteToggle}>&bull;&bull;&bull;</button>
-            {showQuoted && (
-              <div style={{ ...composerBodyHtmlStyle, borderLeft: "3px solid #dadce0", paddingLeft: 8, marginTop: 4 }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(quoted) }} />
-            )}
-          </>
-        )}
-      </div>
+      <HtmlEmailBody
+        html={message.body_html}
+        mcpApp={mcpApp}
+        htmlStyle={composerBodyHtmlStyle}
+        quoteToggleStyle={composerQuoteToggle}
+      />
     );
   }
   if (message.body_text) {

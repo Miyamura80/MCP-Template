@@ -126,8 +126,7 @@ export function InlineComposer({
       arguments: { thread_id: threadId },
     }).then((raw) => {
       if (cancelled) return;
-      const data = (raw as { structuredContent?: unknown })?.structuredContent ?? raw;
-      const t = data as Thread | null;
+      const t = extractStructuredContent<Thread>(raw);
       if (t && Array.isArray(t.messages)) setLocalThread(t);
     }).catch(() => {}).finally(() => { if (!cancelled) setLoadingThread(false); });
     return () => { cancelled = true; };
@@ -143,8 +142,7 @@ export function InlineComposer({
       arguments: { draft_id: draft.draft_id },
     }).then((raw) => {
       if (cancelled) return;
-      const data = (raw as { structuredContent?: unknown })?.structuredContent ?? raw;
-      const d = data as ComposerDraft | null;
+      const d = extractStructuredContent<ComposerDraft>(raw);
       if (d && d.draft_id) onDraftChange({ ...draft, ...d });
     }).catch(() => {});
     return () => { cancelled = true; };
@@ -292,9 +290,8 @@ export function InlineComposer({
       // clear-all list) must be sent, so test against undefined, not truthiness.
       if (attachmentsArg !== undefined) args.attachments = attachmentsArg;
       const raw = await mcpApp.callServerTool({ name: "gmail_composer.send", arguments: args });
-      const wrapper = (raw ?? {}) as { structuredContent?: { message_id?: string } };
-      const inner = wrapper.structuredContent ?? (raw as { message_id?: string });
-      const msgId = (inner as { message_id?: string })?.message_id ?? "";
+      const inner = extractStructuredContent<{ message_id?: string }>(raw);
+      const msgId = inner?.message_id ?? "";
       setSaveStatus({ kind: "sent", message_id: msgId });
       setTimeout(onSent, 1500);
     } catch (err) {
@@ -350,7 +347,7 @@ export function InlineComposer({
         <div style={{ color: "#5f6368", fontSize: 13, padding: "8px 0" }}>Loading conversation…</div>
       )}
       {sentMessages.length > 0 && (
-        <ComposerThreadPanel thread={{ ...effectiveThread!, messages: sentMessages }} />
+        <ComposerThreadPanel thread={{ ...effectiveThread!, messages: sentMessages }} mcpApp={mcpApp} />
       )}
 
       {pendingAgent && (

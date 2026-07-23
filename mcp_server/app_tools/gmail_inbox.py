@@ -24,6 +24,7 @@ from models.gmail import (
     GmailCurateInboxInput,
     GmailCurateInboxResult,
     GmailDraft,
+    GmailFetchImageResult,
     GmailGetThreadInput,
     GmailThread,
 )
@@ -60,6 +61,9 @@ from services.gmail_messages_svc import (
 )
 from services.gmail_messages_svc import (
     gmail_unmark_thread_done as _gmail_unmark_thread_done,
+)
+from services.image_proxy import (
+    fetch_remote_image as _fetch_remote_image,
 )
 
 _APP_META = {"ui": {"visibility": ["app"]}}
@@ -250,3 +254,17 @@ def get_focused_email(user_id: str = "") -> _FocusedEmailResult:
         message_count=data.get("message_count", 0),
         messages=data.get("messages"),
     )
+
+
+@mcp.tool(
+    name="gmail_inbox.fetch_image",
+    description=(
+        "Fetch a remote image referenced by an email's HTML and return it "
+        "as base64 (called by the inbox reader app when the host CSP blocks "
+        "remote img-src)."
+    ),
+    meta=_APP_META,
+)
+def fetch_image(url: str, user_id: str = "") -> GmailFetchImageResult:
+    guard_user_id(user_id)
+    return _fetch_remote_image(url)

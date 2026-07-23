@@ -8,7 +8,7 @@ type validation and structure for the configuration data.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ExampleParent(BaseModel):
@@ -121,6 +121,15 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
     allowed_origins: list[str] = ["http://localhost:3000"]
+    # Streamable-HTTP session mode for the /mcp mount. True (default) keeps
+    # every request self-contained - required for multi-replica / spin-down
+    # deployments - but makes in-band elicitation impossible (the client's
+    # elicitation response POST cannot be correlated back to the transient
+    # session, so ctx.elicit() hangs; empirically verified, same failure mode
+    # as python-sdk issue 678 for sampling). Single-replica deployments may
+    # set False to enable host-native elicitation (e.g. the signing
+    # confirmation dialog) at the cost of in-memory session affinity.
+    mcp_stateless_http: bool = True
 
 
 class IconConfig(BaseModel):
@@ -304,3 +313,74 @@ class GmailConfig(BaseModel):
             "by default; lower it to protect the model's context window."
         ),
     )
+
+
+class PdfSigningConfig(BaseModel):
+    """Server-held sealing certificate for user-gated PDF signing.
+
+    The seal is a platform certificate (DocuSign-style), not a per-user
+    identity. In production point both paths at a real key pair; when unset in
+    dev, a self-signed certificate is generated once and cached under
+    ``dev_cert_dir``.
+    """
+
+    cert_path: str | None = Field(
+        default=None, description="PEM certificate used for the PAdES seal."
+    )
+    key_path: str | None = Field(
+        default=None, description="PEM private key matching cert_path."
+    )
+    dev_cert_dir: str = Field(
+        default=".pdf_signing",
+        description=(
+            "Directory (relative to repo root) where the auto-generated dev "
+            "self-signed certificate is cached when cert_path is unset."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _cert_pair_complete(self) -> "PdfSigningConfig":
+        # A partial pair would silently fall back to the untrusted dev cert -
+        # a production deployment must find out at startup, not in a signed
+        # document's validation report.
+        if bool(self.cert_path) != bool(self.key_path):
+            raise ValueError(
+                "pdf_forms.signing: cert_path and key_path must be set "
+                "together (or both left null for the dev self-signed cert)."
+            )
+        return self
+
+
+class PdfFormsConfig(BaseModel):
+    """PDF form-filling and signing configuration (loaded from pdf_forms.yaml)."""
+
+    max_document_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        ge=0,
+        description="Max size (decoded bytes) of a PDF accepted into a doc session.",
+    )
+    text_layout_max_lines: int = Field(
+        default=400,
+        ge=0,
+        description=(
+            "Cap on extracted text-layout lines returned by pdf_open for flat "
+            "PDFs, keeping tool responses bounded."
+        ),
+    )
+    render_dpi: int = Field(
+        default=110,
+        ge=18,
+        le=300,
+        description="Rasterization DPI for render_pages page images.",
+    )
+    render_max_pages: int = Field(
+        default=4,
+        ge=1,
+        description="Max pages a single render_pages request may rasterize.",
+    )
+    session_ttl_hours: int = Field(
+        default=72,
+        ge=1,
+        description="Age after which unexported document sessions may be swept.",
+    )
+    signing: PdfSigningConfig = Field(default_factory=PdfSigningConfig)

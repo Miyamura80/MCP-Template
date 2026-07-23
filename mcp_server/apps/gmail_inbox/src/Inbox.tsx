@@ -49,9 +49,12 @@ export type {
   ThreadMessage,
 } from "./types";
 
-type InboxProps = { mcpApp: import("./types").McpAppLike };
+type InboxProps = {
+  mcpApp: import("./types").McpAppLike;
+  resultBuffer?: import("./helpers").ToolResultBuffer;
+};
 
-export function Inbox({ mcpApp }: InboxProps) {
+export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
   const narrow = useIsNarrow();
   const [viewMode, setViewMode] = useState<"inbox" | "reader">("inbox");
   const [threads, setThreads] = useState<CuratedThread[] | null>(null);
@@ -137,9 +140,17 @@ export function Inbox({ mcpApp }: InboxProps) {
         void upgradeThread(data.thread_id);
       }
     };
-    mcpApp.ontoolresult = handler;
-    // Fallback: if the host delivered the tool result before the iframe
-    // mounted (race condition), proactively fetch after a short delay.
+    // Prefer draining the buffer installed at startup: it replays a result the
+    // host delivered before this effect ran (so a thread-open renders its reader
+    // instead of losing the result). Falls back to a plain handler assignment
+    // when no buffer was provided (e.g. unit tests construct Inbox directly).
+    if (resultBuffer) {
+      resultBuffer.drainInto(handler);
+    } else {
+      mcpApp.ontoolresult = handler;
+    }
+    // Last-resort fallback: if nothing was ever received (no buffer AND the live
+    // result was still missed), proactively fetch the curated inbox after a delay.
     const timer = setTimeout(() => {
       if (!received) refresh();
     }, 800);
