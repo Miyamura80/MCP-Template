@@ -1,21 +1,29 @@
-"""Shared helpers for the Gmail draft services.
+"""Shared helpers for the Gmail services that touch drafts.
 
-These functions are imported by both ``gmail_drafts_svc`` (compose / update /
-get) and ``gmail_attachments_svc`` (add / remove attachment). They live here -
-rather than in either service module - so neither has to import the other,
+Imported by ``gmail_drafts_svc`` (compose / update / get),
+``gmail_attachments_svc`` (add / remove attachment), ``gmail_messages_svc``
+(thread fetch), and ``gmail_curate_svc`` (inbox curation). They live here -
+rather than in any one service module - so no service has to import another,
 keeping the import graph acyclic.
 
-The central idea: Gmail's ``drafts().update`` is a *whole-message replace*. To
-edit one field (or one attachment) without clobbering the rest, callers read
-the current draft, compute the desired full state, and hand it to
-``_rebuild_draft``. Existing attachment bytes are re-downloaded from the live
-message (Gmail stores them separately, keyed by ``attachmentId``) and
-re-attached so they survive the replace.
+Two concerns share the module:
+
+* **Whole-message replace:** Gmail's ``drafts().update`` replaces the entire
+  MIME message. To edit one field (or one attachment) without clobbering the
+  rest, callers read the current draft, compute the desired full state, and
+  hand it to ``_rebuild_draft``. Existing attachment bytes are re-downloaded
+  from the live message (Gmail stores them separately, keyed by
+  ``attachmentId``) and re-attached so they survive the replace.
+* **Thread → draft lookup:** ``drafts().list`` is paginated; the
+  ``_iter_drafts`` scan (consumed by ``find_draft_id_for_thread`` and
+  ``draft_thread_map``) follows ``nextPageToken`` so a draft past the first
+  page is never silently missed.
 """
 
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 from typing import Any
 
 from loguru import logger as log
@@ -32,22 +40,14 @@ from models.gmail import (
 from services.gmail_svc import _build_raw_message, _parse_message_resource
 
 
-def draft_thread_map(
-    svc: Any, *, target_thread_id: str | None = None
-) -> dict[str, str]:
-    """Build a thread_id → draft_id map across all drafts.list pages.
+def _iter_drafts(svc: Any) -> Iterator[tuple[str, str]]:
+    """Yield ``(thread_id, draft_id)`` for every draft, across all list pages.
 
-    Paginates via ``nextPageToken`` so ``has_draft`` isn't a false negative for
-    accounts with more than one page (100) of drafts.
-
-    When ``target_thread_id`` is given, stops paginating as soon as a draft on
-    that thread is found (the returned map may then be partial - callers using
-    this mode should only look up ``target_thread_id``).
-
-    Best-effort: a Gmail API failure mid-scan returns the map built so far
-    instead of raising, since draft info is supplementary for every caller.
+    Paginates via ``nextPageToken`` so drafts past the first page (100) are
+    never silently skipped. Best-effort: a Gmail API failure mid-scan ends the
+    iteration with what was already yielded instead of raising, since draft
+    info is supplementary for every caller.
     """
-    draft_thread_map: dict[str, str] = {}
     page_token: str | None = None
     try:
         while True:
@@ -60,16 +60,41 @@ def draft_thread_map(
             for d in drafts_resp.get("drafts", []) or []:
                 d_msg = d.get("message") or {}
                 tid = d_msg.get("threadId")
-                if tid and d.get("id") and tid not in draft_thread_map:
-                    draft_thread_map[tid] = d["id"]
-                    if target_thread_id is not None and tid == target_thread_id:
-                        return draft_thread_map
+                if tid and d.get("id"):
+                    yield tid, d["id"]
             page_token = drafts_resp.get("nextPageToken")
             if not page_token:
                 break
     except Exception:  # noqa: BLE001  # drafts lookup is best-effort; don't fail the caller
-        log.debug("drafts.list failed during thread→draft scan; returning partial map")
-    return draft_thread_map
+        log.debug("drafts.list failed during thread→draft scan; stopping early")
+
+
+def find_draft_id_for_thread(svc: Any, thread_id: str) -> str | None:
+    """Return the draft_id of the first draft on ``thread_id``, or ``None``.
+
+    Early-exits: stops paginating ``drafts().list`` as soon as a draft on the
+    thread is found. First-match-wins for a thread carrying several drafts -
+    deliberate, and consistent with ``draft_thread_map``.
+    """
+    for tid, draft_id in _iter_drafts(svc):
+        if tid == thread_id:
+            return draft_id
+    return None
+
+
+def draft_thread_map(svc: Any) -> dict[str, str]:
+    """Build a thread_id → draft_id map across all drafts.list pages.
+
+    Paginates via ``nextPageToken`` so a thread's draft isn't a false negative
+    for accounts with more than one page (100) of drafts. First-match-wins: a
+    thread carrying several drafts maps to the earliest-listed one -
+    deliberate (the old curate-local copy was last-match-wins), and consistent
+    with ``find_draft_id_for_thread``'s early exit.
+    """
+    mapping: dict[str, str] = {}
+    for tid, draft_id in _iter_drafts(svc):
+        mapping.setdefault(tid, draft_id)
+    return mapping
 
 
 def _attachment_not_found(attachment_id: str, draft_id: str) -> ValueError:
