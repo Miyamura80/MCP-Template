@@ -143,9 +143,7 @@ def _make_enhanced_tool(
             # so MCP clients still get a structured result on the headless path.
             if enhancer_entry.fallback == "error":
                 raise
-            result = _recover_from_enhancer_crash(
-                tool, entry, input_obj, ctx, enhancer_exc
-            )
+            result = _recover_from_enhancer_crash(tool, entry, ctx, enhancer_exc)
             # Discard any partial output the enhancer accumulated before crashing.
             tool.extra_content = []
             tool.app_resource_uri = None
@@ -169,25 +167,23 @@ def _make_enhanced_tool(
 def _recover_from_enhancer_crash(
     tool: EnhancedTool,
     entry: ServiceEntry,
-    input_obj: BaseModel,
     ctx: Context,
     enhancer_exc: Exception,
-) -> Any:
+) -> BaseModel:
     """Resolve the headless-fallback result after an enhancer crash.
 
-    Called from inside the broad ``except`` in ``_make_enhanced_tool`` (so
-    ``log.exception`` still captures the active enhancer exception). Never
-    executes the service twice:
+    Never executes the service twice:
 
-    - If the enhancer's ``tool.call()`` already completed, reuse that stashed
+    - If the enhancer's last ``tool.call()`` completed, reuse that stashed
       result - re-invoking the service would duplicate side effects for
       mutating services (e.g. a second Gmail draft or a double charge).
     - If there is no completed result and the service is ``mutating``,
       propagate the enhancer error instead of silently re-executing.
-    - Otherwise (non-mutating, never ran) retry headless.
+    - Otherwise (non-mutating, never completed) retry headless via
+      ``tool.call()`` - the single code path that invokes the service.
     """
-    if tool.call_completed and tool.call_result is not None:
-        log.exception(
+    if tool.call_result is not None:
+        log.opt(exception=enhancer_exc).error(
             "enhancer for {!r} crashed after tool.call(); reusing the "
             "completed service result",
             entry.name,
@@ -195,9 +191,11 @@ def _recover_from_enhancer_crash(
         return tool.call_result
     if entry.mutating:
         raise enhancer_exc
-    log.exception("enhancer for {!r} crashed; falling back to headless", entry.name)
+    log.opt(exception=enhancer_exc).error(
+        "enhancer for {!r} crashed; falling back to headless", entry.name
+    )
     try:
-        return entry.func(input_obj)
+        return tool.call()
     except ConnectRequiredError as exc:
         reraise_with_elicitation(ctx.session, exc)
 
