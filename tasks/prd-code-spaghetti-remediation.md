@@ -8,6 +8,17 @@ This document is the output of a full-codebase spaghetti audit (July 2026,
 `init/` + `scripts/` + `tests/`. Every finding below was verified against the
 code with exact file:line references; nothing is speculative.
 
+**Re-verified against `main` @ `0df2353`** (7 commits after the audit
+snapshot: PDF forms/signing feature, Gmail image proxy, Goose e2e harness,
+`.importlinter` introduction). Every finding below still stands. Deltas worth
+knowing: a repo-level `.importlinter` now exists (Items 1 and 9 amend the
+existing file instead of introducing the tool), it contains **no contract
+forbidding `mcp_server -> api_server`** so the cycle in Item 1 remains
+unguarded; the new PDF services all declare `mutating=True` correctly, which
+strengthens Item 4 (new code follows the contract, the Gmail backlog does
+not); and `gmail_svc.py` grew another concern (the `GMAIL_FAKE_BACKEND`
+fixture-client hook), reinforcing Item 9.
+
 The headline: **module-level layering is largely healthy** (zero
 `services/` -> transport imports, zero CLI -> server imports), but the rot
 lives one level down: a real `api_server <-> mcp_server` circular dependency,
@@ -134,8 +145,10 @@ transport-specific exception type crosses into a different transport.
 4. Promote `_check_quota`/`_check_scopes` (or their replacements) to public
    names consumed by both `_tool_factory.py` and `app_tools/_auth_guard.py`.
 5. Delete every lazy `api_server.*` import inside `mcp_server/` and the
-   "circular import" comments. Add an `import-linter` contract forbidding
-   `mcp_server -> api_server` imports so the cycle cannot return.
+   "circular import" comments. Add a contract to the existing `.importlinter`
+   forbidding `mcp_server -> api_server` imports so the cycle cannot return
+   (as of `main` @ `0df2353` the file has contracts for every other layer
+   pair, but not this one - the one direction that is actually broken).
 
 **Acceptance criteria.**
 - `grep -rn "api_server" mcp_server/` returns nothing.
@@ -497,6 +510,9 @@ idempotency machinery is dead code for most endpoints that need it.
   mutate Pub/Sub state and the token row (`gmail_watch_svc.py:85-115`).
 - Concrete failure: a retried `POST /services/gmail_compose` silently
   duplicates drafts.
+- Precedent that the contract works when followed: the PDF services added on
+  `main` @ `0df2353` all declare it (`services/pdf_forms_svc.py:111,160,257,
+  342`). The gap is the Gmail/webhook/watch backlog, not the mechanism.
 
 **Implementation plan.**
 1. Audit every `@service` against the "create/charge/send" rule; set
@@ -708,8 +724,12 @@ privates sideways.
 2. Rename shared names to drop the leading underscore; they are the package's
    internal API, not module privates.
 3. Service modules (`gmail_drafts_svc`, `gmail_messages_svc`, ...) import
-   helpers and `models/` only, never each other. Enforce with an
-   `import-linter` contract ("service modules are independent siblings").
+   helpers and `models/` only, never each other. Enforce with a contract in
+   the existing `.importlinter` ("service modules are independent siblings").
+   Side benefit: the `pdf_core_isolated_from_gmail` contract currently
+   hand-lists eight Gmail modules by name (with a MAINTENANCE warning that
+   new ones silently escape it); a `services/gmail/` package collapses that
+   list to one entry.
 4. `gmail_svc.py` shrinks to connect/status/disconnect + state signing (or is
    renamed `gmail_oauth_svc.py`); remove its length exemption and
    `gmail_messages_svc.py`'s once under 500.
@@ -872,7 +892,7 @@ defeats the type checker; downstream modules freeze config values at import.
   :280-286), `global_config = Config()` (:414) raising if YAML/.env is
   incomplete. 39 files import it; nothing is importable without valid config
   on disk.
-- `common/config_models.py:177`: `SettingsConfigDict(... extra="allow")` - any
+- `common/global_config.py:169-178`: `SettingsConfigDict(... extra="allow")` - any
   misspelled YAML key silently becomes a live untyped attribute;
   `global_config.anything` type-checks as `Any`.
 - `common/flags.py:27`: `setup_feature_flags()` at import (also in Item 22).
