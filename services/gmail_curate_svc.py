@@ -44,6 +44,7 @@ from models.gmail import (
     GmailLabelChip,
 )
 from services import service
+from services.gmail_draft_helpers import draft_thread_map
 from services.gmail_messages_svc import _BATCH_CHUNK_SIZE, _internal_date_to_dt
 from services.gmail_svc import _get_gmail_client, _headers_to_dict
 
@@ -198,35 +199,6 @@ def _build_label_lookups(
     return label_id_to_name, label_colors
 
 
-def _build_draft_thread_map(svc: Any) -> dict[str, str]:
-    """Build a thread_id → draft_id map across all drafts.list pages.
-
-    Paginates via ``nextPageToken`` so ``has_draft`` isn't a false negative for
-    accounts with more than one page (100) of drafts.
-    """
-    draft_thread_map: dict[str, str] = {}
-    page_token: str | None = None
-    try:
-        while True:
-            drafts_resp = (
-                svc.users()
-                .drafts()
-                .list(userId="me", maxResults=100, pageToken=page_token)
-                .execute()
-            )
-            for d in drafts_resp.get("drafts", []) or []:
-                d_msg = d.get("message") or {}
-                tid = d_msg.get("threadId")
-                if tid and d.get("id"):
-                    draft_thread_map[tid] = d["id"]
-            page_token = drafts_resp.get("nextPageToken")
-            if not page_token:
-                break
-    except Exception:  # noqa: BLE001  # drafts lookup is best-effort; don't fail curate
-        log.debug("drafts.list failed during curate; proceeding without draft info")
-    return draft_thread_map
-
-
 # Base "triageable inbox" query: excludes done threads, Gmail category tabs,
 # and user-applied noise labels. Shared by the deterministic curate service and
 # the ledger read/search path so both agree on what counts as inbox to triage.
@@ -266,7 +238,7 @@ def _thread_has_noise_labels(
 def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
     svc = _get_gmail_client(input.user_id)
     label_id_to_name, label_colors = _build_label_lookups(svc)
-    draft_thread_map = _build_draft_thread_map(svc)
+    thread_to_draft = draft_thread_map(svc)
 
     # Exclude done threads. The mark-done service applies the label "MCP/Done"
     # (see _MCP_DONE_LABEL_NAME in gmail_messages_svc), so the exclusion must use
@@ -326,7 +298,7 @@ def gmail_curate_inbox(input: GmailCurateInboxInput) -> GmailCurateInboxResult:
         )
 
         tid = thread.get("id") or thread_id
-        draft_id = draft_thread_map.get(tid)
+        draft_id = thread_to_draft.get(tid)
         curated.append(
             GmailCuratedThread.model_validate(
                 {

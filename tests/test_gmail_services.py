@@ -842,6 +842,69 @@ class TestGmailGetThread(TestTemplate):
         thread, _mock = self._run_get_thread(thread_payload)
         assert "old line" in (thread.messages[0].body_text or "")
 
+    def test_draft_on_second_drafts_page_is_found(self):
+        """Regression: with >50 drafts, a draft past page 1 must still be found.
+
+        The old inline scan called ``drafts().list(maxResults=50)`` with no
+        ``nextPageToken`` follow-up, so a draft attached to the thread but
+        listed on a later page was silently reported as "no draft".
+        """
+        thread_payload = {
+            "id": "t-deep",
+            "messages": [
+                _plain_message(
+                    message_id="m-1",
+                    thread_id="t-deep",
+                    headers={"From": "a@x", "To": "b@y", "Subject": "hi"},
+                    body="original",
+                )
+            ],
+        }
+        page1 = {
+            "drafts": [
+                {
+                    "id": f"d-{i}",
+                    "message": {"id": f"m-d-{i}", "threadId": f"t-other-{i}"},
+                }
+                for i in range(50)
+            ],
+            "nextPageToken": "page-2",
+        }
+        page2 = {
+            "drafts": [
+                {"id": "d-deep", "message": {"id": "m-d-deep", "threadId": "t-deep"}}
+            ]
+        }
+        target_draft = _draft_resource(
+            draft_id="d-deep", thread_id="t-deep", body="draft reply"
+        )
+
+        with _patch_db() as factory:
+            _seed_token(factory)
+            mock = _make_mock_service()
+            mock.users().threads().get().execute.return_value = thread_payload
+            mock.users().drafts().list().execute.side_effect = [page1, page2]
+            mock.users().drafts().get().execute.return_value = target_draft
+            patches = _patch_client(mock)
+            _apply(patches)
+            try:
+                thread = gmail_get_thread(
+                    GmailGetThreadInput(user_id="alice", thread_id="t-deep")
+                )
+            finally:
+                _stop(patches)
+
+        assert thread.draft is not None
+        assert thread.draft.draft_id == "d-deep"
+        assert thread.draft.body == "draft reply"
+        # The draft's underlying message is not doubled into the thread.
+        assert [m.message_id for m in thread.messages] == ["m-1"]
+        # The scan actually followed nextPageToken onto page 2.
+        list_kwargs = [
+            c.kwargs for c in mock.users().drafts().list.call_args_list if c.kwargs
+        ]
+        assert any(k.get("pageToken") == "page-2" for k in list_kwargs)
+
 
 class TestGmailGetAttachment(TestTemplate):
     def test_returns_normalized_base64(self):

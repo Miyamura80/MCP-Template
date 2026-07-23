@@ -18,6 +18,8 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+from loguru import logger as log
+
 from models.gmail import (
     AttachmentReference,
     AttachmentUpload,
@@ -28,6 +30,46 @@ from models.gmail import (
     _UnsetType,
 )
 from services.gmail_svc import _build_raw_message, _parse_message_resource
+
+
+def draft_thread_map(
+    svc: Any, *, target_thread_id: str | None = None
+) -> dict[str, str]:
+    """Build a thread_id → draft_id map across all drafts.list pages.
+
+    Paginates via ``nextPageToken`` so ``has_draft`` isn't a false negative for
+    accounts with more than one page (100) of drafts.
+
+    When ``target_thread_id`` is given, stops paginating as soon as a draft on
+    that thread is found (the returned map may then be partial - callers using
+    this mode should only look up ``target_thread_id``).
+
+    Best-effort: a Gmail API failure mid-scan returns the map built so far
+    instead of raising, since draft info is supplementary for every caller.
+    """
+    draft_thread_map: dict[str, str] = {}
+    page_token: str | None = None
+    try:
+        while True:
+            drafts_resp = (
+                svc.users()
+                .drafts()
+                .list(userId="me", maxResults=100, pageToken=page_token)
+                .execute()
+            )
+            for d in drafts_resp.get("drafts", []) or []:
+                d_msg = d.get("message") or {}
+                tid = d_msg.get("threadId")
+                if tid and d.get("id") and tid not in draft_thread_map:
+                    draft_thread_map[tid] = d["id"]
+                    if target_thread_id is not None and tid == target_thread_id:
+                        return draft_thread_map
+            page_token = drafts_resp.get("nextPageToken")
+            if not page_token:
+                break
+    except Exception:  # noqa: BLE001  # drafts lookup is best-effort; don't fail the caller
+        log.debug("drafts.list failed during thread→draft scan; returning partial map")
+    return draft_thread_map
 
 
 def _attachment_not_found(attachment_id: str, draft_id: str) -> ValueError:
