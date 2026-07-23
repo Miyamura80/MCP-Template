@@ -217,14 +217,16 @@ def sealing_cert_paths() -> tuple[Path, Path]:
     of the pair, leaving a mismatched key/cert on disk. The winner generates;
     losers block on the lock, then see the finished pair on the recheck.
     """
-    import fcntl  # noqa: PLC0415 - POSIX-only, dev-cert path only
-
     cfg = global_config.pdf_forms.signing
     if cfg.cert_path and cfg.key_path:
         return Path(cfg.cert_path), Path(cfg.key_path)
     cert_path, key_path = _dev_cert_paths()
     if cert_path.exists() and key_path.exists():
         return cert_path, key_path
+    # POSIX-only import, deliberately below the production early-return so a
+    # Windows deployment with configured certs never touches it.
+    import fcntl  # noqa: PLC0415 - dev-cert generation only
+
     cert_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = cert_path.parent / ".dev_cert.lock"
     with open(lock_path, "w") as lock_file:

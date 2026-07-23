@@ -236,11 +236,15 @@ def update_document(
                 .filter(PdfDocument.doc_id == doc_id, PdfDocument.user_id == user_id)
                 .one_or_none()
             )
+            if fresh is None:
+                # Concurrently deleted (TTL sweep) - never hand back the
+                # stale pre-race row as though the write merely no-op'd.
+                raise PdfDocumentNotFoundError(doc_id)
             if audit_only_if_status is not None and "status" not in values:
-                return fresh if fresh is not None else doc
+                return fresh
             raise PdfInvalidTransitionError(
                 doc_id=doc_id,
-                current=fresh.status if fresh is not None else "deleted",
+                current=fresh.status,
                 requested=new_status.value if new_status is not None else "?",
             )
         session.commit()
