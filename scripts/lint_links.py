@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pytest<9.1", "pytest-check-links"]
+# dependencies = ["pytest", "pytest-check-links"]
 # ///
 """Lint markdown links with exponential backoff for rate-limited URLs.
 
@@ -86,6 +86,12 @@ def _build_cmd(extra_ignores: list[str]) -> list[str]:
         "no:cov",
         "-o",
         "addopts=",
+        # Markdown lives inside importable packages (e.g. mcp_server/ has an
+        # __init__.py). Default prepend mode makes pytest import the package to
+        # collect a .md file in it, dragging in project deps this isolated env
+        # doesn't have. importlib mode collects the file without importing its
+        # parent package.
+        "--import-mode=importlib",
         "--check-links",
         "--check-links-ignore",
         r"http://localhost:.*",
