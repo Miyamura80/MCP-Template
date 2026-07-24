@@ -71,7 +71,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "sse-starlette>=3.4.5",
     "pypdf>=6.14.2",
-    "pyhanko>=0.35.1",
+    "pyhanko>=0.35.2",
     "pypdfium2>=5.10.1",
 ]
 readme = "README.md"

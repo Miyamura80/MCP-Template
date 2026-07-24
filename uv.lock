@@ -2093,7 +2093,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
-    { name = "pyhanko", specifier = ">=0.35.1" },
+    { name = "pyhanko", specifier = ">=0.35.2" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.0" },
     { name = "pylint", specifier = ">=4.0.6" },
     { name = "pypdf", specifier = ">=6.14.2" },
@@ -3039,7 +3039,7 @@ wheels = [
 
 [[package]]
 name = "pyhanko"
-version = "0.35.1"
+version = "0.35.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asn1crypto" },
@@ -3050,9 +3050,9 @@ dependencies = [
     { name = "requests" },
     { name = "tzlocal" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/5c/40bffd713756a64af554c45915325431b643238641ca1c2e81ddf27805dd/pyhanko-0.35.1.tar.gz", hash = "sha256:a6319f6f3753bee92ec0e9b91f638d37c58f8e49d494ef2c2a1f5bcf614707a6", size = 7674200, upload-time = "2026-05-06T00:05:38.854Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/36/fa398db6dec3b0d10ae36da77f9044f5834c7a73edf82bc2da64cf4e8454/pyhanko-0.35.2.tar.gz", hash = "sha256:e3363ae72aa3570c7d85ec76592f8b7e900d5695c264cafadc1926df7b0bd711", size = 7680125, upload-time = "2026-07-05T15:26:05.537Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/1a/bea014b55c45c98c63dffd34d2dd01eed0a73ce5b175bd7b1ba798d13558/pyhanko-0.35.1-py3-none-any.whl", hash = "sha256:57c085f29d7f87334be2a5fbd38a1ca3c987f40f51aea38bde628497d6d9ef2e", size = 466983, upload-time = "2026-05-06T00:05:36.849Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/a4/66a2b997b8cfebfcbe1552918dd011e621206f25bb8b1acc4e6536bfa738/pyhanko-0.35.2-py3-none-any.whl", hash = "sha256:d3bc33e33fbf1bacd5d7e9b06bb57564d351b5c85c8c12788e90fc33355bac19", size = 467809, upload-time = "2026-07-05T15:26:03.636Z" },
 ]
 
 [[package]]
