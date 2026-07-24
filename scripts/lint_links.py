@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pytest", "pytest-check-links"]
+# dependencies = ["pytest<9.1", "pytest-check-links"]
 # ///
 """Lint markdown links with exponential backoff for rate-limited URLs.
 
