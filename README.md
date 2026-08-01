@@ -166,6 +166,7 @@ Drop a Python file in `src/cli/commands/` and it is auto-discovered.
 from typing import Annotated
 import typer
 
+
 def main(name: Annotated[str, typer.Argument(help="Who to greet.")]) -> None:
     """Say hello."""
     typer.echo(f"Hello, {name}!")
@@ -182,6 +183,7 @@ uv run mymcp hello World   # Hello, World!
 import typer
 
 app = typer.Typer()
+
 
 @app.command()
 def migrate() -> None:
