@@ -184,6 +184,7 @@ gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page
 	@uv run python scripts/export_tool_surface.py
 	@echo "$(GREEN)✅ Tool surface exported.$(RESET)"
 
+.PHONY: gen_tool_docs
 gen_tool_docs: check_uv ## Render the docs site's tool reference from the @service registry
 	@echo "$(YELLOW)🛠  Generating tool reference docs...$(RESET)"
 	@uv run python scripts/gen_tool_docs.py
@@ -305,6 +306,7 @@ docs_lint: ## Lint docs links
 	@cd docs && bun install --frozen-lockfile && bun run lint:links
 	@echo "$(GREEN)✅Docs linting completed.$(RESET)"
 
+.PHONY: docs_test
 docs_test: ## Run the docs site's vitest suite
 	@echo "$(YELLOW)🧪Running docs tests...$(RESET)"
 	@cd docs && bun install --frozen-lockfile && bun run test
@@ -335,6 +337,7 @@ blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification
 	@uv run python scripts/check_blind_except_justification.py
 	@echo "$(GREEN)✅Blind-except justification check completed.$(RESET)"
 
+.PHONY: tool_surface_docs_check
 tool_surface_docs_check: check_uv ## Fail if the docs' tool reference has drifted from the @service registry
 	@echo "$(YELLOW)🔍Checking tool surface docs...$(RESET)"
 	@uv run python scripts/gen_tool_docs.py --check
