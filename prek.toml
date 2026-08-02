@@ -39,6 +39,13 @@ hooks = [
 repo = "local"
 hooks = [
     { id = "export-tool-surface", name = "export MCP tool surface; fail if drift was fixed", entry = "uv run python scripts/export_tool_surface.py --check", language = "system", pass_filenames = false, files = "^(services/.*\\.py|mcp_server/server\\.py|landing-page/src/config/tool-surface\\.generated\\.json)$" },
+    # Unconditional, unlike its neighbour above, and the difference is load-bearing.
+    # A `files` filter matches only added/modified paths, so `git rm` on a service
+    # module - the way the surface *shrinks* - would skip the hook entirely and
+    # leave rows advertising tools that now return "Unknown tool". Deletion is half
+    # of how the surface moves and it is the half that misleads clients.
+    # It costs ~2s, less than several hooks already unconditional here.
+    { id = "tool-surface-docs", name = "regenerate the docs tool reference; fail if drift was fixed", entry = "uv run python scripts/gen_tool_docs.py --check", language = "system", pass_filenames = false, always_run = true },
 ]
 
 # ── Source-size guardrails (mirror GitHub Actions) ────────────────

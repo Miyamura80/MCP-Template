@@ -33,6 +33,15 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # `make ci` shells into `cd docs && bun install` for docs_lint and
+      # docs_test. Without Bun on the runner it aborts at docs_lint, five
+      # targets in, and never reaches the checks after it.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned for reproducible CI; bump deliberately alongside local dev.
+          bun-version: 1.3.11
+
       - name: Run CI checks
         run: make ci
 

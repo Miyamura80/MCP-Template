@@ -42,3 +42,8 @@ jobs:
         run: uv run python scripts/check_file_length.py
       - name: Run blind-except justification check
         run: uv run python scripts/check_blind_except_justification.py
+      # Lives here rather than in docs-lint.yaml because the drift this catches
+      # is introduced by service-only commits, and that workflow is path-filtered
+      # to docs/**. Python-only, so it needs no Bun.
+      - name: Run tool surface docs check
+        run: make tool_surface_docs_check
