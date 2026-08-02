@@ -198,6 +198,30 @@ describe("mdxBodyToMarkdown", () => {
     expect(mdxBodyToMarkdown(raw)).toBe("Real content.");
   });
 
+  it("strips a block comment spanning several lines", () => {
+    // The `[\s\S]` in the comment pattern exists for this; a single-line test
+    // would still pass against a narrowed `[^\n]*`.
+    const raw = [
+      "{/* BEGIN generated",
+      "   spanning several lines",
+      "   still the comment */}",
+      "",
+      "Real content.",
+    ].join("\n");
+
+    expect(mdxBodyToMarkdown(raw)).toBe("Real content.");
+  });
+
+  it("survives a `>` inside a quoted attribute value", () => {
+    // `[^>]*` would stop at the inner `>`, miss the closing quote, and emit the
+    // orphaned tail as raw text.
+    const callout = '<Callout title="Compare A > B">\nBody.\n</Callout>';
+    const card = '<Card title="A > B" href="/x" />';
+
+    expect(mdxBodyToMarkdown(callout)).toBe("**Compare A > B**\n\nBody.");
+    expect(mdxBodyToMarkdown(card)).toBe("- [A > B](/x)");
+  });
+
   it("keeps a Callout title as a label", () => {
     const raw = [
       '<Callout type="warn" title="Forking this repo?">',

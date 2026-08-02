@@ -127,6 +127,25 @@ export function splitFences(body: string): Segment[] {
   return segments;
 }
 
+/**
+ * The attribute run inside a JSX tag, up to but not including its closing `>`.
+ *
+ * Not `[^>]*`: that stops at the first `>` anywhere, including one inside a
+ * quoted value. `<Callout title="Compare A > B">` would then match only as far
+ * as the inner `>`, the `title=` lookup would miss its closing quote, and the
+ * orphaned `B">` tail would be emitted into the page as raw text. Consuming
+ * quoted values whole avoids it.
+ */
+const TAG_ATTRS = String.raw`(?:[^>"']|"[^"]*"|'[^']*')*`;
+
+const CARD_TAG = new RegExp(String.raw`<Card\b${TAG_ATTRS}>`, "g");
+const TAB_TAG = new RegExp(String.raw`<Tab\b${TAG_ATTRS}>`, "g");
+const CALLOUT_TAG = new RegExp(String.raw`<Callout\b${TAG_ATTRS}>`, "g");
+const STRUCTURAL_TAG = new RegExp(
+  String.raw`</?(?:Cards|Steps|Step|Tabs|Tab|Callout)\b${TAG_ATTRS}>`,
+  "g",
+);
+
 /** The MDX-to-Markdown rewrites, applied to prose only - never to code. */
 function stripMdxSyntax(prose: string): string {
   return (
@@ -134,33 +153,36 @@ function stripMdxSyntax(prose: string): string {
       // Drop MDX `import`/`export` statements.
       .replace(/^\s*(?:import|export)\s.+$/gm, "")
       // Drop JSX expression-container props (e.g. `icon={<Rocket />}`). The `>`
-      // inside a nested component would otherwise terminate the `[^>]*` tag scans
-      // below early, leaving raw JSX in the output. We only emit title/href, so
-      // these props are noise for the LLM text anyway.
+      // inside a nested component is not quoted, so `TAG_ATTRS` cannot absorb it
+      // and the tag scans below would still terminate early. We only emit
+      // title/href, so these props are noise for the LLM text anyway.
       .replace(/\s+[A-Za-z_][\w-]*=\{[^}]*\}/g, "")
       // <Card title="X" href="Y" /> -> a Markdown link to the related resource.
-      .replace(/<Card\b[^>]*\/?>/g, (tag) => {
-        const title = tag.match(/title=["']([^"']*)["']/)?.[1];
-        const href = tag.match(/href=["']([^"']*)["']/)?.[1];
+      .replace(CARD_TAG, (tag) => {
+        const title = tag.match(/\btitle=["']([^"']*)["']/)?.[1];
+        const href = tag.match(/\bhref=["']([^"']*)["']/)?.[1];
         if (title && href) return `- [${title}](${href})`;
         if (title) return `- ${title}`;
         return "";
       })
       // <Tab value="X"> -> a bold label so per-tab content stays attributed.
-      .replace(/<Tab\b[^>]*\bvalue=["']([^"']*)["'][^>]*>/g, "\n**$1**\n")
+      .replace(TAB_TAG, (tag) => {
+        const value = tag.match(/\bvalue=["']([^"']*)["']/)?.[1];
+        return value ? `\n**${value}**\n` : tag;
+      })
       // <Callout title="X"> -> a bold label. The title carries the point of the
       // callout ("Forking this repo?", "Account requirements"); dropping it with
       // the tag leaves the body floating with nothing to attach it to.
-      .replace(/<Callout\b[^>]*>/g, (tag) => {
+      .replace(CALLOUT_TAG, (tag) => {
         const title = tag.match(/\btitle=["']([^"']*)["']/)?.[1];
         return title ? `\n**${title}**\n` : "";
       })
-      // MDX block comments. `mcp/tools.mdx` carries the generated-region markers,
-      // and without this the twin published to LLM consumers ships a line telling
-      // the reader to edit scripts/gen_tool_docs.py.
+      // MDX block comments, which may span lines. `mcp/tools.mdx` carries the
+      // generated-region markers, and without this the twin published to LLM
+      // consumers ships a line telling the reader to edit scripts/gen_tool_docs.py.
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
       // Strip the remaining structural component tags, keeping their children.
-      .replace(/<\/?(?:Cards|Steps|Step|Tabs|Tab|Callout)\b[^>]*>/g, "")
+      .replace(STRUCTURAL_TAG, "")
       // Collapse the blank lines left behind by the removals. Prose-only, like
       // the rest: run over the whole document it also reflows code, and the
       // blank line PEP 8 wants before a top-level `def` is exactly the run it
