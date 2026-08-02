@@ -184,6 +184,39 @@ describe("mdxBodyToMarkdown", () => {
     expect(out).toContain("x\n\n\n\ny");
   });
 
+  it("strips MDX block comments so generated-region markers do not ship", () => {
+    // `mcp/tools.mdx` carries these. Leaking one publishes an internal
+    // instruction to edit a script into the LLM-facing twin.
+    const raw = [
+      "{/* BEGIN generated: tool reference - edit scripts/gen_tool_docs.py */}",
+      "",
+      "Real content.",
+      "",
+      "{/* END generated */}",
+    ].join("\n");
+
+    expect(mdxBodyToMarkdown(raw)).toBe("Real content.");
+  });
+
+  it("keeps a Callout title as a label", () => {
+    const raw = [
+      '<Callout type="warn" title="Forking this repo?">',
+      "Read this first.",
+      "</Callout>",
+    ].join("\n");
+
+    const out = mdxBodyToMarkdown(raw);
+    expect(out).toContain("**Forking this repo?**");
+    expect(out).toContain("Read this first.");
+    expect(out).not.toContain("<Callout");
+  });
+
+  it("drops a Callout with no title, tag and all", () => {
+    const raw = ['<Callout type="info">', "Body only.", "</Callout>"].join("\n");
+
+    expect(mdxBodyToMarkdown(raw)).toBe("Body only.");
+  });
+
   it("rewrites the fumadocs components it knows", () => {
     const raw = [
       "<Cards>",

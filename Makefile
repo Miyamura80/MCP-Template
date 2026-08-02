@@ -301,15 +301,20 @@ ty: install_tools ## Run type checker
 	@uv run ty check
 	@echo "$(GREEN)✅Typer completed.$(RESET)"
 
-docs_lint: ## Lint docs links
+.PHONY: docs_install
+docs_install: ## Install the docs site's bun dependencies (shared by docs_lint/docs_test)
+	@cd docs && bun install --frozen-lockfile
+
+.PHONY: docs_lint
+docs_lint: docs_install ## Lint docs links
 	@echo "$(YELLOW)🔍Linting docs links...$(RESET)"
-	@cd docs && bun install --frozen-lockfile && bun run lint:links
+	@cd docs && bun run lint:links
 	@echo "$(GREEN)✅Docs linting completed.$(RESET)"
 
 .PHONY: docs_test
-docs_test: ## Run the docs site's vitest suite
+docs_test: docs_install ## Run the docs site's vitest suite
 	@echo "$(YELLOW)🧪Running docs tests...$(RESET)"
-	@cd docs && bun install --frozen-lockfile && bun run test
+	@cd docs && bun run test
 	@echo "$(GREEN)✅Docs tests completed.$(RESET)"
 
 lint_links: ## Lint all markdown links using pytest-check-links

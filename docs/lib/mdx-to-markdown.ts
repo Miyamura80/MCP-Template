@@ -148,6 +148,17 @@ function stripMdxSyntax(prose: string): string {
       })
       // <Tab value="X"> -> a bold label so per-tab content stays attributed.
       .replace(/<Tab\b[^>]*\bvalue=["']([^"']*)["'][^>]*>/g, "\n**$1**\n")
+      // <Callout title="X"> -> a bold label. The title carries the point of the
+      // callout ("Forking this repo?", "Account requirements"); dropping it with
+      // the tag leaves the body floating with nothing to attach it to.
+      .replace(/<Callout\b[^>]*>/g, (tag) => {
+        const title = tag.match(/\btitle=["']([^"']*)["']/)?.[1];
+        return title ? `\n**${title}**\n` : "";
+      })
+      // MDX block comments. `mcp/tools.mdx` carries the generated-region markers,
+      // and without this the twin published to LLM consumers ships a line telling
+      // the reader to edit scripts/gen_tool_docs.py.
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
       // Strip the remaining structural component tags, keeping their children.
       .replace(/<\/?(?:Cards|Steps|Step|Tabs|Tab|Callout)\b[^>]*>/g, "")
       // Collapse the blank lines left behind by the removals. Prose-only, like

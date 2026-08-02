@@ -31,6 +31,7 @@ import argparse
 import pathlib
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass
 
 from mcp_server.enhancers import discover_enhancers, get_enhancer
@@ -190,10 +191,11 @@ def _render(surface: dict[str, str]) -> str:
     lines = [
         BEGIN_MARKER,
         "",
-        f"Once connected, your assistant has {len(surface)} tools, all backed by "
-        "the official Gmail",
-        "API. Tools marked **UI** render an interactive MCP App in clients that "
-        "support",
+        f"Once connected, your assistant has {len(surface)} tools, covering Gmail "
+        "(via the",
+        "official API), PDF form-filling and signing, and webhook delivery. Tools "
+        "marked",
+        "**UI** render an interactive MCP App in clients that support",
         "it (an inbox dashboard, a draft composer, a signing surface) and fall back to",
         "plain structured output everywhere else.",
         "",
@@ -224,7 +226,17 @@ def _render(surface: dict[str, str]) -> str:
 
 def _splice(page: str, rendered: str) -> str:
     start = page.find(BEGIN_MARKER)
-    end = page.find(END_MARKER)
+    # Searched from after the begin marker, not from the top: an end marker that
+    # precedes the begin marker would otherwise splice backwards and overwrite
+    # whatever sat between them. Duplicate markers are rejected for the same
+    # reason - the second pair would be silently ignored while the first was
+    # rewritten.
+    end = page.find(END_MARKER, start + len(BEGIN_MARKER)) if start != -1 else -1
+    if page.count(BEGIN_MARKER) > 1 or page.count(END_MARKER) > 1:
+        raise DriftError(
+            f"❌ {TOOLS_PAGE.relative_to(REPO_ROOT)} has more than one "
+            "generated-region marker pair. Leave exactly one."
+        )
     if start == -1 or end == -1:
         raise DriftError(
             f"❌ {TOOLS_PAGE.relative_to(REPO_ROOT)} is missing the generated-region "
@@ -243,7 +255,20 @@ def main() -> int:
     args = parser.parse_args()
 
     discover_enhancers()
-    surface = {entry.name: entry.description for entry in llm_tool_surface()}
+    entries = llm_tool_surface()
+    surface = {entry.name: entry.description for entry in entries}
+    # `services.__init__` appends to `_registry` with no uniqueness guard, so two
+    # @service calls sharing a name both register. Collapsing them into a dict
+    # would hide that: the count would be short by one and the description picked
+    # arbitrarily, from the page whose whole job is to be authoritative.
+    if len(surface) != len(entries):
+        counts = Counter(entry.name for entry in entries)
+        duplicates = sorted(name for name, n in counts.items() if n > 1)
+        print(
+            f"❌ duplicate @service name(s) in the registry: {', '.join(duplicates)}",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         updated = _splice(TOOLS_PAGE.read_text(encoding="utf-8"), _render(surface))
