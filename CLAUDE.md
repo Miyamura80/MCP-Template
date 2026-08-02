@@ -32,7 +32,9 @@ make ruff           # Run ruff linter
 make vulture        # Find dead code
 make ty             # Run type checker
 make lint_links     # Check for broken links in markdown files (README, etc.)
-make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, check_deps, lint_links, file_len_check, blind_except_check)
+make docs_test      # Run the docs site's vitest suite (docs/lib/*.test.ts)
+make tool_surface_docs_check # Fail if docs/ has drifted from the @service registry
+make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, tool_surface_docs_check)
 
 # Dependencies
 uv sync             # Install dependencies (not pip install)
@@ -67,7 +69,25 @@ Layering (top calls down, never the reverse):
 - **`src/`** - CLI plumbing (`src/cli/`) + shared utils (logging, theme, errors, output).
 - **`utils/llm/`** - DSPY + LiteLLM wrapper with fallback model, Tenacity retries, LangFuse observability.
 - **`tests/`** - subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
-- **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`.
+- **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`. Two
+  invariants are enforced, both in `make ci`:
+  - The tool reference in `docs/content/docs/mcp/tools.mdx` is **generated**.
+    Everything between the `{/* BEGIN generated */}` markers is rendered by
+    `scripts/gen_tool_docs.py` from `llm_tool_surface()` plus the enhancer
+    registry (which supplies the `**UI**` markers); descriptions are the
+    registry's own, so the page shows what an MCP client is actually told, and
+    the tool count is interpolated rather than asserted. Editorial input is the
+    `GROUPS` table in that script - a registered tool missing from it is a hard
+    error, not a silent omission. Run `make gen_tool_docs` after adding a
+    `@service`; `make tool_surface_docs_check` and the unconditional
+    `tool-surface-docs` prek hook fail on drift. The hook is not path-filtered
+    on purpose: a `files` filter never sees a `git rm`, and deleting a service is
+    exactly how the page ends up advertising tools that no longer exist.
+  - `make docs_test` runs vitest over `docs/lib/*.test.ts`. Pure helpers only -
+    today `mdx-to-markdown.ts`, the `string -> string` converter behind the
+    agent-facing `.mdx` twins and `llms-full.txt`. It is kept out of `source.ts`
+    so it imports nothing: `source.ts` pulls in the `fumadocs-mdx:collections/*`
+    virtual modules, which need the site's codegen to exist.
 - **`landing-page/`** - standalone Astro + Tailwind v4 marketing site, **separate** from `docs/` and the Python server, with its own Railway deploy (`landing-page/railway.toml`). Data-driven: all copy lives in `src/config/landing.ts`, design tokens in `src/styles/global.css` (`@theme`). Uses `bun`, never npm. See [`landing-page/README.md`](./landing-page/README.md).
 - **`.claude/`**, **`.agents/`**, **`.codex/`** - Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
 

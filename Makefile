@@ -184,6 +184,11 @@ gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page
 	@uv run python scripts/export_tool_surface.py
 	@echo "$(GREEN)✅ Tool surface exported.$(RESET)"
 
+gen_tool_docs: check_uv ## Render the docs site's tool reference from the @service registry
+	@echo "$(YELLOW)🛠  Generating tool reference docs...$(RESET)"
+	@uv run python scripts/gen_tool_docs.py
+	@echo "$(GREEN)✅ Tool reference generated.$(RESET)"
+
 ########################################################
 # Run Tests
 ########################################################
@@ -300,6 +305,11 @@ docs_lint: ## Lint docs links
 	@cd docs && bun install --frozen-lockfile && bun run lint:links
 	@echo "$(GREEN)✅Docs linting completed.$(RESET)"
 
+docs_test: ## Run the docs site's vitest suite
+	@echo "$(YELLOW)🧪Running docs tests...$(RESET)"
+	@cd docs && bun install --frozen-lockfile && bun run test
+	@echo "$(GREEN)✅Docs tests completed.$(RESET)"
+
 lint_links: ## Lint all markdown links using pytest-check-links
 	@echo "$(YELLOW)🔍Linting all markdown links with pytest-check-links...$(RESET)"
 	@uv run --no-project --with "pytest<9.1" --with "pytest-check-links" python scripts/lint_links.py
@@ -325,7 +335,12 @@ blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification
 	@uv run python scripts/check_blind_except_justification.py
 	@echo "$(GREEN)✅Blind-except justification check completed.$(RESET)"
 
-ci: ruff vulture import_lint ty docs_lint check_deps file_len_check blind_except_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, check_deps, file_len_check, blind_except_check)
+tool_surface_docs_check: check_uv ## Fail if the docs' tool reference has drifted from the @service registry
+	@echo "$(YELLOW)🔍Checking tool surface docs...$(RESET)"
+	@uv run python scripts/gen_tool_docs.py --check
+	@echo "$(GREEN)✅Tool surface docs check completed.$(RESET)"
+
+ci: ruff vulture import_lint ty docs_lint docs_test check_deps file_len_check blind_except_check tool_surface_docs_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, tool_surface_docs_check)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
 .PHONY: sync-agent-config
