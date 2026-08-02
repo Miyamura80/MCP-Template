@@ -108,9 +108,11 @@ global_config.OPENAI_API_KEY  # secrets from .env
 from utils.llm.dspy_inference import DSPYInference
 import dspy
 
+
 class MySignature(dspy.Signature):
     input_field: str = dspy.InputField()
     output_field: str = dspy.OutputField()
+
 
 inf_module = DSPYInference(pred_signature=MySignature, observe=True)
 result = await inf_module.run(input_field="value")
@@ -121,6 +123,7 @@ result = await inf_module.run(input_field="value")
 ```python
 from tests.test_template import TestTemplate
 from tests.conftest import slow_test, nondeterministic_test
+
 
 class TestMyFeature(TestTemplate):
     def test_something(self):
@@ -185,6 +188,7 @@ don't.
 ```python
 from mcp_server.enhancers import enhance
 from mcp_server.enhancers.base import EnhancedTool
+
 
 @enhance("my_service", fallback="headless")
 async def my_enhanced(tool: EnhancedTool[MyInput, MyOutput]) -> MyOutput:
