@@ -11,6 +11,11 @@
 // in `fumadocs-mdx:collections/server`, a virtual module that only exists after
 // the site's codegen step, which would drag a whole build into a test of a pure
 // `string -> string` function.
+//
+// Maintained in parallel with the same file in Miyamura80/MCP-Template. The two
+// copies are byte-identical on purpose; a fix here wants porting there, and vice
+// versa. Keep the comments describing shapes rather than repo-specific files so
+// they stay true on both sides.
 
 export function mdxBodyToMarkdown(raw: string): string {
   const withoutFrontmatter = raw
@@ -146,6 +151,27 @@ const STRUCTURAL_TAG = new RegExp(
   "g",
 );
 
+/**
+ * Read one attribute's value out of a matched tag.
+ *
+ * Two things the obvious `/\bname=["']([^"']*)["']/` gets wrong, both silent:
+ *
+ * - `[^"']` ends the value at the first quote of *either* kind, so a
+ *   double-quoted title containing an apostrophe is truncated - `title="Don't
+ *   do this"` yields `Don`. Callout titles are prose headings, so apostrophes
+ *   are ordinary; matching each quote style against its own closer fixes it and
+ *   also stops `title="X'` from matching at all.
+ * - `\b` looks like it anchors the attribute name, but `-` is a non-word
+ *   character, so the boundary is satisfied mid-token and `data-title="Decoy"`
+ *   matches `title=`. Requiring whitespace or the tag's start actually anchors it.
+ */
+function attrValue(tag: string, name: string): string | undefined {
+  const match = tag.match(
+    new RegExp(String.raw`(?:^|\s)${name}=(?:"([^"]*)"|'([^']*)')`),
+  );
+  return match?.[1] ?? match?.[2];
+}
+
 /** The MDX-to-Markdown rewrites, applied to prose only - never to code. */
 function stripMdxSyntax(prose: string): string {
   return (
@@ -159,27 +185,27 @@ function stripMdxSyntax(prose: string): string {
       .replace(/\s+[A-Za-z_][\w-]*=\{[^}]*\}/g, "")
       // <Card title="X" href="Y" /> -> a Markdown link to the related resource.
       .replace(CARD_TAG, (tag) => {
-        const title = tag.match(/\btitle=["']([^"']*)["']/)?.[1];
-        const href = tag.match(/\bhref=["']([^"']*)["']/)?.[1];
+        const title = attrValue(tag, "title");
+        const href = attrValue(tag, "href");
         if (title && href) return `- [${title}](${href})`;
         if (title) return `- ${title}`;
         return "";
       })
       // <Tab value="X"> -> a bold label so per-tab content stays attributed.
       .replace(TAB_TAG, (tag) => {
-        const value = tag.match(/\bvalue=["']([^"']*)["']/)?.[1];
+        const value = attrValue(tag, "value");
         return value ? `\n**${value}**\n` : tag;
       })
       // <Callout title="X"> -> a bold label. The title carries the point of the
       // callout ("Forking this repo?", "Account requirements"); dropping it with
       // the tag leaves the body floating with nothing to attach it to.
       .replace(CALLOUT_TAG, (tag) => {
-        const title = tag.match(/\btitle=["']([^"']*)["']/)?.[1];
+        const title = attrValue(tag, "title");
         return title ? `\n**${title}**\n` : "";
       })
-      // MDX block comments, which may span lines. `mcp/tools.mdx` carries the
-      // generated-region markers, and without this the twin published to LLM
-      // consumers ships a line telling the reader to edit scripts/gen_tool_docs.py.
+      // MDX block comments, which may span lines. They never carry reader-facing
+      // content - an authoring note or a generated-region marker - so stripping
+      // them keeps that out of the twin published to LLM consumers.
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
       // Strip the remaining structural component tags, keeping their children.
       .replace(STRUCTURAL_TAG, "")
