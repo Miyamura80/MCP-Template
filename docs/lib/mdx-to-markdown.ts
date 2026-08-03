@@ -11,6 +11,11 @@
 // in `fumadocs-mdx:collections/server`, a virtual module that only exists after
 // the site's codegen step, which would drag a whole build into a test of a pure
 // `string -> string` function.
+//
+// Maintained in parallel with the same file in Miyamura80/MCP-Template. The two
+// copies are byte-identical on purpose; a fix here wants porting there, and vice
+// versa. Keep the comments describing shapes rather than repo-specific files so
+// they stay true on both sides.
 
 export function mdxBodyToMarkdown(raw: string): string {
   const withoutFrontmatter = raw
@@ -65,6 +70,20 @@ export type Segment = { code: boolean; text: string };
  * absolute anchor walks straight past it. The consequence is not cosmetic - an
  * unrecognised fence gets `stripMdxSyntax` applied to it, which is exactly the
  * import-eating this module exists to prevent.
+ *
+ * The allowance is deliberately unbounded, and that is a tradeoff rather than a
+ * free win. A line scanner cannot tell a nested-list fence from a CommonMark
+ * *indented* code block (4+ spaces, no fence) whose content happens to contain a
+ * line of backticks - by indent alone the two are identical, and no bound
+ * separates them, since indented code starts at exactly the depth nested fences
+ * reach. Erring toward "it's a fence" means such a block would open one and the
+ * prose after it would go unrewritten until a matching close.
+ *
+ * Chosen knowing that, because in these docs the shapes are not symmetric:
+ * fenced blocks are the house style and indented code blocks number zero across
+ * every page, while fences nested in list items are real and present. The test
+ * suite pins this direction, so flipping it is a deliberate act rather than a
+ * silent regression.
  */
 const FENCE_OPEN = /^[ \t]*(`{3,}|~{3,})/;
 /**
@@ -146,6 +165,93 @@ const STRUCTURAL_TAG = new RegExp(
   "g",
 );
 
+/** One `name="value"` or `name='value'` pair. Each quote style closes its own. */
+const ATTR_PAIR = /([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
+/**
+ * Blank out `{...}` regions, leaving the plain attributes around them.
+ *
+ * The `name={...}` rule in `stripMdxSyntax` already drops *named* expression
+ * containers, but a spread has no name to anchor on, so `<Card
+ * {...parse('title="Fake"')} title="Real" />` arrives here intact and the
+ * literal `title=` inside it is the first one the walk meets. JS inside a prop
+ * is not attribute syntax at all, so the whole region is skipped rather than
+ * parsed.
+ *
+ * Depth-counted instead of `\{[^}]*\}` because these nest - `{...{a: {b: 1}}}`
+ * would end at the first `}` and hand the tail back to the walk. Quotes are
+ * tracked for the same reason in reverse: a `}` inside `'a}b'` closes nothing.
+ * An unbalanced `{` swallows the rest of the tag, which loses the label; that is
+ * the safe direction, since the alternative is publishing a value read out of
+ * someone's JavaScript.
+ *
+ * Inside a brace the string rules are JavaScript's, and outside it they are
+ * JSX's, which is why `depth` gates them. JS has backtick strings and
+ * backslash escapes; a scanner without them ends the string early, and the
+ * first `}` after that closes a spread that has not really ended - so
+ * `` {...parse(`} title="Fake"`)} `` hands `title="Fake"` back to the walk.
+ * A JSX attribute value has neither: `title="a\"` ends at that quote, and
+ * treating the backslash as an escape would run the value on past it.
+ */
+function withoutBraceExpressions(tag: string): string {
+  let out = "";
+  let depth = 0;
+  let quote: string | null = null;
+
+  for (let i = 0; i < tag.length; i++) {
+    const ch = tag[i];
+
+    if (quote !== null) {
+      if (depth === 0) {
+        out += ch;
+        if (ch === quote) quote = null;
+      } else if (ch === "\\") {
+        i++; // An escaped character cannot be the one that closes the string.
+      } else if (ch === quote) {
+        quote = null;
+      }
+    } else if (ch === '"' || ch === "'" || (depth > 0 && ch === "`")) {
+      quote = ch;
+      if (depth === 0) out += ch;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      if (depth > 0) depth--;
+    } else if (depth === 0) {
+      out += ch;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Read one attribute's value out of a matched tag.
+ *
+ * Walks the attributes in order rather than searching for the name, because
+ * searching gets three things wrong, all of them silent:
+ *
+ * - A pattern anchored on the name alone finds it *inside another prop's
+ *   value*. `<Card description='set title="Fake"' title="Real" />` yields
+ *   `Fake`, because the first `title=` in the string is the one in the prose.
+ *   Consuming each value whole steps past it, so only real attribute positions
+ *   are ever considered.
+ * - `[^"']` for the value ends it at the first quote of *either* kind, so
+ *   `title="Don't do this"` truncates to `Don`. Callout titles are prose
+ *   headings, so apostrophes are ordinary.
+ * - `\b` before the name looks like an anchor but is not: `-` is a non-word
+ *   character, so `\btitle=` matches `data-title="Decoy"`. Comparing the parsed
+ *   name for equality settles it.
+ */
+function attrValue(tag: string, name: string): string | undefined {
+  for (const [, key, doubleQuoted, singleQuoted] of withoutBraceExpressions(
+    tag,
+  ).matchAll(ATTR_PAIR)) {
+    if (key === name) return doubleQuoted ?? singleQuoted;
+  }
+  return undefined;
+}
+
 /** The MDX-to-Markdown rewrites, applied to prose only - never to code. */
 function stripMdxSyntax(prose: string): string {
   return (
@@ -159,27 +265,27 @@ function stripMdxSyntax(prose: string): string {
       .replace(/\s+[A-Za-z_][\w-]*=\{[^}]*\}/g, "")
       // <Card title="X" href="Y" /> -> a Markdown link to the related resource.
       .replace(CARD_TAG, (tag) => {
-        const title = tag.match(/\btitle=["']([^"']*)["']/)?.[1];
-        const href = tag.match(/\bhref=["']([^"']*)["']/)?.[1];
+        const title = attrValue(tag, "title");
+        const href = attrValue(tag, "href");
         if (title && href) return `- [${title}](${href})`;
         if (title) return `- ${title}`;
         return "";
       })
       // <Tab value="X"> -> a bold label so per-tab content stays attributed.
       .replace(TAB_TAG, (tag) => {
-        const value = tag.match(/\bvalue=["']([^"']*)["']/)?.[1];
+        const value = attrValue(tag, "value");
         return value ? `\n**${value}**\n` : tag;
       })
       // <Callout title="X"> -> a bold label. The title carries the point of the
       // callout ("Forking this repo?", "Account requirements"); dropping it with
       // the tag leaves the body floating with nothing to attach it to.
       .replace(CALLOUT_TAG, (tag) => {
-        const title = tag.match(/\btitle=["']([^"']*)["']/)?.[1];
+        const title = attrValue(tag, "title");
         return title ? `\n**${title}**\n` : "";
       })
-      // MDX block comments, which may span lines. `mcp/tools.mdx` carries the
-      // generated-region markers, and without this the twin published to LLM
-      // consumers ships a line telling the reader to edit scripts/gen_tool_docs.py.
+      // MDX block comments, which may span lines. They never carry reader-facing
+      // content - an authoring note or a generated-region marker - so stripping
+      // them keeps that out of the twin published to LLM consumers.
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
       // Strip the remaining structural component tags, keeping their children.
       .replace(STRUCTURAL_TAG, "")

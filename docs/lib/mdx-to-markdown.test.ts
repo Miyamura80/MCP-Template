@@ -81,6 +81,30 @@ describe("splitFences", () => {
     expect(mdxBodyToMarkdown(body)).toContain("import os");
   });
 
+  it("treats a fence line inside an indented block as opening a fence", () => {
+    // Pins the tradeoff `FENCE_OPEN` documents. By indent alone a nested-list
+    // fence and a CommonMark indented code block are identical, so recognising
+    // the first means also recognising the second. These docs use fenced blocks
+    // throughout and contain no indented code blocks, so this is the direction
+    // that loses nothing - but it is a choice, and flipping it should be
+    // deliberate rather than a silent regression.
+    const body = [
+      "Prose.",
+      "",
+      "    ```",
+      "    still code",
+      "    ```",
+      "",
+      "import { Card } from 'fumadocs-ui/components/card';",
+    ].join("\n");
+
+    expect(codeLines(body)).toContain("    still code");
+    // The cost is bounded by the block closing: prose after it is prose again,
+    // so the rules resume. Only an *unmatched* fence inside such a block would
+    // swallow the tail, which is the same exposure any unterminated fence has.
+    expect(mdxBodyToMarkdown(body)).not.toContain("fumadocs-ui/components/card");
+  });
+
   it("handles ~~~ fences", () => {
     const body = ["~~~python", "import os", "~~~", "", "prose"].join("\n");
 
@@ -184,18 +208,94 @@ describe("mdxBodyToMarkdown", () => {
     expect(out).toContain("x\n\n\n\ny");
   });
 
-  it("strips MDX block comments so generated-region markers do not ship", () => {
-    // `mcp/tools.mdx` carries these. Leaking one publishes an internal
-    // instruction to edit a script into the LLM-facing twin.
+  it("strips MDX block comments so authoring notes do not ship", () => {
+    // Comments are never reader-facing, so leaking one publishes an internal
+    // note into the twin that LLM consumers read.
     const raw = [
-      "{/* BEGIN generated: tool reference - edit scripts/gen_tool_docs.py */}",
+      "{/* TODO: rewrite this section before launch */}",
       "",
       "Real content.",
       "",
-      "{/* END generated */}",
+      "{/* END */}",
     ].join("\n");
 
     expect(mdxBodyToMarkdown(raw)).toBe("Real content.");
+  });
+
+  it("keeps an apostrophe inside a double-quoted attribute", () => {
+    // `[^"']` ends the value at either quote character, truncating the title to
+    // "Don". Callout titles are prose headings, so apostrophes are ordinary.
+    const raw = `<Callout title="Don't do this">\nBody.\n</Callout>`;
+
+    expect(mdxBodyToMarkdown(raw)).toBe("**Don't do this**\n\nBody.");
+  });
+
+  it("does not read a hyphenated lookalike attribute", () => {
+    // `\b` is satisfied between `-` and `t`, so `\btitle=` matches `data-title=`.
+    const raw = `<Callout data-title="Decoy">\nBody.\n</Callout>`;
+
+    expect(mdxBodyToMarkdown(raw)).toBe("Body.");
+  });
+
+  it("does not read an attribute name out of another prop's value", () => {
+    // Searching for `title=` finds the one quoted inside `description`, because
+    // it comes first in the string. Walking the attributes steps past whole
+    // values, so only real attribute positions are considered.
+    const title = `<Card description='set title="Fake"' title="Real" href="/r" />`;
+    const href = `<Card description='use href="/fake"' title="Real" href="/real" />`;
+
+    expect(mdxBodyToMarkdown(title)).toBe("- [Real](/r)");
+    expect(mdxBodyToMarkdown(href)).toBe("- [Real](/real)");
+  });
+
+  it("does not read an attribute out of a spread prop", () => {
+    // The `name={...}` rule drops named expression containers, but a spread has
+    // no name to anchor on, so it reaches the walk with its JS intact.
+    const card = `<Card {...parse('title="Fake"')} title="Real" href="/real" />`;
+    const callout = `<Callout {...parse('title="Fake"')} title="Real">\nBody.\n</Callout>`;
+
+    expect(mdxBodyToMarkdown(card)).toBe("- [Real](/real)");
+    expect(mdxBodyToMarkdown(callout)).toBe("**Real**\n\nBody.");
+  });
+
+  it("skips a spread whose braces nest, or whose quotes hold a brace", () => {
+    // `\{[^}]*\}` ends at the first `}` and hands the tail back to the walk, so
+    // the inner `title=` is read after all. Depth counting is what fixes it, and
+    // a `}` inside a quoted string must not decrement that depth.
+    const nested = `<Card {...{a: {b: 'title="Fake"'}}} title="Real" href="/real" />`;
+    const braceInQuotes = `<Card {...parse('}title="Fake"')} title="Real" href="/real" />`;
+
+    expect(mdxBodyToMarkdown(nested)).toBe("- [Real](/real)");
+    expect(mdxBodyToMarkdown(braceInQuotes)).toBe("- [Real](/real)");
+  });
+
+  it("applies JS string rules inside a spread, not JSX ones", () => {
+    // Inside the braces the strings are JavaScript's, so they can be backticked
+    // and can carry backslash escapes. A scanner that knows neither ends the
+    // string early, and the next `}` then closes a spread that has not really
+    // ended - handing its contents to the walk as if they were attributes.
+    const backtick = '<Card {...parse(`} title="Fake"`)} title="Real" href="/real" />';
+    const interpolated =
+      '<Card {...parse(`${x} title="Fake"`)} title="Real" href="/real" />';
+    const escapedBacktick =
+      '<Card {...parse(`a\\` } title="Fake"`)} title="Real" href="/real" />';
+
+    expect(mdxBodyToMarkdown(backtick)).toBe("- [Real](/real)");
+    expect(mdxBodyToMarkdown(interpolated)).toBe("- [Real](/real)");
+    expect(mdxBodyToMarkdown(escapedBacktick)).toBe("- [Real](/real)");
+  });
+
+  it("leaves a tag whose quoting it cannot parse alone, rather than guessing", () => {
+    // A backslash-escaped quote inside a spread is balanced to JavaScript but
+    // not to `TAG_ATTRS`, which is a flat regex and cannot know it is looking at
+    // JS. So the tag never matches and passes through verbatim. That is ugly,
+    // but it is the safe half of the trade: an unconverted tag is visible, where
+    // a wrong guess would publish `Fake` as the label and read as correct.
+    const raw = `<Card {...parse('a\\' } title="Fake"')} title="Real" href="/real" />`;
+
+    const out = mdxBodyToMarkdown(raw);
+    expect(out).toBe(raw);
+    expect(out).not.toContain("- [Fake]");
   });
 
   it("strips a block comment spanning several lines", () => {
