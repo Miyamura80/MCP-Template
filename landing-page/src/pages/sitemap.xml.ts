@@ -12,6 +12,9 @@ const routes = [
     priority: "0.7",
     changefreq: "monthly",
   })),
+  // The canonical support & contact page. /help and /contact serve the same
+  // body but are deliberately absent - they are noindex aliases of this URL.
+  { path: "/support", priority: "0.5", changefreq: "monthly" },
   { path: "/privacy", priority: "0.3", changefreq: "yearly" },
   { path: "/terms", priority: "0.3", changefreq: "yearly" },
 ];

@@ -5,7 +5,7 @@
  * surface: llms.txt, llms-full.txt, agents.md and the in-page agent view.
  * Rebranding the site (editing landing.ts) keeps all of these in sync.
  */
-import { site, hero, features, getStarted, faq, compatibility, connect, comparison, pricing, agentGuide } from "../config/landing";
+import { site, hero, features, getStarted, faq, compatibility, connect, comparison, pricing, agentGuide, support, supportEmail } from "../config/landing";
 
 /** Strip a trailing slash so we can safely append paths. */
 function trimSlash(url: string): string {
@@ -53,6 +53,11 @@ ${agentGuide.whenToUse.map((s) => `- ${s}`).join("\n")}
 ## Resources
 - [Documentation](${site.docsUrl})
 - [Source code](${site.githubUrl})
+
+## Support
+- [support.md](${o}/support.md): Fixes for connection and authentication issues, plus how to reach a human. Also served at /support (aliases /help, /contact).
+- [GitHub Issues](${site.githubUrl}/issues): Bugs and feature requests (public).
+- Email: ${supportEmail} for account, billing, or anything private.
 
 ## Optional
 - [FAQ](${o}/#faq): Common questions about clients, transports, auth and self-hosting.
@@ -154,6 +159,17 @@ ${connect.targets
 
 ${faqBlock}
 
+## Support
+
+Most problems are setup or connection related - use the streamable-HTTP endpoint
+${site.mcpUrl} (not stdio), complete the OAuth/auth step, and add the server with
+its name ${site.serverName}. If that does not resolve it:
+
+- GitHub Issues (bugs, features, public): ${site.githubUrl}/issues
+- Email (account, billing, anything private): ${supportEmail}
+
+Full troubleshooting and contact page: ${o}/support (markdown: ${o}/support.md).
+
 ## Machine-readable resources
 
 - llms.txt: ${o}/llms.txt
@@ -161,6 +177,7 @@ ${faqBlock}
 - agents.md: ${o}/agents.md
 - auth.md (agent auth manifest): ${o}/auth.md
 - pricing.md (machine-readable pricing): ${o}/pricing.md
+- support.md (troubleshooting + contact): ${o}/support.md
 - Agent skills (JSON): ${o}/.well-known/agent-skills/index.json
 - Agent skills (shell pointer): ${o}/skills.sh
 - MCP discovery (JSON): ${o}/.well-known/mcp.json
@@ -240,6 +257,7 @@ Full matrix: ${o}/compare
 
 - Agent auth (auth.md): ${o}/auth.md
 - Pricing (pricing.md): ${o}/pricing.md
+- Support & contact (support.md): ${o}/support.md
 - Full description for LLMs: ${o}/llms-full.txt
 - Skills (JSON): ${o}/.well-known/agent-skills/index.json
 - Skills (shell pointer): ${o}/skills.sh
@@ -377,5 +395,51 @@ always check ${site.url}.
 - Full description for LLMs: ${o}/llms-full.txt
 - Agent guide: ${o}/agents.md
 - Agent auth (auth.md): ${o}/auth.md
+`;
+}
+
+/**
+ * support.md - the markdown twin of the /support page: self-serve
+ * troubleshooting first, then how to reach a human. Built from the same
+ * `support` config the HTML page renders, so the two never disagree.
+ */
+export function buildSupportMd(origin: string): string {
+  const o = trimSlash(origin);
+
+  const troubleshooting = support.troubleshooting
+    .map((item) => {
+      const link = item.href
+        ? `\n  ${item.hrefLabel ?? "More"}: ${item.href.startsWith("http") ? item.href : o + item.href}`
+        : "";
+      return `### ${item.q}\n${item.a}${link}`;
+    })
+    .join("\n\n");
+
+  const channels = support.channels
+    .map((c) => {
+      const target = c.href.startsWith("mailto:") ? supportEmail : c.href;
+      return `### ${c.label} (${c.kind})\n${c.description}\n  ${c.cta === supportEmail ? `Email: ${supportEmail}` : `${c.cta}: ${target}`}`;
+    })
+    .join("\n\n");
+
+  return `# ${support.title}
+
+${support.intro}
+
+## Common issues
+
+${troubleshooting}
+
+More questions: ${o}/#faq and the docs at ${site.docsUrl}.
+
+## ${support.channelsHeading}
+
+${channels}
+
+## More
+
+- Full description for LLMs: ${o}/llms-full.txt
+- Agent guide: ${o}/agents.md
+- Source: ${site.githubUrl}
 `;
 }
