@@ -428,7 +428,7 @@ export function buildSupportMd(origin: string): string {
 
   return `# ${support.title}
 
-## Common issues
+## ${support.issuesHeading}
 
 ${troubleshooting}
 
