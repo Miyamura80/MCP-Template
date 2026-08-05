@@ -77,6 +77,7 @@ export const footer: { columns: FooterColumn[]; copyright: string } = {
       links: [
         { label: "Docs", href: site.docsUrl },
         { label: "API Reference", href: "/api" },
+        { label: "Support", href: "/support" },
         { label: "GitHub", href: site.githubUrl },
         { label: "Changelog", href: site.githubUrl + "/releases" },
       ],
@@ -86,7 +87,7 @@ export const footer: { columns: FooterColumn[]; copyright: string } = {
       links: [
         { label: "About", href: "#" },
         { label: "Blog", href: "#" },
-        { label: "Contact", href: "#" },
+        { label: "Contact", href: "/contact" },
       ],
     },
     {
