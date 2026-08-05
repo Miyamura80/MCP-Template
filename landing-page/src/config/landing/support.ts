@@ -32,29 +32,30 @@ export interface TroubleshootItem {
 }
 
 export interface SupportChannel {
-  label: string;
-  /** When to use this one, so a user picks the right door the first time. */
-  description: string;
-  href: string;
-  /** Button/label text. */
+  /** Link / button text. */
   cta: string;
+  href: string;
+  /** Terse routing hint - which door this is. Keep it to a few words. */
+  blurb: string;
+  /** Reused mark: a logo in public/logos/, or the built-in "mail" glyph. */
+  icon: "github" | "mail";
   /**
-   * "public"  - anyone can read it (GitHub Issues): bugs, features, how-tos.
-   * "private" - one-to-one (email): billing, account, anything with your data.
+   * Exactly one channel is `primary`: it renders as the single accent CTA.
+   * Every other channel is a quiet secondary link (see the design rule "one
+   * CTA per view"). This template's audience is developers, so GitHub Issues
+   * leads and email is the fallback.
    */
-  kind: "public" | "private";
+  primary: boolean;
 }
 
 export const support: {
   title: string;
-  intro: string;
   troubleshooting: TroubleshootItem[];
   channelsHeading: string;
   channels: SupportChannel[];
 } = {
   title: "Support & contact",
-  intro: `Hit a snag or have a question? Most issues are setup or connection related and are covered below. If that does not sort it, reach a human through one of the channels underneath.`,
-  // TODO: replace with the issues your users actually hit. These two cover the
+  // TODO: replace with the issues your users actually hit. These cover the
   // failure modes common to any remote MCP server.
   troubleshooting: [
     {
@@ -74,24 +75,22 @@ export const support: {
       a: `Once your client finishes auth, the tools register automatically - list them with the MCP tools/list method (most clients do this for you). If nothing shows, the connection did not complete: remove the server and add it again.`,
     },
   ],
-  channelsHeading: "Still stuck? Talk to us",
+  channelsHeading: "Still stuck?",
   channels: [
     {
-      label: "GitHub Issues",
-      description:
-        "Bugs, feature requests, and anything technical or reproducible. Public and searchable, so others hit by the same thing find the answer.",
+      cta: "Open a GitHub issue",
       href: `${site.githubUrl}/issues`,
-      cta: "Open an issue",
-      kind: "public",
+      blurb: "Public bugs and feature requests",
+      icon: "github",
+      primary: true,
     },
     {
-      label: "Email support",
       // TODO: keep this in step with `supportEmail` above.
-      description:
-        "Account, billing, security, or anything involving your data that should not be public. Goes straight to the team.",
+      cta: "Email support",
       href: `mailto:${supportEmail}`,
-      cta: supportEmail,
-      kind: "private",
+      blurb: "Billing, account, or anything private",
+      icon: "mail",
+      primary: false,
     },
   ],
 };
