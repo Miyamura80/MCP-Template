@@ -37,8 +37,12 @@ export interface SupportChannel {
   href: string;
   /** Terse routing hint - which door this is. Keep it to a few words. */
   blurb: string;
-  /** Reused mark: a logo in public/logos/, or the built-in "mail" glyph. */
-  icon: "github" | "mail";
+  /**
+   * Reused mark for the CTA: a logo in public/logos/, or the built-in "mail"
+   * glyph. Only rendered for the `primary` channel (the one drawn as a button);
+   * omit it on secondary channels, which render as plain text links.
+   */
+  icon?: "github" | "mail";
   /**
    * Exactly one channel is `primary`: it renders as the single accent CTA.
    * Every other channel is a quiet secondary link (see the design rule "one
@@ -50,11 +54,13 @@ export interface SupportChannel {
 
 export const support: {
   title: string;
+  issuesHeading: string;
   troubleshooting: TroubleshootItem[];
   channelsHeading: string;
   channels: SupportChannel[];
 } = {
   title: "Support & contact",
+  issuesHeading: "Common issues",
   // TODO: replace with the issues your users actually hit. These cover the
   // failure modes common to any remote MCP server.
   troubleshooting: [
@@ -89,7 +95,6 @@ export const support: {
       cta: "Email support",
       href: `mailto:${supportEmail}`,
       blurb: "Billing, account, or anything private",
-      icon: "mail",
       primary: false,
     },
   ],
