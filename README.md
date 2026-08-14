@@ -77,7 +77,7 @@ The skill's source of truth lives in [`skills/gmail-mcp/SKILL.md`](skills/gmail-
 | MCP server (streamable HTTP at `/mcp`, services auto-registered as tools; stdio supported for local dev) | FastMCP |
 | HTTP API server (also hosts `/mcp`) | FastAPI + Uvicorn |
 | Auth | WorkOS + API keys |
-| Payments | Stripe |
+| Payments | Stripe subscriptions + x402 sell-side paywall (price a tool with `@service(price=...)`; agents pay per call in stablecoins, Cloudflare Wallets / x402 ecosystem) |
 | Database + migrations | SQLAlchemy + Alembic |
 | Config (YAML + `.env`) | Pydantic-settings |
 | LLM inference + observability | DSPY + LiteLLM + LangFuse |
