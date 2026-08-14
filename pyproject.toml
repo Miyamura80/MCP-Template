@@ -267,7 +267,7 @@ exclude-newer = "7 days"
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.6.0",
+    "pre-commit>=4.6.1",
     # NOTE: pytest-check-links is deliberately NOT a project dependency. It still
     # declares the pytest `path` collect hook removed in pytest 9.1, so having it
     # in this venv would make pytest 9.1+ abort at plugin load. The link checker
