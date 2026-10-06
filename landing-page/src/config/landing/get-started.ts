@@ -269,8 +269,8 @@ export const connect: {
       method: "manual",
       steps: [
         "Open chatgpt.com/plugins",
-        "Click Add (+), then Create MCP App",
-        "Paste the URL above, tick the acknowledgement, then click Create",
+        "Click Add, then Create custom MCP server",
+        "Paste the URL above, tick the acknowledgement, then click Create as a plugin",
       ],
     },
   ],
