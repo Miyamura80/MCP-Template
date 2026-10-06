@@ -7,7 +7,8 @@ from langchain.agents import create_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from sealgate.agent import get_langchain_tools, langchain_connection
 
-MODEL = os.environ.get("AGENT_MODEL", "anthropic:claude-sonnet-5-5")
+MODEL = os.environ.get("AGENT_MODEL", "openai:z-ai/glm-5.3-flash")
+os.environ.setdefault("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 SYSTEM_PROMPT = (
     "You are Kurisu, a research agent that reports on the latest development of OpenSSH. "
     'Use the DeepWiki tools with repoName "openssh/openssh-portable" to read the wiki '

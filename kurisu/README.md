@@ -19,10 +19,11 @@ The tokens go to `.sealgate/agent-token.json`. Keep `.sealgate/` out of git and 
 
 ## Run
 
+The model defaults to GLM 5.3 Flash on OpenRouter. Set `AGENT_MODEL` or
+`OPENAI_BASE_URL` only to override it.
+
 ```bash
-export OPENAI_BASE_URL=https://openrouter.ai/api/v1
 export OPENAI_API_KEY=<your OpenRouter key>
-export AGENT_MODEL=openai:z-ai/glm-5.3-flash
 python agent.py "What changed recently in OpenSSH?"
 ```
 
