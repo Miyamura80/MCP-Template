@@ -268,9 +268,9 @@ export const connect: {
       logo: "/logos/chatgpt.svg",
       method: "manual",
       steps: [
-        "Settings → Connectors → Advanced: turn on Developer mode",
-        "Click Create",
-        "Paste the URL above, then click Create",
+        "Open chatgpt.com/plugins",
+        "Click Add, then Create custom MCP server",
+        "Paste the URL above → Create as a plugin",
       ],
     },
   ],
