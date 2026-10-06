@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "servers": [
+    { "name": "deepwiki", "display_name": "DeepWiki", "url": "https://mcp.deepwiki.com/mcp" }
+  ],
+  "tools": [
+    { "server": "deepwiki", "tool": "read_wiki_structure", "acl": "PUBLIC", "read_untrusted_public_data": true },
+    { "server": "deepwiki", "tool": "read_wiki_contents", "acl": "PUBLIC", "read_untrusted_public_data": true },
+    { "server": "deepwiki", "tool": "ask_wiki_question", "acl": "PUBLIC", "read_untrusted_public_data": true, "write_operation": true }
+  ]
+}
