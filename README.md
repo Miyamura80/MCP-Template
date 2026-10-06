@@ -63,7 +63,7 @@ The skill's source of truth lives in [`skills/gmail-mcp/SKILL.md`](skills/gmail-
 ## App Distribution
 
 - MCP server with OAuth
-- Claude and ChatGPT connectors
+- Claude connectors and ChatGPT apps
 - APIs and SDKs
 - Chat interfaces like iMessage and WhatsApp
 - A dashboard that uses the same MCP layer
