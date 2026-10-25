@@ -34,7 +34,7 @@ make ty             # Run type checker
 make lint_links     # Check for broken links in markdown files (README, etc.)
 make docs_test      # Run the docs site's vitest suite (docs/lib/*.test.ts)
 make tool_surface_docs_check # Fail if docs/ has drifted from the @service registry
-make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, tool_surface_docs_check)
+make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, tool_surface_docs_check, lint_immutable_refs)
 
 # Dependencies
 uv sync             # Install dependencies (not pip install)

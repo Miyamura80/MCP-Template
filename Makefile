@@ -339,6 +339,11 @@ file_len_check: check_uv ## Check source files (.py/.ts/.tsx) don't exceed max l
 	@uv run python scripts/check_file_length.py
 	@echo "$(GREEN)✅File length check completed.$(RESET)"
 
+lint_immutable_refs: ## Fail if a Dockerfile or GitHub Actions file uses a mutable image tag or action ref
+	@echo "$(YELLOW)🔍Checking for mutable image/action references...$(RESET)"
+	@python3 scripts/check_immutable_refs.py
+	@echo "$(GREEN)✅All images pinned by digest and actions by commit sha.$(RESET)"
+
 blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification comment
 	@echo "$(YELLOW)🔍Checking blind-except justifications...$(RESET)"
 	@uv run python scripts/check_blind_except_justification.py
@@ -350,7 +355,7 @@ tool_surface_docs_check: check_uv ## Fail if the docs' tool reference has drifte
 	@uv run python scripts/gen_tool_docs.py --check
 	@echo "$(GREEN)✅Tool surface docs check completed.$(RESET)"
 
-ci: ruff vulture import_lint ty docs_lint docs_test check_deps file_len_check blind_except_check tool_surface_docs_check ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, tool_surface_docs_check)
+ci: ruff vulture import_lint ty docs_lint docs_test check_deps file_len_check blind_except_check tool_surface_docs_check lint_immutable_refs ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, tool_surface_docs_check, lint_immutable_refs)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
 .PHONY: sync-agent-config
