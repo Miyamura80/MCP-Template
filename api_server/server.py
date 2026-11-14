@@ -183,6 +183,16 @@ app.include_router(google_webhooks.router)
 app.include_router(agentic_payments.router)
 app.include_router(ask.router)
 
+# --- Built-in OAuth server for MCP clients (opt-in) ------------------------
+# Only with MCP_AUTH_MODE=self (api_server/oauth/). Registered before the MCP
+# mount below, which sits at "/" and would otherwise answer /authorize and /token.
+if global_config.MCP_AUTH_MODE == "self":
+    import api_server.oauth as oauth_server  # noqa: PLC0415
+    from api_server.oauth import flow as oauth_flow  # noqa: PLC0415
+
+    app.include_router(oauth_flow.router)
+    app.router.routes.extend(oauth_server.create_sdk_routes())
+
 # --- MCP server (streamable HTTP) -----------------------------------------
 # Mounts MCPServer at /mcp so CLI/API/MCP share one process, port, and middleware.
 _mcp_app = mount_mcp_server(app)
