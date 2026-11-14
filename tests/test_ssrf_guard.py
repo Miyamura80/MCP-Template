@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 import services._ssrf_guard as ssrf_guard
@@ -134,6 +136,22 @@ class TestSsrfGuard(TestTemplate):
         try:
             assert client.trust_env is False
             assert client.follow_redirects is False
+        finally:
+            client.close()
+
+    def test_deadline_client_keeps_the_hardening(self):
+        client = build_client(timeout=1.0, deadline=time.monotonic() + 1.0)
+        try:
+            assert client.trust_env is False
+            assert client.follow_redirects is False
+        finally:
+            client.close()
+
+    def test_deadline_client_fails_once_the_deadline_has_passed(self):
+        client = build_client(timeout=1.0, deadline=time.monotonic() - 1.0)
+        try:
+            with pytest.raises(httpx.ConnectTimeout):
+                client.get("http://127.0.0.1:9/")
         finally:
             client.close()
 
