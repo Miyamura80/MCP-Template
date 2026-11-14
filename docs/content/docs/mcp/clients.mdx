@@ -1,0 +1,31 @@
+---
+title: Supported clients
+description: Which MCP clients can connect to your server, how they authenticate, and which render MCP Apps
+---
+
+Every client below connects to the same **streamable-HTTP** endpoint,
+`https://YOUR-DEPLOYMENT/mcp`. Stdio (`mymcp-mcp`) is for local dev only; see
+[Setup](/docs/mcp/setup#local-stdio-legacy).
+
+| Client | Runs | Transport | Auth | MCP Apps | Guide |
+| --- | --- | --- | --- | --- | --- |
+| Claude (web, Desktop, Cowork) | Cloud | Streamable HTTP | OAuth | Yes | [Claude Web & Cowork](/docs/mcp/claude-web-cowork) |
+| ChatGPT | Cloud | Streamable HTTP | OAuth | Yes | [ChatGPT](/docs/mcp/chatgpt) |
+| Claude Code | Local | Streamable HTTP | OAuth or `X-API-KEY` | No | [Claude Code](/docs/mcp/claude-code) |
+| Cursor | Local | Streamable HTTP | OAuth or `X-API-KEY` | Yes | [Cursor](/docs/mcp/cursor) |
+| VS Code (Copilot) | Local | Streamable HTTP | OAuth or `X-API-KEY` | Yes | [VS Code](/docs/mcp/vscode) |
+| Codex | Local | Streamable HTTP | OAuth or `X-API-KEY` | No | [Codex](/docs/mcp/codex) |
+| Grok (grok.com) | Cloud | Streamable HTTP | OAuth | Unverified | [Grok](/docs/mcp/grok#grokcom-connectors) |
+| Grok Build CLI | Local | Streamable HTTP | OAuth or `X-API-KEY` | No | [Grok](/docs/mcp/grok#grok-build-cli) |
+| xAI API | Cloud | Streamable HTTP | `X-API-KEY` or bearer token | No (API) | [Grok](/docs/mcp/grok#xai-api-remote-mcp-tools) |
+| Muse Code | Local | Streamable HTTP | OAuth or `X-API-KEY` | Unverified | [Muse](/docs/mcp/muse#muse-code) |
+| Muse (consumer) | Cloud | Unverified | Unverified | Unverified | [Muse](/docs/mcp/muse#muse-consumer-agent) |
+
+- **Cloud** clients run in the vendor's cloud and need a public URL with
+  [OAuth 2.1](/docs/mcp/oauth); `localhost` won't work.
+- **Local** clients run on your machine, so `http://localhost:8080/mcp` works
+  during development.
+- **MCP Apps**: clients marked *No* still get the tool's normal output; the
+  `ui://` dashboard is just skipped. See
+  [ext-apps](https://github.com/modelcontextprotocol/ext-apps) for the current
+  host list.
