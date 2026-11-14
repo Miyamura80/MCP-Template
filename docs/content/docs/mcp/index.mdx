@@ -5,22 +5,25 @@ description: Connect AI assistants to use your tools via MCP
 
 The MCP server lets AI assistants call your tools directly. Set it up once and any MCP-compatible client can use all available tools without manual copy-pasting.
 
-**Local clients** (Claude Code, Cursor, VS Code) spawn the server over **stdio** - no HTTP server or port configuration needed. **Cloud clients** (claude.ai, Cowork, ChatGPT) run in a vendor's cloud and connect to your deployed **streamable-HTTP** endpoint at `/mcp` as a remote connector.
+Every client connects to the **streamable-HTTP** endpoint at `/mcp`. **Cloud clients** (claude.ai, Cowork, ChatGPT, Grok) run in a vendor's cloud and need your public deployment with [OAuth](/docs/mcp/oauth). **Local clients** (Claude Code, Cursor, VS Code, Codex) run on your machine and can also use an API key or `localhost`. See [Supported clients](/docs/mcp/clients) for the full matrix.
 
 ## Quick Start
 
-1. [Set up your client](/docs/mcp/setup) (Claude Desktop, Claude Code, Cursor, or VS Code)
+1. Pick your client from [Supported clients](/docs/mcp/clients)
 2. Browse the [available tools](/docs/mcp/tools)
 3. Ask your AI assistant to use them
 
-## Connect a cloud client
-
-Running in claude.ai, Cowork, or ChatGPT? Add your deployment as a remote
-connector:
+## Connect a client
 
 <Cards>
   <Card title="Claude Web & Cowork" href="/docs/mcp/claude-web-cowork" />
   <Card title="ChatGPT" href="/docs/mcp/chatgpt" />
+  <Card title="Claude Code" href="/docs/mcp/claude-code" />
+  <Card title="Cursor" href="/docs/mcp/cursor" />
+  <Card title="VS Code" href="/docs/mcp/vscode" />
+  <Card title="Codex" href="/docs/mcp/codex" />
+  <Card title="Grok" href="/docs/mcp/grok" />
+  <Card title="Muse (Meta)" href="/docs/mcp/muse" />
 </Cards>
 
 <Cards>
