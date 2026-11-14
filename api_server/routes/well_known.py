@@ -22,6 +22,11 @@ The discovery documents that live here:
   follow the redirect; serving the document inline as a 200 is what actually
   satisfies them. The upstream document is fetched once and cached.
 
+  With ``MCP_AUTH_MODE=self`` this server is the authorization server itself:
+  the protected-resource document points at this origin, and this path serves
+  the built-in server's metadata (``api_server.oauth.authorization_server_metadata``),
+  built locally rather than fetched.
+
 * **MCP Server Card** (SEP-2127) - pre-connect *discovery*: the identity
   (name, title, description, version, icon) plus the endpoint (``serverUrl`` /
   ``remotes``) and tool surface (``tools[]``) a registry or agent previews
@@ -61,7 +66,9 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+import api_server.oauth as oauth_server
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
+from api_server.oauth.flow import issuer_url as oauth_issuer_url
 from common import global_config
 from common.config_models import BrandingConfig, IconConfig
 from models.a2a import (
@@ -342,12 +349,17 @@ def web_bot_auth_directory() -> JSONResponse:
 
 
 def _metadata() -> dict:
-    domain = authkit_domain()
-    if not domain:
-        raise HTTPException(status_code=404, detail="OAuth is not configured")
+    if oauth_server.is_self_mode():
+        # The built-in OAuth server issues MCP tokens (api_server/oauth/).
+        authorization_server = oauth_issuer_url()
+    else:
+        domain = authkit_domain()
+        if not domain:
+            raise HTTPException(status_code=404, detail="OAuth is not configured")
+        authorization_server = domain
     return {
         "resource": mcp_resource_url(),
-        "authorization_servers": [domain],
+        "authorization_servers": [authorization_server],
         "bearer_methods_supported": ["header"],
     }
 
@@ -368,7 +380,12 @@ def _authorization_server_metadata() -> dict:
     404 when OAuth is unconfigured (mirrors the PRM routes); 502 when the
     upstream authorization server cannot be reached, so callers see a clear
     "try again" signal rather than a cached or partial document.
+
+    With ``MCP_AUTH_MODE=self`` this server is the authorization server, so its
+    own metadata is built locally and served instead.
     """
+    if oauth_server.is_self_mode():
+        return oauth_server.authorization_server_metadata()
     domain = authkit_domain()
     if not domain:
         raise HTTPException(status_code=404, detail="OAuth is not configured")

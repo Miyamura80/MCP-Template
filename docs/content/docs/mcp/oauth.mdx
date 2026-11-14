@@ -74,6 +74,60 @@ curl https://your-deployment.example.com/.well-known/oauth-protected-resource/mc
 4. Add the server to an MCP client by URL alone (no headers). The client
    discovers AuthKit, registers itself, and opens the consent screen.
 
+## Built-in authorization server (opt-in)
+
+Tokens that AuthKit issues for MCP have no revocation endpoint, so signing a
+user out cannot end the sessions their apps hold. Set `MCP_AUTH_MODE=self` and
+this server becomes the authorization server itself: it issues, stores and
+revokes the tokens, and AuthKit only signs the user in. The default is
+`authkit`; setting it back is the rollback.
+
+```
+MCP client ──/authorize──► this server ──consent page──► AuthKit sign-in
+     ▲                                                       │
+     └──── code + iss ◄── /oauth/workos/callback ◄───────────┘
+     ──/token (PKCE)──► opaque, hashed, revocable tokens ──► /mcp
+```
+
+What it does (`api_server/oauth/`):
+
+- **Client ID Metadata Documents** only; Dynamic Client Registration is
+  deprecated in the 2026-07-28 spec and is refused. The document fetch goes
+  through an SSRF guard (`services/_ssrf_guard.py`) with a 5 s deadline, a
+  10 KB cap and a short cache. Only public clients
+  (`token_endpoint_auth_method: none`) are accepted.
+- A **consent page** names the client and the redirect host (with a warning
+  for loopback redirects) before the user is sent to AuthKit, and binds each
+  sign-in to its browser with a cookie nonce.
+- **PKCE S256** only, exact redirect matching (any port on loopback, RFC 8252),
+  `iss` on every authorization response (RFC 9207), tokens bound to
+  `MCP_PUBLIC_URL` (RFC 8707).
+- Codes and tokens are random and stored only as SHA-256 hashes (migration
+  `015`). Access tokens live one hour; refresh tokens rotate, a reused one
+  revokes its whole grant, and a grant ends 90 days after sign-in.
+- `/revoke` follows RFC 7009 for public clients.
+- `api_server.oauth.storage.revoke_user_grants(user_id)` revokes every token a
+  user holds and refuses any sign-in already under way. Call it from your own
+  sign-out (for example a `mutating=True` service); the template does not ship
+  one.
+
+Setup:
+
+```bash
+MCP_AUTH_MODE=self
+MCP_PUBLIC_URL=https://your-deployment.example.com/mcp
+WORKOS_CLIENT_ID=client_...
+WORKOS_API_KEY=sk_...
+SESSION_SECRET_KEY=<a long random value>
+```
+
+Add `https://your-deployment.example.com/oauth/workos/callback` as a redirect
+URI in the WorkOS dashboard. Outside development the server refuses to start in
+this mode without a real `SESSION_SECRET_KEY` and `MCP_PUBLIC_URL`. Run
+`make db_migrate` for the token tables. The protected-resource and
+authorization-server metadata then point at this origin, and `/mcp` accepts only
+tokens this server issued (plus `X-API-KEY`).
+
 ## Conformance testing
 
 [MCPJam](https://github.com/MCPJam/inspector) ships an OAuth conformance
