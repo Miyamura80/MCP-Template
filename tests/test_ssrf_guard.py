@@ -14,6 +14,7 @@ import socket
 import time
 from unittest.mock import patch
 
+import httpcore
 import httpx
 import pytest
 
@@ -25,6 +26,7 @@ from services._ssrf_guard import (
     is_public_address,
     validate_and_pin,
 )
+from tests.stall_server import StallServer
 from tests.test_template import TestTemplate
 
 _PUBLIC_IP = "93.184.216.34"
@@ -138,6 +140,36 @@ class TestSsrfGuard(TestTemplate):
             assert client.follow_redirects is False
         finally:
             client.close()
+
+    def test_deadline_transport_replaces_httpx_pool(self):
+        # _DeadlineTransport swaps httpx's private HTTPTransport._pool; if an
+        # httpx upgrade renames it, the deadline would silently stop applying.
+        client = build_client(timeout=1.0, deadline=time.monotonic() + 1.0)
+        try:
+            transport = client._transport
+            assert isinstance(transport, httpx.HTTPTransport)
+            pool = transport._pool
+            assert isinstance(pool, httpcore.ConnectionPool)
+            assert isinstance(pool._network_backend, ssrf_guard._DeadlineBackend)
+        finally:
+            client.close()
+
+    def test_deadline_hit_mid_body_is_an_httpx_read_timeout(self):
+        server = StallServer()
+        client = build_client(timeout=5.0, deadline=time.monotonic() + 0.5)
+        try:
+            start = time.monotonic()
+            with (
+                client.stream("GET", server.url("/body")) as response,
+                pytest.raises(httpx.ReadTimeout),
+            ):
+                assert response.status_code == 200
+                for _ in response.iter_raw():
+                    pass
+            assert time.monotonic() - start < 1.5
+        finally:
+            client.close()
+            server.close()
 
     def test_deadline_client_fails_once_the_deadline_has_passed(self):
         client = build_client(timeout=1.0, deadline=time.monotonic() - 1.0)

@@ -99,22 +99,6 @@ class TestClientMetadataDocuments(TestTemplate):
             with pytest.raises(InvalidRedirectUriError):
                 client.validate_redirect_uri(AnyUrl(bad))
 
-    def test_slow_document_is_abandoned_at_the_deadline(self):
-        response = MagicMock(status_code=200, headers={})
-        response.iter_raw.return_value = iter([b"{", b" ", b" ", b" "])
-        http = MagicMock()
-        http.__enter__.return_value.stream.return_value.__enter__.return_value = (
-            response
-        )
-        clock = iter(range(0, 100, 3))  # each read takes three seconds
-        with (
-            patch.object(cimd, "validate_and_pin", return_value=MagicMock(headers={})),
-            patch.object(cimd, "build_client", return_value=http),
-            patch.object(cimd.time, "monotonic", side_effect=lambda: next(clock)),
-            pytest.raises(cimd.ClientMetadataError, match="too long"),
-        ):
-            cimd._fetch_document(CLIENT_ID)
-
     def test_compressed_document_is_refused(self):
         response = MagicMock(status_code=200, headers={"content-encoding": "gzip"})
         http = MagicMock()

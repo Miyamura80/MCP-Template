@@ -37,7 +37,7 @@ class TestCimdFetchDeadline(TestTemplate):
         path = "/" + client_id.split("/", 3)[3]
         return PinnedTarget(url=self.stall_server.url(path))
 
-    @pytest.mark.parametrize("mode", ["flood", "header", "trailer"])
+    @pytest.mark.parametrize("mode", ["flood", "header", "trailer", "body"])
     def test_stalling_server_is_cut_off_at_the_deadline(self, mode):
         start = time.monotonic()
         with pytest.raises(cimd.ClientMetadataError):

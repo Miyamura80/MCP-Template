@@ -41,10 +41,11 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import ssl
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Any
 from urllib.parse import urlparse
 
 import httpcore
@@ -193,16 +194,31 @@ def build_client(*, timeout: float, deadline: float) -> httpx.Client:
     (status line, headers, body, chunk trailers). It is required because every
     URL fetched through this client is chosen by someone else.
     """
-    pool = httpcore.ConnectionPool(
-        ssl_context=httpx.create_ssl_context(trust_env=False),
-        network_backend=_DeadlineBackend(httpcore.SyncBackend(), deadline),
-    )
     return httpx.Client(
         timeout=timeout,
         trust_env=False,
         follow_redirects=False,
-        transport=_PoolTransport(pool),
+        transport=_DeadlineTransport(deadline),
     )
+
+
+class _DeadlineTransport(httpx.HTTPTransport):
+    """httpx's own transport over a network backend that obeys ``deadline``.
+
+    ``HTTPTransport`` accepts no network backend, so the pool it builds is
+    replaced by one over :class:`_DeadlineBackend`. Everything else - request
+    translation and the httpcore-to-httpx exception mapping - stays httpx's
+    own, so a deadline hit surfaces as the usual ``httpx.ReadTimeout`` /
+    ``ConnectTimeout`` / ``WriteTimeout``. ``_pool`` is private to httpx;
+    ``tests/test_ssrf_guard.py`` pins that the swap still takes effect.
+    """
+
+    def __init__(self, deadline: float) -> None:
+        super().__init__(trust_env=False)
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(trust_env=False),
+            network_backend=_DeadlineBackend(httpcore.SyncBackend(), deadline),
+        )
 
 
 def _time_left(deadline: float, timeout: float | None, exc: type[Exception]) -> float:
@@ -231,13 +247,27 @@ class _DeadlineStream(httpcore.NetworkStream):
     def close(self) -> None:
         self._stream.close()
 
-    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+    def start_tls(
+        self,
+        ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
         timeout = _time_left(self._deadline, timeout, httpcore.ConnectTimeout)
         stream = self._stream.start_tls(ssl_context, server_hostname, timeout)
         return _DeadlineStream(stream, self._deadline)
 
-    def get_extra_info(self, info: str):
+    def get_extra_info(self, info: str) -> Any:
         return self._stream.get_extra_info(info)
+
+
+# httpcore's socket-option type (``httpcore._backends.base.SOCKET_OPTION``),
+# restated so the overrides below need no private import.
+_SocketOption = (
+    tuple[int, int, int]
+    | tuple[int, int, bytes | bytearray]
+    | tuple[int, int, None, int]
+)
 
 
 class _DeadlineBackend(httpcore.NetworkBackend):
@@ -248,90 +278,26 @@ class _DeadlineBackend(httpcore.NetworkBackend):
         self._deadline = deadline
 
     def connect_tcp(
-        self, host, port, timeout=None, local_address=None, socket_options=None
-    ):
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[_SocketOption] | None = None,
+    ) -> httpcore.NetworkStream:
         timeout = _time_left(self._deadline, timeout, httpcore.ConnectTimeout)
         stream = self._backend.connect_tcp(
             host, port, timeout, local_address, socket_options
         )
         return _DeadlineStream(stream, self._deadline)
 
-    def connect_unix_socket(self, path, timeout=None, socket_options=None):
+    def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[_SocketOption] | None = None,
+    ) -> httpcore.NetworkStream:
         raise httpcore.ConnectError("unix sockets are not allowed")
 
     def sleep(self, seconds: float) -> None:
         self._backend.sleep(seconds)
-
-
-def _to_httpx_error(exc: Exception, request: httpx.Request) -> httpx.TransportError:
-    """The httpx exception matching an httpcore one (they share class names)."""
-    cls = getattr(httpx, type(exc).__name__, None)
-    if not (isinstance(cls, type) and issubclass(cls, httpx.TransportError)):
-        cls = httpx.TransportError
-    return cls(str(exc), request=request)
-
-
-_HTTPCORE_ERRORS = (
-    httpcore.TimeoutException,
-    httpcore.NetworkError,
-    httpcore.ProtocolError,
-    httpcore.UnsupportedProtocol,
-    httpcore.ProxyError,
-)
-
-
-class _ResponseStream(httpx.SyncByteStream):
-    def __init__(self, stream: Iterable[bytes], request: httpx.Request) -> None:
-        self._stream = stream
-        self._request = request
-
-    def __iter__(self) -> Iterator[bytes]:
-        try:
-            yield from self._stream
-        except _HTTPCORE_ERRORS as exc:
-            raise _to_httpx_error(exc, self._request) from exc
-
-    def close(self) -> None:
-        close = getattr(self._stream, "close", None)
-        if close is not None:
-            close()
-
-
-class _PoolTransport(httpx.BaseTransport):
-    """An httpx transport over a caller-built ``httpcore.ConnectionPool``.
-
-    httpx's own ``HTTPTransport`` has no way to pass a network backend, so this
-    does the same request/response translation on public APIs only.
-    """
-
-    def __init__(self, pool: httpcore.ConnectionPool) -> None:
-        self._pool = pool
-
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
-        core_request = httpcore.Request(
-            method=request.method,
-            url=httpcore.URL(
-                scheme=request.url.raw_scheme,
-                host=request.url.raw_host,
-                port=request.url.port,
-                target=request.url.raw_path,
-            ),
-            headers=request.headers.raw,
-            content=request.stream,
-            extensions=request.extensions,
-        )
-        try:
-            response = self._pool.handle_request(core_request)
-        except _HTTPCORE_ERRORS as exc:
-            raise _to_httpx_error(exc, request) from exc
-        # A sync pool always returns a sync stream; this narrows the type.
-        stream = cast("Iterable[bytes]", response.stream)
-        return httpx.Response(
-            status_code=response.status,
-            headers=response.headers,
-            stream=_ResponseStream(stream, request),
-            extensions=response.extensions,
-        )
-
-    def close(self) -> None:
-        self._pool.close()

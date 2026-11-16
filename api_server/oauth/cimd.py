@@ -192,8 +192,6 @@ def _fetch_document(client_id: str) -> bytes:
                 body.extend(chunk)
                 if len(body) > _MAX_DOCUMENT_BYTES:
                     raise ClientMetadataError("client metadata document is too large")
-                if time.monotonic() > deadline:
-                    raise ClientMetadataError("client metadata document took too long")
             return bytes(body)
     except httpx.HTTPError as exc:
         raise ClientMetadataError(
