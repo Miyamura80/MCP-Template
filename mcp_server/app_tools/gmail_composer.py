@@ -25,6 +25,7 @@ from models.gmail import (
     GmailUpdateDraftInput,
     _UnsetType,
 )
+from services import InvalidArgument
 from services.gmail_drafts_svc import (
     gmail_discard_draft as _gmail_discard_draft,
 )
@@ -65,7 +66,7 @@ def _coerce_attachments(
         elif a.get("attachment_id"):
             out.append(AttachmentReference(attachment_id=a["attachment_id"]))
         else:
-            raise ValueError(
+            raise InvalidArgument(
                 "attachment must have either 'data_base64' (new upload) or "
                 "'attachment_id' (existing file reference)"
             )

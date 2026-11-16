@@ -145,9 +145,10 @@ class _TemplateMCPServer(MCPServer):
 
     SDK 2.x reports any non-``ToolError`` tool exception as a bare
     ``Error executing tool <name>``. Our services fail with model-facing
-    messages (recovery scripts, quota/scope refusals), so a crash whose cause
-    is first-party is re-labelled as a ``ToolError`` keeping its text - the v1
-    wire behavior. Third-party crashes stay sanitized. See
+    messages (recovery scripts, rejected arguments, quota refusals), so a crash
+    caused by a ``services.ModelFacingError`` is re-labelled as a ``ToolError``
+    keeping its text. Everything else stays sanitized and is logged with its
+    traceback. See
     ``mcp_server/_tool_errors.py``. Tool functions themselves are untouched,
     so in-process callers still see the original exception types.
     """
@@ -158,6 +159,9 @@ class _TemplateMCPServer(MCPServer):
         except UnexpectedToolError as exc:
             message = model_facing_message(exc.__cause__)
             if message is None:
+                # A real crash: keep its stack in our logs before the SDK
+                # replaces it with a generic message for the client.
+                log.opt(exception=exc.__cause__ or exc).error("Tool {!r} crashed", name)
                 raise
             raise ToolError(f"Error executing tool {name}: {message}") from exc
 

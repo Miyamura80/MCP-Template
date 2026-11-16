@@ -43,6 +43,7 @@ from urllib.parse import urlparse
 import httpx
 
 from models.gmail import GmailFetchImageResult
+from services import ModelFacingError
 
 _MAX_IMAGE_BYTES = 2 * 1024 * 1024  # cap per image; emails shouldn't need more
 _MAX_REDIRECTS = 3
@@ -53,7 +54,7 @@ _TIMEOUT_SECONDS = 10.0  # per network operation (httpx timeout)
 _TOTAL_DEADLINE_SECONDS = 20.0
 
 
-class ImageFetchError(ValueError):
+class ImageFetchError(ModelFacingError, ValueError):
     """Raised when a remote image URL is rejected or cannot be fetched."""
 
 
@@ -169,6 +170,10 @@ def fetch_remote_image(url: str) -> GmailFetchImageResult:
                         current = str(httpx.URL(current).join(location))
                         continue
                     return _read_image_response(resp, url, deadline)
+            except httpx.TimeoutException as exc:
+                raise ImageFetchError("image fetch timed out") from exc
             except httpx.HTTPError as exc:
-                raise ImageFetchError(f"image fetch failed: {exc}") from exc
+                # httpx's text can carry the pinned IP and internal details;
+                # the cause stays on the server.
+                raise ImageFetchError("image fetch failed") from exc
     raise ImageFetchError("too many redirects")

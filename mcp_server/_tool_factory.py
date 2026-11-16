@@ -18,9 +18,10 @@ from typing import Any
 
 from loguru import logger as log
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.session import ServerSession
 from mcp.types import CallToolResult, TextContent
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
 from mcp_server.enhancers.base import EnhancedTool, build_app_meta
@@ -43,9 +44,25 @@ def _check_scopes() -> None:
     from api_server.auth.scopes import SERVICES_EXECUTE, check_scopes  # noqa: PLC0415
 
     if not check_scopes([SERVICES_EXECUTE], user.scopes):
-        raise PermissionError(
-            "Insufficient permissions: 'services:execute' scope required."
-        )
+        # ToolError: a deliberate refusal the model should read (the SDK
+        # sanitizes every other exception type).
+        raise ToolError("Insufficient permissions: 'services:execute' scope required.")
+
+
+def _build_input(input_model: type, kwargs: dict) -> Any:
+    """Construct the service's input model, reporting a rejection to the model.
+
+    The SDK has already validated the arguments against the tool's signature,
+    but the input model's own validators (cross-field rules, ``user_id``
+    injection) run only here. Their failure is the caller's to correct, so it
+    is raised as a ``ToolError`` - the only exception text the SDK passes on.
+    A ``ValidationError`` raised anywhere else (e.g. parsing an upstream API
+    response inside a service) stays sanitized.
+    """
+    try:
+        return input_model(**kwargs)
+    except ValidationError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def _check_quota() -> None:
@@ -184,7 +201,7 @@ def _make_headless_tool(mcp: MCPServer, entry: ServiceEntry) -> None:
                 kwargs["user_id"] = user.user_id
             elif not kwargs.get("user_id"):
                 kwargs.setdefault("user_id", "")
-        input_obj = input_model(**kwargs)
+        input_obj = _build_input(input_model, kwargs)
         _meter(entry)
         try:
             return func(input_obj)
@@ -219,7 +236,7 @@ def _make_enhanced_tool(
                 kwargs["user_id"] = user.user_id
             elif not kwargs.get("user_id"):
                 kwargs.setdefault("user_id", "")
-        input_obj = input_model(**kwargs)
+        input_obj = _build_input(input_model, kwargs)
         await _meter_async(entry)
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
         try:
