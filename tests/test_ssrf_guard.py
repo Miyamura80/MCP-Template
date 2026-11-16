@@ -131,14 +131,6 @@ class TestSsrfGuard(TestTemplate):
         ):
             validate_and_pin("https://nope.invalid/p")
 
-    def test_build_client_disables_env_and_redirects(self):
-        client = build_client(timeout=1.0)
-        try:
-            assert client.trust_env is False
-            assert client.follow_redirects is False
-        finally:
-            client.close()
-
     def test_deadline_client_keeps_the_hardening(self):
         client = build_client(timeout=1.0, deadline=time.monotonic() + 1.0)
         try:

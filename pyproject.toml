@@ -186,6 +186,8 @@ exclude = [
     "tests/test_image_proxy.py",
     # autouse fixture, reached by pytest only.
     "tests/test_oauth_cimd_deadline.py",
+    # Used only by the two excluded deadline tests above.
+    "tests/stall_server.py",
     "tests/test_scopes.py",
     "utils/llm/",
     "common/",

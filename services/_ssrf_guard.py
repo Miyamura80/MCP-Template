@@ -1,10 +1,12 @@
 """Shared SSRF guard: resolve a URL's host, reject non-global addresses, and
 pin the connection to a validated IP.
 
-Factored out of :mod:`services.image_proxy` so every outbound request that
-targets a user- or attacker-controlled URL (remote email images, webhook
-delivery) shares one hardened resolve-then-pin path instead of each transport
-re-implementing it and drifting.
+Every outbound fetch of a client- or attacker-chosen URL goes through here:
+remote email images (:mod:`services.image_proxy`) and OAuth client metadata
+documents (:mod:`api_server.oauth.cimd`). One hardened resolve-then-pin path
+and one deadline-bound client, instead of each caller re-implementing them and
+drifting. (Webhook delivery does not use it yet: its URL is validated when the
+subscription is saved, not re-pinned at delivery time.)
 
 The core defence is closing the DNS-rebinding TOCTOU window. A naive client that
 validates ``example.com`` and then reconnects by hostname resolves DNS a second
@@ -27,11 +29,12 @@ non-global (defeats split-horizon DNS that returns a public A record to the
 validator and a private one to the connector); the pin then targets one of the
 validated answers.
 
-The caller still owns the client: this module only decides *where* to connect
-and *what identity* to present. Callers MUST construct their ``httpx`` client
-with ``trust_env=False`` (an environment proxy could route past this local DNS
-check) and ``follow_redirects=False`` (each hop must be re-validated and
-re-pinned, never followed blindly) - see :func:`build_client`.
+:func:`validate_and_pin` decides *where* to connect and *what identity* to
+present; :func:`build_client` returns the only client to send it with:
+``trust_env=False`` (an environment proxy could route past this local DNS
+check), ``follow_redirects=False`` (each hop must be re-validated and
+re-pinned, never followed blindly) and a wall-clock deadline on every socket
+operation.
 """
 
 from __future__ import annotations
@@ -149,7 +152,9 @@ def validate_and_pin(url: str, *, allow_loopback: bool = False) -> PinnedTarget:
     addresses = _resolve(host, port or default_port)
     for addr in addresses:
         if not is_public_address(addr, allow_loopback=allow_loopback):
-            raise SsrfError(f"host {host!r} resolves to non-public address {addr}")
+            # The address itself stays out of the message: it can name
+            # internal infrastructure, and callers pass this text on.
+            raise SsrfError(f"host {host!r} resolves to a non-public address")
 
     try:
         ipaddress.ip_address(host)
@@ -171,7 +176,7 @@ def validate_and_pin(url: str, *, allow_loopback: bool = False) -> PinnedTarget:
     )
 
 
-def build_client(*, timeout: float, deadline: float | None = None) -> httpx.Client:
+def build_client(*, timeout: float, deadline: float) -> httpx.Client:
     """An ``httpx.Client`` hardened for SSRF-guarded requests.
 
     ``trust_env=False`` so an environment proxy cannot route past the local DNS
@@ -181,14 +186,13 @@ def build_client(*, timeout: float, deadline: float | None = None) -> httpx.Clie
 
     ``timeout`` bounds each socket operation, not the request: a server that
     sends one byte just inside it, or an endless run of ``100 Continue``
-    responses, keeps a request alive indefinitely. Pass ``deadline`` (a
-    :func:`time.monotonic` value) to bound the whole exchange as well: every
-    connect, TLS handshake, read and write is then capped at the time left, and
-    fails with a timeout once it has run out, wherever in the response the
-    server stalls (status line, headers, body, chunk trailers).
+    responses, keeps a request alive indefinitely. ``deadline`` (a
+    :func:`time.monotonic` value) bounds the whole exchange: every connect, TLS
+    handshake, read and write is capped at the time left, and fails with a
+    timeout once it has run out, wherever in the response the server stalls
+    (status line, headers, body, chunk trailers). It is required because every
+    URL fetched through this client is chosen by someone else.
     """
-    if deadline is None:
-        return httpx.Client(timeout=timeout, trust_env=False, follow_redirects=False)
     pool = httpcore.ConnectionPool(
         ssl_context=httpx.create_ssl_context(trust_env=False),
         network_backend=_DeadlineBackend(httpcore.SyncBackend(), deadline),
