@@ -122,9 +122,10 @@ SESSION_SECRET_KEY=<a long random value>
 ```
 
 Add `https://your-deployment.example.com/oauth/workos/callback` as a redirect
-URI in the WorkOS dashboard. Outside development the server refuses to start in
-this mode without a real `SESSION_SECRET_KEY` and `MCP_PUBLIC_URL`. Run
-`make db_migrate` for the token tables. The protected-resource and
+URI in the WorkOS dashboard. The server refuses to start in this mode without
+`WORKOS_CLIENT_ID` and `WORKOS_API_KEY`, and outside development also without a
+real `SESSION_SECRET_KEY` and `MCP_PUBLIC_URL`. Run `make db_migrate` for the
+token tables; expired codes and tokens are deleted hourly. The protected-resource and
 authorization-server metadata then point at this origin, and `/mcp` accepts only
 tokens this server issued (plus `X-API-KEY`).
 
