@@ -1,0 +1,70 @@
+---
+title: Codex
+description: Add your server to the Codex CLI with `codex mcp add` or config.toml
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Codex (OpenAI's coding agent CLI and IDE extension) connects to your server's
+**streamable-HTTP** endpoint at `/mcp`. Config lives in `~/.codex/config.toml`
+(or `.codex/config.toml` in a trusted project).
+
+## Add the server
+
+<Tabs items={['OAuth', 'API key']} groupId="mcp-auth">
+<Tab value="OAuth">
+
+```bash
+codex mcp add mymcp --url https://YOUR-DEPLOYMENT/mcp
+codex mcp login mymcp
+```
+
+`login` opens the browser for consent. Needs [OAuth 2.1](/docs/mcp/oauth)
+configured on the deployment.
+
+</Tab>
+<Tab value="API key">
+
+The server reads API keys from the `X-API-KEY` header, so map it from an env
+var in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.mymcp]
+url = "https://YOUR-DEPLOYMENT/mcp"
+env_http_headers = { "X-API-KEY" = "MYMCP_API_KEY" }
+```
+
+```bash
+export MYMCP_API_KEY=sk_...
+```
+
+Codex reads the variable at launch, so set it in the shell you start Codex from.
+
+</Tab>
+</Tabs>
+
+<Callout type="warn">
+Don't use `--bearer-token-env-var` with an `sk_` key: it sends
+`Authorization: Bearer`, which this server treats as a JWT/OAuth token, not an
+API key.
+</Callout>
+
+## Verify
+
+```bash
+codex mcp list
+```
+
+Inside a session, `/mcp` lists the server's tools.
+
+## Troubleshooting
+
+- **401 (API key)**: `MYMCP_API_KEY` is unset in this shell, or the key was revoked.
+- **Already exists**: `codex mcp remove mymcp`, then add again.
+- **MCP Apps**: Codex does not render `ui://` apps; tools fall back to their
+  headless output.
+
+## Related
+
+- [Codex: MCP](https://developers.openai.com/codex/mcp)
+- [Setup](/docs/mcp/setup) - stdio (`mymcp-mcp`) for local dev

@@ -20,7 +20,13 @@ from api_server.idempotency import (
 )
 from db.base import Base
 from db.models.idempotency_keys import IdempotencyRecord
-from services import ServiceEntry, discover_services, get_registry, service
+from services import (
+    InvalidArgument,
+    ServiceEntry,
+    discover_services,
+    get_registry,
+    service,
+)
 from tests.test_template import TestTemplate
 
 # Every registered service that mutates state (create/charge/send/delete/
@@ -239,6 +245,25 @@ class TestExecuteIdempotent(TestTemplate):
         assert exc.value.status_code == 402
 
         # Claim was released: a retry with the same key runs compute again.
+        counter = {"n": 0}
+        result = self._run("k1", {"a": 1}, counter)
+        assert result.value == 1
+        assert counter["n"] == 1
+
+    def test_invalid_argument_releases_claim(self):
+        # A service rejecting its arguments does so before any side effect.
+        def _compute_fail():
+            raise InvalidArgument("bad argument")
+
+        with pytest.raises(InvalidArgument):
+            execute_idempotent(
+                request=_request("k1"),
+                user_id="u1",
+                route="demo",
+                request_payload={"a": 1},
+                compute=_compute_fail,
+            )
+
         counter = {"n": 0}
         result = self._run("k1", {"a": 1}, counter)
         assert result.value == 1

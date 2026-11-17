@@ -1,0 +1,303 @@
+"""Shared SSRF guard: resolve a URL's host, reject non-global addresses, and
+pin the connection to a validated IP.
+
+Every outbound fetch of a client- or attacker-chosen URL goes through here:
+remote email images (:mod:`services.image_proxy`) and OAuth client metadata
+documents (:mod:`api_server.oauth.cimd`). One hardened resolve-then-pin path
+and one deadline-bound client, instead of each caller re-implementing them and
+drifting. (Webhook delivery does not use it yet: its URL is validated when the
+subscription is saved, not re-pinned at delivery time.)
+
+The core defence is closing the DNS-rebinding TOCTOU window. A naive client that
+validates ``example.com`` and then reconnects by hostname resolves DNS a second
+time, so an attacker who flips the record to ``169.254.169.254`` (cloud
+metadata), ``127.0.0.1``, or an RFC1918 range between the two lookups lands the
+socket on internal infrastructure. Here the host is resolved exactly once; every
+answer must pass the allowlist; and the request is rewritten to target one
+validated IP with the original hostname carried in the ``Host`` header and TLS
+SNI - so the IP that passed validation is the IP actually connected to.
+
+Allowlist, not blocklist: an address passes only if
+``ipaddress.ip_address(...).is_global`` is True. That is strictly safer than
+enumerating bad ranges - one predicate rejects loopback, RFC1918 private,
+CGNAT / shared address space (100.64/10), link-local (169.254/16, fe80::/10),
+unique-local IPv6 (fc00::/7), multicast, and reserved ranges, so a range an
+enumerated blocklist forgot cannot slip through. Handles IPv4 and IPv6.
+
+A hostname resolving to MULTIPLE addresses is rejected if ANY answer is
+non-global (defeats split-horizon DNS that returns a public A record to the
+validator and a private one to the connector); the pin then targets one of the
+validated answers.
+
+:func:`validate_and_pin` decides *where* to connect and *what identity* to
+present; :func:`build_client` returns the only client to send it with:
+``trust_env=False`` (an environment proxy could route past this local DNS
+check), ``follow_redirects=False`` (each hop must be re-validated and
+re-pinned, never followed blindly) and a wall-clock deadline on every socket
+operation.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import socket
+import ssl
+import time
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from typing import Any
+from urllib.parse import urlparse
+
+import httpcore
+import httpx
+
+_IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+_ALLOWED_SCHEMES = ("http", "https")
+
+
+class SsrfError(ValueError):
+    """Raised when a URL is rejected by the SSRF guard.
+
+    Covers an unsupported scheme, a missing/invalid host or port, a host that
+    cannot be resolved, and - the security-critical case - a host that resolves
+    to any non-global address.
+    """
+
+
+@dataclass(frozen=True)
+class PinnedTarget:
+    """A validated request target with the connection pinned to a resolved IP.
+
+    ``url`` points at the validated IP; ``headers`` carries the original ``Host``
+    so virtual-hosted servers still route correctly; ``extensions`` sets
+    ``sni_hostname`` for https so the TLS handshake and certificate hostname
+    verification still run against the real hostname (httpcore uses
+    ``sni_hostname`` for both). For an IP-literal host there is nothing to pin:
+    ``url`` is returned unchanged and ``headers`` / ``extensions`` are empty.
+    """
+
+    url: str
+    headers: dict[str, str] = field(default_factory=dict)
+    extensions: dict[str, str] = field(default_factory=dict)
+
+
+def _resolve(host: str, port: int) -> list[_IPAddress]:
+    """Resolve ``host`` to every candidate address, or raise :class:`SsrfError`."""
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, OSError) as exc:
+        raise SsrfError(f"cannot resolve host {host!r}") from exc
+    if not infos:
+        raise SsrfError(f"cannot resolve host {host!r}")
+    addresses: list[_IPAddress] = []
+    for info in infos:
+        addr = str(info[4][0]).split("%")[0]  # strip IPv6 scope id
+        addresses.append(ipaddress.ip_address(addr))
+    return addresses
+
+
+# IPv6 ranges that carry or translate to an IPv4 address and that ``is_global``
+# reports as global on some Python versions: NAT64 (RFC 6052 / RFC 8215) and the
+# deprecated IPv4-compatible block. On a NAT64 network, 64:ff9b::7f00:1 reaches
+# 127.0.0.1, so these are refused outright.
+_TRANSLATED_IPV6 = (
+    ipaddress.IPv6Network("64:ff9b::/96"),
+    ipaddress.IPv6Network("64:ff9b:1::/48"),
+    ipaddress.IPv6Network("::/96"),
+)
+
+
+def is_public_address(addr: _IPAddress, *, allow_loopback: bool = False) -> bool:
+    """True if ``addr`` may be connected to under the allowlist.
+
+    Public means ``is_global``. ``allow_loopback`` additionally permits loopback
+    (127.0.0.0/8, ::1) for local development, and nothing else. An IPv6 address
+    that embeds an IPv4 address (IPv4-mapped, 6to4, Teredo) must also pass on
+    that IPv4 address, and NAT64 / IPv4-compatible addresses are refused.
+    """
+    if allow_loopback and addr.is_loopback:
+        return True
+    if isinstance(addr, ipaddress.IPv6Address):
+        if any(addr in net for net in _TRANSLATED_IPV6):
+            return False
+        embedded = [addr.ipv4_mapped, addr.sixtofour]
+        if addr.teredo:
+            embedded.extend(addr.teredo)
+        if any(v4 is not None and not v4.is_global for v4 in embedded):
+            return False
+    return addr.is_global
+
+
+def validate_and_pin(url: str, *, allow_loopback: bool = False) -> PinnedTarget:
+    """Validate ``url`` and pin it to one resolved, allowlisted IP.
+
+    Resolves the host once, requires every answer to satisfy
+    :func:`is_public_address`, then rewrites the URL to target the first
+    validated IP while preserving the hostname in ``Host`` + SNI. IP-literal
+    hosts are validated and passed through unchanged.
+
+    Raises :class:`SsrfError` on any rejection.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        raise SsrfError(f"unsupported URL scheme: {parsed.scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise SsrfError("URL has no host")
+    try:
+        port = parsed.port  # raises ValueError on e.g. "https://h:abc/"
+    except ValueError as exc:
+        raise SsrfError(f"invalid port in URL {url!r}") from exc
+
+    default_port = 80 if parsed.scheme == "http" else 443
+    addresses = _resolve(host, port or default_port)
+    for addr in addresses:
+        if not is_public_address(addr, allow_loopback=allow_loopback):
+            # The address itself stays out of the message: it can name
+            # internal infrastructure, and callers pass this text on.
+            raise SsrfError(f"host {host!r} resolves to a non-public address")
+
+    try:
+        ipaddress.ip_address(host)
+        # Host is already an IP literal (validated above): nothing to pin.
+        return PinnedTarget(url=url)
+    except ValueError:
+        pass
+
+    ip = str(addresses[0])
+    ip_netloc = f"[{ip}]" if ":" in ip else ip
+    if port:
+        ip_netloc += f":{port}"
+    pinned = parsed._replace(netloc=ip_netloc).geturl()
+    host_header = host if not port else f"{host}:{port}"
+    # sni_hostname keeps cert verification pointed at the real host under https.
+    extensions = {"sni_hostname": host} if parsed.scheme == "https" else {}
+    return PinnedTarget(
+        url=pinned, headers={"Host": host_header}, extensions=extensions
+    )
+
+
+def build_client(*, timeout: float, deadline: float) -> httpx.Client:
+    """An ``httpx.Client`` hardened for SSRF-guarded requests.
+
+    ``trust_env=False`` so an environment proxy cannot route past the local DNS
+    validation; ``follow_redirects=False`` so a 3xx to an internal address is
+    never followed automatically (the caller re-validates + re-pins each hop, or
+    treats the redirect as a failure).
+
+    ``timeout`` bounds each socket operation, not the request: a server that
+    sends one byte just inside it, or an endless run of ``100 Continue``
+    responses, keeps a request alive indefinitely. ``deadline`` (a
+    :func:`time.monotonic` value) bounds the whole exchange: every connect, TLS
+    handshake, read and write is capped at the time left, and fails with a
+    timeout once it has run out, wherever in the response the server stalls
+    (status line, headers, body, chunk trailers). It is required because every
+    URL fetched through this client is chosen by someone else.
+    """
+    return httpx.Client(
+        timeout=timeout,
+        trust_env=False,
+        follow_redirects=False,
+        transport=_DeadlineTransport(deadline),
+    )
+
+
+class _DeadlineTransport(httpx.HTTPTransport):
+    """httpx's own transport over a network backend that obeys ``deadline``.
+
+    ``HTTPTransport`` accepts no network backend, so the pool it builds is
+    replaced by one over :class:`_DeadlineBackend`. Everything else - request
+    translation and the httpcore-to-httpx exception mapping - stays httpx's
+    own, so a deadline hit surfaces as the usual ``httpx.ReadTimeout`` /
+    ``ConnectTimeout`` / ``WriteTimeout``. ``_pool`` is private to httpx;
+    ``tests/test_ssrf_guard.py`` pins that the swap still takes effect.
+    """
+
+    def __init__(self, deadline: float) -> None:
+        super().__init__(trust_env=False)
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(trust_env=False),
+            network_backend=_DeadlineBackend(httpcore.SyncBackend(), deadline),
+        )
+
+
+def _time_left(deadline: float, timeout: float | None, exc: type[Exception]) -> float:
+    """The timeout for one operation: ``timeout`` capped at the time left."""
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise exc("request deadline exceeded")
+    return left if timeout is None else min(timeout, left)
+
+
+class _DeadlineStream(httpcore.NetworkStream):
+    """A network stream whose every operation is capped at a shared deadline."""
+
+    def __init__(self, stream: httpcore.NetworkStream, deadline: float) -> None:
+        self._stream = stream
+        self._deadline = deadline
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        timeout = _time_left(self._deadline, timeout, httpcore.ReadTimeout)
+        return self._stream.read(max_bytes, timeout)
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        timeout = _time_left(self._deadline, timeout, httpcore.WriteTimeout)
+        self._stream.write(buffer, timeout)
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def start_tls(
+        self,
+        ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
+        timeout = _time_left(self._deadline, timeout, httpcore.ConnectTimeout)
+        stream = self._stream.start_tls(ssl_context, server_hostname, timeout)
+        return _DeadlineStream(stream, self._deadline)
+
+    def get_extra_info(self, info: str) -> Any:
+        return self._stream.get_extra_info(info)
+
+
+# httpcore's socket-option type (``httpcore._backends.base.SOCKET_OPTION``),
+# restated so the overrides below need no private import.
+_SocketOption = (
+    tuple[int, int, int]
+    | tuple[int, int, bytes | bytearray]
+    | tuple[int, int, None, int]
+)
+
+
+class _DeadlineBackend(httpcore.NetworkBackend):
+    """Wraps an httpcore backend so every connection it opens obeys ``deadline``."""
+
+    def __init__(self, backend: httpcore.NetworkBackend, deadline: float) -> None:
+        self._backend = backend
+        self._deadline = deadline
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[_SocketOption] | None = None,
+    ) -> httpcore.NetworkStream:
+        timeout = _time_left(self._deadline, timeout, httpcore.ConnectTimeout)
+        stream = self._backend.connect_tcp(
+            host, port, timeout, local_address, socket_options
+        )
+        return _DeadlineStream(stream, self._deadline)
+
+    def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[_SocketOption] | None = None,
+    ) -> httpcore.NetworkStream:
+        raise httpcore.ConnectError("unix sockets are not allowed")
+
+    def sleep(self, seconds: float) -> None:
+        self._backend.sleep(seconds)

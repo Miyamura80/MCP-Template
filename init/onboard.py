@@ -1477,7 +1477,12 @@ def _replace_cli_name(old_name: str, new_name: str) -> list[str]:
         ),
         (
             PROJECT_ROOT / "mcp_server" / "server.py",
-            [(f'FastMCP("{old_name}")', f'FastMCP("{new_name}")')],
+            [
+                (
+                    f'_TemplateMCPServer(\n    "{old_name}",',
+                    f'_TemplateMCPServer(\n    "{new_name}",',
+                )
+            ],
         ),
         (
             PROJECT_ROOT / "Makefile",

@@ -25,7 +25,28 @@ class ServiceEntry:
     asset: str = "USDC"
 
 
-class ConnectRequiredError(Exception):
+class ModelFacingError(Exception):
+    """An error whose text is written for the model to read and act on.
+
+    The MCP transport passes ``str(exc)`` of these (and only these) through to
+    the client; every other exception reaches it as a bare ``Error executing
+    tool <name>`` (see ``mcp_server/_tool_errors.py``). So the message must be
+    first-party text: say what went wrong and what to do next, and never
+    interpolate a third-party exception's text (an HTTP client, parser or
+    database error may carry URLs, paths, DSNs or response bodies).
+    """
+
+
+class InvalidArgument(ModelFacingError, ValueError):  # noqa: N818 - name shared with the sibling MCP repos
+    """A service rejected an argument; the caller's mistake to read and correct.
+
+    Subclasses ``ValueError`` so existing ``except ValueError`` callers keep
+    working. Raised before any side effect, so the REST transport maps it to
+    400 and releases the ``Idempotency-Key`` claim for a clean retry.
+    """
+
+
+class ConnectRequiredError(ModelFacingError):
     """A service call requires the user to first complete an external connect flow.
 
     Transport-agnostic contract: each integration that links a third-party

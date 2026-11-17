@@ -217,3 +217,14 @@ async def attachment_too_large_handler(request: Request, exc: Exception) -> Resp
     """
     request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
     return _build_error_response(413, str(exc), request_id)
+
+
+async def invalid_argument_handler(request: Request, exc: Exception) -> Response:
+    """Map a service's ``InvalidArgument`` to 400 Bad Request.
+
+    The service rejected the caller's arguments with a message written for the
+    caller (``services.ModelFacingError``), so it is a client error carrying
+    that message, not the generic 500 an uncaught exception becomes.
+    """
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
+    return _build_error_response(400, str(exc), request_id)
