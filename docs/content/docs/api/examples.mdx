@@ -57,7 +57,7 @@ curl -sS "$MYMCP_API/health"
 
 ```bash
 curl -sS "$MYMCP_API/api/v1/auth/me" \
-  -H "Authorization: Bearer $MYMCP_API_KEY"
+  -H "X-API-KEY: $MYMCP_API_KEY"
 ```
 
 ```json
@@ -78,7 +78,7 @@ the body. Nothing about the route changes from one tool to the next.
 
 ```bash
 curl -sS -X POST "$MYMCP_API/api/v1/services/greet" \
-  -H "Authorization: Bearer $MYMCP_API_KEY" \
+  -H "X-API-KEY: $MYMCP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "Alice", "shout": true}'
 ```
@@ -101,7 +101,7 @@ tool - drift between transports means someone bypassed the registry.
 
 ```bash
 curl -sS -X POST "$MYMCP_API/api/v1/services/greet" \
-  -H "Authorization: Bearer $MYMCP_API_KEY" \
+  -H "X-API-KEY: $MYMCP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "Alice", "shout": true}'
 ```
@@ -142,7 +142,7 @@ API = os.environ["MYMCP_API"]
 KEY = os.environ["MYMCP_API_KEY"]
 NAMES = ["Alice", "Bob", "Carol"]
 
-with httpx.Client(base_url=API, headers={"Authorization": f"Bearer {KEY}"}) as client:
+with httpx.Client(base_url=API, headers={"X-API-KEY": KEY}) as client:
     for name in NAMES:
         resp = client.post(
             "/api/v1/services/greet",
@@ -160,7 +160,7 @@ a change of endpoint name and body - not of structure.
 
 ```bash
 curl -sS -X POST "$MYMCP_API/api/v1/services/config_get" \
-  -H "Authorization: Bearer $MYMCP_API_KEY" \
+  -H "X-API-KEY: $MYMCP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"key": "llm_config.cache_enabled"}'
 ```
@@ -174,7 +174,7 @@ requires an `Idempotency-Key`:
 
 ```bash
 curl -sS -X POST "$MYMCP_API/api/v1/services/config_set" \
-  -H "Authorization: Bearer $MYMCP_API_KEY" \
+  -H "X-API-KEY: $MYMCP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{"key": "logging.verbose", "value": "true"}'
