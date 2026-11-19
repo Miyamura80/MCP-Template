@@ -123,7 +123,7 @@ class OAuthServerCase(TestTemplate):
             p.stop()
         cimd.clear_cache()
 
-    def _fetch(self, client_id: str) -> bytes:
+    def _fetch(self, client_id: str, deadline: float | None = None) -> bytes:
         assert client_id == CLIENT_ID
         return self.document
 
