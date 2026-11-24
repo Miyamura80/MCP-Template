@@ -11,6 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from api_server.dashboard import pages as dashboard_pages
+from api_server.dashboard import session as dashboard_session
 from api_server.middleware.error_handler import (
     ErrorHandlerMiddleware,
     RequestIdMiddleware,
@@ -187,6 +189,9 @@ app.include_router(webhooks.router)
 app.include_router(google_webhooks.router)
 app.include_router(agentic_payments.router)
 app.include_router(ask.router)
+app.include_router(dashboard_session.router)
+app.include_router(dashboard_pages.pages)
+app.include_router(dashboard_pages.api)
 
 # --- Built-in OAuth server for MCP clients (opt-in) ------------------------
 # Only with MCP_AUTH_MODE=self (api_server/oauth/). Registered before the MCP

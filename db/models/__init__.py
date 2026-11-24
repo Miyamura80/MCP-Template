@@ -2,6 +2,7 @@
 
 from db.base import Base
 from db.models.api_keys import APIKey
+from db.models.approvals import ApprovalSetting, PendingAction
 from db.models.feedback import AgentFeedback
 from db.models.gmail_push import ProcessedPubsubMessage
 from db.models.idempotency_keys import IdempotencyRecord
@@ -20,6 +21,7 @@ from db.models.webhooks import WebhookDelivery, WebhookEvent, WebhookSubscriptio
 __all__ = [
     "APIKey",
     "AgentFeedback",
+    "ApprovalSetting",
     "Base",
     "IdempotencyRecord",
     "OAuthCode",
@@ -27,6 +29,7 @@ __all__ = [
     "OAuthToken",
     "PaymentSettlement",
     "PaymentStatus",
+    "PendingAction",
     "ProcessedPubsubMessage",
     "Profile",
     "SubscriptionStatus",
