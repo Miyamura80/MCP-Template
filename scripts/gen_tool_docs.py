@@ -145,6 +145,14 @@ GROUPS: tuple[Group, ...] = (
         ),
         tools=("feedback",),
     ),
+    Group(
+        heading="Docs",
+        intro=(
+            "Keyword search over these docs, so an agent can look things up "
+            "instead of\nguessing."
+        ),
+        tools=("search_docs",),
+    ),
 )
 
 
