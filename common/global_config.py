@@ -269,10 +269,9 @@ class Config(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Agent feedback sinks (optional): Slack incoming-webhook URL, and a Linear
-    # personal API key + team id (both needed to enable the Linear sink)
+    # personal API key (the Linear sink also needs feedback.linear.team_id)
     FEEDBACK_SLACK_WEBHOOK_URL: str | None = None
-    LINEAR_API_KEY: str | None = None
-    LINEAR_TEAM_ID: str | None = None
+    FEEDBACK_LINEAR_API_KEY: str | None = None
 
     # Redis
     REDIS_URL: str | None = None

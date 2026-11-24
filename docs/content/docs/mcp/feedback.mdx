@@ -13,9 +13,14 @@ skipped; it never fails the agent's call, and the tool result's
 ```
 feedback(...) --> agent_feedback table (always)
               --> Slack   (if FEEDBACK_SLACK_WEBHOOK_URL)
-              --> Linear  (if LINEAR_API_KEY + LINEAR_TEAM_ID)
+              --> Linear  (if FEEDBACK_LINEAR_API_KEY + feedback.linear.team_id)
               --> your own registered sinks
 ```
+
+Sinks run inline, after the row is stored, so the result can say where the
+feedback went. Each sink gets a total budget of `feedback.sink_timeout_seconds`
+(default 3) per submission, so a slow sink delays the call by about that much
+at most.
 
 ## Slack
 
@@ -28,29 +33,32 @@ FEEDBACK_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 
 ## Linear
 
-Set both in `.env`; the sink is off unless both are present:
+Put the personal API key (Linear: Settings > Security & access) in `.env`:
 
 ```bash
-LINEAR_API_KEY=lin_api_...   # personal API key (Settings > Security & access)
-LINEAR_TEAM_ID=...           # UUID of the team that owns the issues
+FEEDBACK_LINEAR_API_KEY=lin_api_...
 ```
 
-The key acts as the user who created it, so a dedicated bot user keeps the
-issues from appearing under a person's name. Optional, in
-`common/global_config.yaml`:
+and the team in `common/global_config.yaml`. The sink is off unless both the
+key and `team_id` are set:
 
 ```yaml
 feedback:
-  linear_label_ids: ["<label uuid>"]   # applied to new issues
-  linear_project_id: "<project uuid>"  # new issues go in this project
+  linear:
+    team_id: "<team uuid>"            # required: the team that owns the issues
+    label_ids: ["<label uuid>"]       # optional: applied to new issues
+    project_id: "<project uuid>"      # optional: new issues go in this project
 ```
+
+The key acts as the user who created it, so a dedicated bot user keeps the
+issues from appearing under a person's name.
 
 ### One issue per problem
 
 A problem is identified by its `category` plus `tool_name`. The sink writes a
 fingerprint token (`agent-feedback-<16 hex>`) as the last line of the issue
 description. On each submission it looks in the team for an issue whose
-description contains that token and whose state is not completed, canceled or
+description ends with that token and whose state is not completed, canceled or
 duplicate:
 
 - **Found:** the report is added to that issue as a comment.
@@ -64,7 +72,9 @@ same moment can, rarely, both create an issue.
 
 Agent-written text is untrusted: the message and context are placed in code
 blocks with backticks neutralised, so they cannot add mentions, links or
-formatting. The original text is kept unchanged in the database.
+formatting, and any `agent-feedback-` they contain is altered so an agent
+cannot plant another problem's token and redirect its reports. The original
+text is kept unchanged in the database.
 
 ## Your own sink
 
@@ -72,3 +82,27 @@ Implement `FeedbackSink` (a `name` and a `send(record)` that raises on failure)
 and register it at import time with `register_feedback_sink()` from
 `services/feedback_svc.py`. Registering a sink named `slack` or `linear`
 replaces the built-in one.
+
+```python
+from services.feedback_sinks import FeedbackRecord, SinkClient, SinkError
+from services.feedback_svc import register_feedback_sink
+
+
+class JiraSink:
+    name = "jira"
+
+    def send(self, record: FeedbackRecord) -> None:
+        with SinkClient() as client:  # one HTTP client + the time budget
+            body = client.post_json(JIRA_URL, {...}, headers={"Authorization": KEY})
+        if not body:
+            raise SinkError("Jira returned nothing")
+
+
+register_feedback_sink(JiraSink())
+```
+
+`SinkClient.post_json` returns the parsed JSON body and raises `SinkError` on a
+transport error, a non-2xx status or a spent budget, with a message that never
+includes the URL or headers. Failures are logged as the exception type and
+message only, without a traceback (whose frame locals could hold your
+secrets), so keep your own exception messages free of secrets too.

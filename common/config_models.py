@@ -296,18 +296,29 @@ class AskConfig(BaseModel):
     rate_limit_per_minute: int = 20
 
 
+class LinearFeedbackConfig(BaseModel):
+    """Linear feedback sink settings (the API key is a secret, in ``.env``).
+
+    The sink is on when ``FEEDBACK_LINEAR_API_KEY`` and ``team_id`` are both
+    set. ``label_ids`` and ``project_id`` are applied to issues it creates.
+    """
+
+    team_id: str | None = None
+    label_ids: list[str] = Field(default_factory=list)
+    project_id: str | None = None
+
+
 class FeedbackConfig(BaseModel):
     """Agent ``feedback`` tool configuration.
 
-    Submissions are always stored in the ``agent_feedback`` table; the Slack
-    sink is enabled by setting ``FEEDBACK_SLACK_WEBHOOK_URL`` in ``.env``, the
-    Linear sink by setting ``LINEAR_API_KEY`` and ``LINEAR_TEAM_ID``. The
-    ``linear_*`` fields are optional extras applied to issues it creates.
+    Submissions are always stored in the ``agent_feedback`` table. The Slack
+    sink is enabled by ``FEEDBACK_SLACK_WEBHOOK_URL`` in ``.env``; the Linear
+    sink by ``FEEDBACK_LINEAR_API_KEY`` plus ``linear.team_id``.
+    ``sink_timeout_seconds`` is each sink's total budget per submission.
     """
 
-    sink_timeout_seconds: float = 3.0
-    linear_label_ids: list[str] = Field(default_factory=list)
-    linear_project_id: str | None = None
+    sink_timeout_seconds: float = Field(default=3.0, gt=0)
+    linear: LinearFeedbackConfig = Field(default_factory=LinearFeedbackConfig)
 
 
 class ApprovalsConfig(BaseModel):
