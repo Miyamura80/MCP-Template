@@ -12,7 +12,6 @@ every grant a user has, which AuthKit-issued MCP tokens cannot do.
     storage.py    hashed code/token rows, rotation, ``revoke_user_grants``
     flow.py       consent page and WorkOS sign-in (browser leg)
     cimd.py       Client ID Metadata Document fetch and validation
-    fetch_slots.py  per-host and global limits on those fetches
     signing.py    signed, short-lived values carried through the browser
 """
 

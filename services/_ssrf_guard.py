@@ -80,6 +80,11 @@ class PinnedTarget:
     headers: dict[str, str] = field(default_factory=dict)
     extensions: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def address(self) -> str:
+        """The IP address ``url`` connects to, without IPv6 brackets."""
+        return urlparse(self.url).hostname or ""
+
 
 def _resolve(host: str, port: int) -> list[_IPAddress]:
     """Resolve ``host`` to every candidate address, or raise :class:`SsrfError`."""
