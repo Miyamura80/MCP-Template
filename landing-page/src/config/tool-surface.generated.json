@@ -1,5 +1,9 @@
 [
   {
+    "name": "feedback",
+    "description": "Report a problem with this server so its developers can fix it. Call this when you get stuck: a tool errors in a way you cannot recover from, a description or doc misled you, or a capability you need is missing. Describe what you tried, what happened and what you expected; never include secrets or the user's private data."
+  },
+  {
     "name": "gmail_add_attachment",
     "description": "Attach one file to an existing Gmail draft and return the draft's full attachment list (each with attachment_id, filename, mime_type, size_bytes). Only the attachments change - body, subject, and recipients are preserved exactly. Pass the file as 'attachment' (filename + mime_type + base64 data_base64)."
   },
