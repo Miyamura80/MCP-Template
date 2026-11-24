@@ -11,7 +11,7 @@ Enabled by setting ``WORKOS_AUTHKIT_DOMAIN`` (the AuthKit issuer URL, e.g.
 indicator configured in the WorkOS dashboard.
 """
 
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import jwt
 from jwt import PyJWKClient
@@ -38,6 +38,28 @@ def mcp_resource_url() -> str:
     if configured:
         return configured.rstrip("/")
     return f"http://localhost:{global_config.server.port}/mcp"
+
+
+def strip_resource_flags(resource: str) -> str:
+    """Drop the query, fragment and trailing slash from a resource URI.
+
+    Clients connect to ``/mcp?dangerous_tools=false`` and, following RFC 8707,
+    send that full URL as the ``resource`` they want a token for. The query is
+    per-connection options (``src/utils/mcp_url_flags.py``), not a different
+    resource, so audience checks compare the bare URL. Without this, adding a
+    flag to the URL would invalidate every token.
+    """
+    parts = urlsplit(resource.strip())
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")).rstrip("/")
+
+
+def audience_matches(aud: object) -> bool:
+    """Whether a JWT ``aud`` claim (string or list) names this MCP server."""
+    canonical = strip_resource_flags(mcp_resource_url())
+    values = [aud] if isinstance(aud, str) else aud if isinstance(aud, list) else []
+    return any(
+        isinstance(v, str) and strip_resource_flags(v) == canonical for v in values
+    )
 
 
 def resource_metadata_url() -> str:
@@ -76,10 +98,15 @@ def verify_authkit_token(token: str) -> AuthKitUser | None:
             token,
             signing_key.key,
             algorithms=["RS256"],
-            audience=mcp_resource_url(),
             issuer=[domain, domain + "/"],
+            # Audience is checked below instead: an ``aud`` minted for
+            # ``/mcp?flags`` must still match, and PyJWT compares exactly.
+            options={"verify_aud": False, "require": ["aud"]},
         )
     except jwt.PyJWTError:
+        return None
+
+    if not audience_matches(payload.get("aud")):
         return None
 
     user_id = payload.get("sub")

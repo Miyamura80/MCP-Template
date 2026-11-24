@@ -31,6 +31,12 @@ from common import global_config
 from db.engine import use_db_session
 from src.payments.request_context import reset_payment_header, set_payment_header
 from src.utils.current_user import reset_current_user, set_current_user
+from src.utils.mcp_url_flags import (
+    InvalidUrlFlagError,
+    parse_url_flags,
+    reset_url_flags,
+    set_url_flags,
+)
 
 _MCP_PATH = "/mcp"
 
@@ -63,13 +69,23 @@ class MCPAuthMiddleware:
             await _send_unauthorized(send)
             return
 
+        # Per-connection options from the MCP URL (``?dangerous_tools=false``).
+        # Parsed after auth so an unauthenticated caller learns nothing new.
+        try:
+            flags = parse_url_flags(scope.get("query_string", b""))
+        except InvalidUrlFlagError as exc:
+            await _send_json_error(send, 400, -32602, str(exc))
+            return
+
         # Lift the X-PAYMENT header off the scope so the paywall can read it at
         # the tool chokepoint (MCP tool calls have no Request object).
         token = set_current_user(user)
         payment_token = set_payment_header(_payment_header_value(scope))
+        flags_token = set_url_flags(flags)
         try:
             await self.app(scope, receive, send)
         finally:
+            reset_url_flags(flags_token)
             reset_payment_header(payment_token)
             reset_current_user(token)
 
@@ -154,20 +170,32 @@ def _www_authenticate_value() -> bytes:
 
 
 async def _send_unauthorized(send: Send) -> None:
+    await _send_json_error(
+        send,
+        401,
+        -32001,
+        "Authentication required",
+        extra_headers=[(b"www-authenticate", _www_authenticate_value())],
+    )
+
+
+async def _send_json_error(
+    send: Send,
+    status: int,
+    code: int,
+    message: str,
+    extra_headers: list[tuple[bytes, bytes]] | None = None,
+) -> None:
     body = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "error": {"code": -32001, "message": "Authentication required"},
-            "id": None,
-        }
+        {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": None}
     ).encode()
     await send(
         {
             "type": "http.response.start",
-            "status": 401,
+            "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
-                (b"www-authenticate", _www_authenticate_value()),
+                *(extra_headers or []),
                 (b"content-length", str(len(body)).encode()),
             ],
         }

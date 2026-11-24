@@ -5,7 +5,15 @@ import pkgutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal, get_args
+
+# How much harm a call can do, coarsest first. ``read`` has no side effects;
+# ``write`` changes state the user can see and undo (a draft, a label);
+# ``dangerous`` is hard or impossible to undo, or reaches other people (sending
+# mail, deleting, revoking). Transports use it for MCP tool annotations, the
+# ``?dangerous_tools=false`` filter, and (later) approval gating.
+Risk = Literal["read", "write", "dangerous"]
+RISKS: tuple[Risk, ...] = get_args(Risk)
 
 
 @dataclass
@@ -16,6 +24,7 @@ class ServiceEntry:
     output_model: type
     func: Callable[..., Any]
     mutating: bool = False
+    risk: Risk = "read"
     # Sell-side (x402) pricing. ``price`` is the per-call amount as a positive
     # decimal string in units of ``asset`` (e.g. "0.001" USDC); ``None`` means
     # the service is free and stays on the daily-quota path. A priced service is
@@ -102,6 +111,25 @@ def _validate_price(name: str, price: str) -> None:
         )
 
 
+def _resolve_risk(name: str, mutating: bool, risk: Risk | None) -> tuple[bool, Risk]:
+    """Return ``(mutating, risk)`` with the defaults and invariants applied.
+
+    Unset ``risk`` follows ``mutating`` (``write`` or ``read``). ``dangerous``
+    implies ``mutating``, since anything worth gating also needs idempotent
+    retries. ``read`` with ``mutating=True`` is a contradiction and fails at
+    import time rather than advertising a side effect as read-only.
+    """
+    if risk is None:
+        return mutating, "write" if mutating else "read"
+    if risk not in RISKS:
+        raise ValueError(
+            f"@service({name!r}) risk must be one of {RISKS}, got {risk!r}"
+        )
+    if risk == "read" and mutating:
+        raise ValueError(f"@service({name!r}) is mutating, so risk cannot be 'read'")
+    return mutating or risk == "dangerous", risk
+
+
 def service(
     *,
     name: str,
@@ -109,6 +137,7 @@ def service(
     input_model: type,
     output_model: type,
     mutating: bool = False,
+    risk: Risk | None = None,
     price: str | None = None,
     asset: str = "USDC",
 ):
@@ -122,6 +151,12 @@ def service(
     re-executed - the fallback reuses the already-completed ``tool.call()``
     result or propagates the enhancer error. CLI behavior is unchanged.
 
+    ``risk`` ("read", "write" or "dangerous") defaults from ``mutating``. Mark
+    a service ``dangerous`` when its effect is hard to undo or reaches other
+    people (sending, deleting, revoking); that implies ``mutating``. On MCP it
+    sets the tool annotations and lets a client hide the tool with
+    ``/mcp?dangerous_tools=false``.
+
     Set ``price`` (a decimal string like "0.001", in units of ``asset``) to
     sell the tool via the x402 paywall: HTTP and MCP calls must carry a valid
     ``X-PAYMENT`` header, which the server verifies and settles before running
@@ -133,6 +168,7 @@ def service(
     """
     if price is not None:
         _validate_price(name, price)
+    mutating, resolved_risk = _resolve_risk(name, mutating, risk)
 
     def decorator(func):
         _registry.append(
@@ -143,6 +179,7 @@ def service(
                 output_model=output_model,
                 func=func,
                 mutating=mutating,
+                risk=resolved_risk,
                 price=price,
                 asset=asset,
             )
