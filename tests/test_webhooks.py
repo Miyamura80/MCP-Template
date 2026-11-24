@@ -11,7 +11,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from contextlib import contextmanager
+import socket
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from unittest.mock import patch
 
@@ -76,16 +77,33 @@ def _plaintext_encryption():
         yield
 
 
+# A public IP the SSRF allowlist accepts, used to mock DNS for hostname seeds so
+# delivery's resolve-then-pin step succeeds without touching the real network.
+_PUBLIC_IP = "93.184.216.34"
+_PUBLIC_ADDRINFO = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (_PUBLIC_IP, 443))]
+
+
 @contextmanager
-def _mock_http(handler):
-    """Patch the delivery module's httpx.Client to use a MockTransport."""
+def _mock_http(handler, *, addrinfo=_PUBLIC_ADDRINFO):
+    """Patch delivery's httpx.Client + DNS so posts hit a MockTransport.
+
+    The client is now built inside ``services._ssrf_guard.build_client`` and the
+    subscriber host is resolved+pinned there, so both the client factory and the
+    resolver are patched on the guard module. ``addrinfo`` controls what the
+    subscriber hostname resolves to (default: a public IP the allowlist passes).
+    """
     transport = httpx.MockTransport(handler)
     real_client = httpx.Client  # capture before patching to avoid recursion
 
     def factory(*_args, **_kwargs):
         return real_client(transport=transport)
 
-    with patch("services.webhook_delivery_svc.httpx.Client", factory):
+    with ExitStack() as stack:
+        stack.enter_context(patch("services._ssrf_guard.httpx.Client", factory))
+        if addrinfo is not None:
+            stack.enter_context(
+                patch("services._ssrf_guard.socket.getaddrinfo", return_value=addrinfo)
+            )
         yield
 
 
@@ -320,6 +338,43 @@ class TestDelivery(TestTemplate):
                 if next_at.tzinfo is None:
                     next_at = next_at.replace(tzinfo=UTC)
                 assert next_at > before
+
+    def test_delivery_refuses_a_host_rebound_to_an_internal_address(self):
+        # Public at subscribe time, 169.254.169.254 (cloud metadata) now: the
+        # POST must never leave the process, and the delivery is retried.
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200)
+
+        metadata = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 443))
+        ]
+        with (
+            _patch_db(),
+            _plaintext_encryption(),
+            patch.object(global_config, "DEV_ENV", "prod"),
+        ):
+            self._seed()
+            with _mock_http(handler, addrinfo=metadata):
+                counts = drain_due_deliveries()
+        assert requests == []
+        assert counts["retry"] == 1
+
+    def test_delivery_connects_to_the_pinned_address(self):
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200)
+
+        with _patch_db(), _plaintext_encryption():
+            self._seed()
+            with _mock_http(handler):
+                assert drain_due_deliveries()["sent"] == 1
+        assert seen[0].url.host == _PUBLIC_IP
+        assert seen[0].headers["Host"] == "sub.example"
 
     def test_gives_up_at_max_attempts(self):
         def handler(_request: httpx.Request) -> httpx.Response:
