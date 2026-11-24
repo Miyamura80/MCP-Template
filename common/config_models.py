@@ -331,6 +331,13 @@ class EventsConfig(BaseModel):
     max_subscription_ttl_seconds: int = Field(default=604800, gt=0)
     verification_cache_seconds: int = Field(default=86400, ge=0)
     max_subscriptions_per_user: int = Field(default=50, gt=0)
+    # events/stream (push): how often an open stream checks for new events,
+    # the heartbeat when the client asks for none, and how long one stream may
+    # stay open before the server ends it (the client reconnects with its
+    # cursor, so a long-lived request never pins one replica forever).
+    stream_check_ms: int = Field(default=1000, ge=50)
+    stream_heartbeat_ms: int = Field(default=30000, ge=1000)
+    stream_max_seconds: int = Field(default=300, gt=0)
 
 
 class FeaturesConfig(BaseModel):

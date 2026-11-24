@@ -344,7 +344,7 @@ class TestWire(TestTemplate):
             "feedback.received",
             "gmail.message_received",
         }
-        assert types["approval.resolved"]["delivery"] == ["poll", "webhook"]
+        assert types["approval.resolved"]["delivery"] == ["poll", "push", "webhook"]
         assert "tool" in types["approval.resolved"]["inputSchema"]["properties"]
 
     def test_poll_over_the_wire(self):

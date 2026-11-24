@@ -4,9 +4,10 @@
     events/poll         -> events since a cursor, for the authenticated principal
     events/subscribe    -> create or refresh a webhook subscription
     events/unsubscribe  -> remove one
+    events/stream       -> push: a long-lived request that streams events
+                           (``mcp_server/events_stream.py``)
 
-Push delivery (``events/stream``) is not offered, so no type lists ``push``
-and ``listChanged`` is not advertised: the catalog only changes with a deploy.
+``listChanged`` is not advertised: the catalog only changes with a deploy.
 Every method needs an authenticated principal (stdio has none: ``Forbidden``),
 and events are always that principal's own.
 
@@ -28,6 +29,7 @@ from mcp.types import INVALID_PARAMS, PaginatedRequestParams, RequestParams
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from mcp_server.events_stream import StreamParams, stream
 from services import InvalidArgument
 from services.events.catalog import EVENT_TYPES
 from services.events.store import UnknownEventError, poll
@@ -113,6 +115,7 @@ class Events(Extension):
             MethodBinding("events/poll", PollParams, self._poll),
             MethodBinding("events/subscribe", SubscribeParams, self._subscribe),
             MethodBinding("events/unsubscribe", UnsubscribeParams, self._unsubscribe),
+            MethodBinding("events/stream", StreamParams, self._stream),
         ]
 
     async def _list(
@@ -151,6 +154,19 @@ class Events(Extension):
             max_age_ms=params.max_age_ms,
             ttl_ms=params.ttl_ms,
         )
+
+    async def _stream(
+        self, ctx: ServerRequestContext[Any, Any], params: StreamParams
+    ) -> dict[str, Any]:
+        user_id = _principal()
+        try:
+            return await stream(ctx, user_id, params)
+        except UnknownEventError as exc:
+            raise MCPError(
+                NOT_FOUND, str(exc), {"kind": "event", "name": exc.name}
+            ) from exc
+        except InvalidArgument as exc:
+            raise MCPError(INVALID_PARAMS, str(exc)) from exc
 
     async def _unsubscribe(
         self, _ctx: ServerRequestContext[Any, Any], params: UnsubscribeParams

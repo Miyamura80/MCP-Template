@@ -215,6 +215,37 @@ def events_after(
     )
 
 
+def stream_start(
+    user_id: str,
+    name: str,
+    arguments: dict[str, Any],
+    cursor: str | None,
+    max_age_ms: int | None,
+) -> tuple[dict[str, Any], int, bool]:
+    """Validate an ``events/stream`` request: ``(arguments, after, truncated)``."""
+    arguments = event_type(name).validate_arguments(arguments)
+    with use_db_session() as s:
+        cursor_row = s.get(EventCursor, user_id)
+        after, truncated = start_after(s, cursor_row, user_id, name, cursor, max_age_ms)
+    return arguments, after, truncated
+
+
+def stream_next(
+    user_id: str, name: str, arguments: dict[str, Any], after: int
+) -> tuple[list[dict[str, Any]], int]:
+    """The next batch for an open stream, each event carrying its cursor, and
+    the position to continue from (past events the arguments filtered out)."""
+    kind = event_type(name)
+    with use_db_session() as s:
+        rows = events_after(s, user_id, name, after, _SCAN_LIMIT)
+    events = [
+        {**occurrence(r), "cursor": str(r.user_seq)}
+        for r in rows
+        if kind.matches(arguments, r.data)
+    ]
+    return events, rows[-1].user_seq if rows else after
+
+
 def poll(
     user_id: str,
     name: str,
