@@ -215,35 +215,68 @@ def events_after(
     )
 
 
+def _scan(
+    s: Session,
+    kind: EventType,
+    user_id: str,
+    arguments: dict[str, Any],
+    after: int,
+    limit: int,
+) -> tuple[list[EventLog], int, bool]:
+    """The one read behind poll and push: up to ``limit`` matching events after
+    ``after``, the position to continue from, and whether the scan caught up.
+
+    The position moves past rows the arguments filtered out. Once caught up it
+    jumps to the user's head, past their other event types. That is safe
+    because ``head`` is read before the rows: emits are serialized per user,
+    so every seq up to ``head`` had committed and the rows query saw it. Keep
+    that order.
+    """
+    cursor_row = s.get(EventCursor, user_id)
+    head = cursor_row.seq if cursor_row else 0
+    rows = events_after(s, user_id, kind.name, after, _SCAN_LIMIT)
+    matched: list[EventLog] = []
+    position = after
+    for row in rows:
+        if len(matched) == limit:
+            break
+        position = row.user_seq
+        if kind.matches(arguments, row.data):
+            matched.append(row)
+    caught_up = not rows or (position == rows[-1].user_seq and len(rows) < _SCAN_LIMIT)
+    if caught_up:
+        position = max(position, head)
+    return matched, position, caught_up
+
+
 def stream_start(
     user_id: str,
     name: str,
     arguments: dict[str, Any],
     cursor: str | None,
     max_age_ms: int | None,
-) -> tuple[dict[str, Any], int, bool]:
-    """Validate an ``events/stream`` request: ``(arguments, after, truncated)``."""
-    arguments = event_type(name).validate_arguments(arguments)
+) -> tuple[EventType, dict[str, Any], int, bool]:
+    """Validate an ``events/stream`` request: ``(type, arguments, after,
+    truncated)``. Raises before the stream opens, never during it."""
+    kind = event_type(name)
+    arguments = kind.validate_arguments(arguments)
     with use_db_session() as s:
         cursor_row = s.get(EventCursor, user_id)
         after, truncated = start_after(s, cursor_row, user_id, name, cursor, max_age_ms)
-    return arguments, after, truncated
+    return kind, arguments, after, truncated
 
 
 def stream_next(
-    user_id: str, name: str, arguments: dict[str, Any], after: int
-) -> tuple[list[dict[str, Any]], int]:
-    """The next batch for an open stream, each event carrying its cursor, and
-    the position to continue from (past events the arguments filtered out)."""
-    kind = event_type(name)
+    user_id: str, kind: EventType, arguments: dict[str, Any], after: int
+) -> tuple[list[dict[str, Any]], int, bool]:
+    """The next batch for an open stream, each event carrying its cursor; the
+    position to continue from; and whether the stream has caught up."""
     with use_db_session() as s:
-        rows = events_after(s, user_id, name, after, _SCAN_LIMIT)
-    events = [
-        {**occurrence(r), "cursor": str(r.user_seq)}
-        for r in rows
-        if kind.matches(arguments, r.data)
-    ]
-    return events, rows[-1].user_seq if rows else after
+        rows, position, caught_up = _scan(
+            s, kind, user_id, arguments, after, _SCAN_LIMIT
+        )
+        events = [{**occurrence(r), "cursor": str(r.user_seq)} for r in rows]
+    return events, position, caught_up
 
 
 def poll(
@@ -261,33 +294,16 @@ def poll(
     limit = min(max_events or global_config.events.max_poll_events, 1000)
     with use_db_session() as s:
         cursor_row = s.get(EventCursor, user_id)
-        head = cursor_row.seq if cursor_row else 0
         after, truncated = start_after(s, cursor_row, user_id, name, cursor, max_age_ms)
-        rows = events_after(s, user_id, name, after, _SCAN_LIMIT)
-        events: list[dict[str, Any]] = []
-        position = after
-        for row in rows:
-            if len(events) == limit:
-                break
-            position = row.user_seq
-            if kind.matches(arguments, row.data):
-                events.append(occurrence(row))
-        has_more = bool(rows) and (
-            position != rows[-1].user_seq or len(rows) == _SCAN_LIMIT
-        )
-        if not has_more:
-            # Caught up on this name: skip ahead past the user's other event
-            # types. Safe because ``head`` was read before ``rows``: emits are
-            # serialized per user, so every seq up to ``head`` had committed
-            # and the rows query saw it. Keep that order.
-            position = max(position, head)
+        rows, position, caught_up = _scan(s, kind, user_id, arguments, after, limit)
+        events = [occurrence(r) for r in rows]
     return {
         "resultType": "complete",
         "events": events,
         "cursor": str(position),
         "truncated": truncated,
-        "hasMore": has_more,
-        "nextPollMs": 0 if has_more else global_config.events.poll_interval_ms,
+        "hasMore": not caught_up,
+        "nextPollMs": global_config.events.poll_interval_ms if caught_up else 0,
     }
 
 

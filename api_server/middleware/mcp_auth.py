@@ -105,6 +105,15 @@ async def _authenticate_async(scope: Scope) -> AuthenticatedUser | None:
     return await anyio.to_thread.run_sync(lambda: _authenticate(scope))  # ty: ignore[unresolved-attribute]
 
 
+def authenticate_scope(scope: Scope) -> AuthenticatedUser | None:
+    """Authenticate an ASGI scope exactly as the /mcp middleware does.
+
+    Blocking (DB, JWKS). Also used to re-verify the principal of a long-lived
+    ``events/stream`` while it is open (``mcp_server/events_ext.py``).
+    """
+    return _authenticate(scope)
+
+
 def _authenticate(scope: Scope) -> AuthenticatedUser | None:
     headers = {
         k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]

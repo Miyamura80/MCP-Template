@@ -335,9 +335,15 @@ class EventsConfig(BaseModel):
     # the heartbeat when the client asks for none, and how long one stream may
     # stay open before the server ends it (the client reconnects with its
     # cursor, so a long-lived request never pins one replica forever).
-    stream_check_ms: int = Field(default=1000, ge=50)
-    stream_heartbeat_ms: int = Field(default=30000, ge=1000)
-    stream_max_seconds: int = Field(default=300, gt=0)
+    stream_check_ms: int = Field(default=1000, ge=10)
+    stream_heartbeat_ms: int = Field(default=30000, gt=0)
+    # A client's heartbeatMs is clamped into these bounds (spec: the server
+    # honors it within its own bounds). The max stays under common load
+    # balancer idle timeouts (60s and up), so an idle stream isn't cut.
+    stream_heartbeat_min_ms: int = Field(default=1000, gt=0)
+    stream_heartbeat_max_ms: int = Field(default=55000, gt=0)
+    stream_max_seconds: float = Field(default=300, gt=0)
+    max_streams_per_user: int = Field(default=5, gt=0)
 
 
 class FeaturesConfig(BaseModel):
