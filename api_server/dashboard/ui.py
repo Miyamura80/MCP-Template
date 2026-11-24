@@ -54,6 +54,7 @@ def dashboard_page(
     lead: str = "",
     status_code: int = 200,
     narrow: bool = False,
+    form_action: tuple[str, ...] = (),
 ) -> HTMLResponse:
     """A dashboard page: brand bar with tabs, an eyebrow label, a title, the body."""
     head = f"<span class='eyebrow'>{esc(eyebrow)}</span><h1>{esc(title)}</h1>" + (
@@ -65,6 +66,7 @@ def dashboard_page(
         status_code,
         header=_topbar(session, active),
         narrow=narrow,
+        form_action=form_action,
     )
 
 

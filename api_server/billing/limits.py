@@ -9,6 +9,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from api_server.dashboard.links import billing_url
 from common import global_config
 from db.engine import use_db_session
 from db.models.subscription_types import SubscriptionTier
@@ -24,25 +25,33 @@ class LimitStatus:
     tier: str
 
 
-def billing_url(tier: str) -> str:
-    """The dashboard billing page an agent can hand its user at the quota.
+def _quota_exceeded(
+    message: str, *, tier: str, usage: int, limit: int, reset_at: datetime
+) -> HTTPException:
+    """The 402 for a spent quota, carrying the billing link for the agent.
 
-    Free users get the Plus deep link; the page only prefills, so the human
-    still reviews and clicks (``api_server/dashboard/billing.py``).
+    An agent can't pay for its user, so it hands over ``billing_url``: the Plus
+    deep link for free users (the page only prefills; the human still clicks),
+    the plain billing page otherwise. The link also ends ``message``, which is
+    all an MCP client sees.
     """
-    # Lazy: api_server.oauth.flow pulls in the OAuth stack, which only the
-    # error path needs.
-    from api_server.oauth.flow import issuer_url  # noqa: PLC0415
-
-    query = "?plan=plus" if tier == SubscriptionTier.FREE.value else ""
-    return f"{issuer_url()}/dashboard/billing{query}"
-
-
-def _billing_hint(tier: str) -> str:
-    """The sentence a quota error ends with, so an MCP client sees the link too."""
-    if tier == SubscriptionTier.FREE.value:
-        return f" Ask the user to upgrade at {billing_url(tier)}"
-    return f" The user can review billing at {billing_url(tier)}"
+    free = tier == SubscriptionTier.FREE.value
+    url = billing_url("?plan=plus" if free else "")
+    hint = "Ask the user to upgrade at" if free else "The user can review billing at"
+    retry_after = max(1, int((reset_at - datetime.now(UTC)).total_seconds()))
+    return HTTPException(
+        status_code=402,
+        detail={
+            "code": "quota_exceeded",
+            "message": f"{message} {hint} {url}",
+            "billing_url": url,
+            "current_usage": usage,
+            "daily_limit": limit,
+            "tier": tier,
+            "quota_reset_at": reset_at.isoformat(),
+        },
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscription:
@@ -166,21 +175,12 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     .execution_options(synchronize_session=False)
                 )
                 session.commit()
-                next_reset = day_start + timedelta(days=1)
-                retry_after = max(1, int((next_reset - now).total_seconds()))
-                raise HTTPException(
-                    status_code=402,
-                    detail={
-                        "code": "quota_exceeded",
-                        "message": f"No daily request quota for {tier_key} tier."
-                        + _billing_hint(tier_key),
-                        "billing_url": billing_url(tier_key),
-                        "current_usage": 0,
-                        "daily_limit": 0,
-                        "tier": tier_key,
-                        "quota_reset_at": next_reset.isoformat(),
-                    },
-                    headers={"Retry-After": str(retry_after)},
+                raise _quota_exceeded(
+                    f"No daily request quota for {tier_key} tier.",
+                    tier=tier_key,
+                    usage=0,
+                    limit=0,
+                    reset_at=day_start + timedelta(days=1),
                 )
             result = session.execute(
                 update(UserSubscription)
@@ -241,20 +241,12 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
             next_reset = reset_ts.replace(
                 hour=0, minute=0, second=0, microsecond=0
             ) + timedelta(days=1)
-            retry_after = max(1, int((next_reset - datetime.now(UTC)).total_seconds()))
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "quota_exceeded",
-                    "message": f"Daily request limit ({daily_limit}) exceeded "
-                    f"for {tier_key} tier." + _billing_hint(tier_key),
-                    "billing_url": billing_url(tier_key),
-                    "current_usage": sub.current_period_usage,
-                    "daily_limit": daily_limit,
-                    "tier": tier_key,
-                    "quota_reset_at": next_reset.isoformat(),
-                },
-                headers={"Retry-After": str(retry_after)},
+            raise _quota_exceeded(
+                f"Daily request limit ({daily_limit}) exceeded for {tier_key} tier.",
+                tier=tier_key,
+                usage=sub.current_period_usage,
+                limit=daily_limit,
+                reset_at=next_reset,
             )
 
         session.refresh(sub)

@@ -218,11 +218,6 @@ def consent_decision(
 
 def authenticate_with_workos(code: str, code_verifier: str) -> str:
     """Exchange a WorkOS code for the signed-in user's id."""
-    return workos_identity(code, code_verifier)[0]
-
-
-def workos_identity(code: str, code_verifier: str) -> tuple[str, str | None]:
-    """Exchange a WorkOS code for the signed-in user's ``(id, email or None)``."""
     response = httpx.post(
         WORKOS_AUTHENTICATE_URL,
         json={
@@ -235,12 +230,10 @@ def workos_identity(code: str, code_verifier: str) -> tuple[str, str | None]:
         timeout=_WORKOS_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
-    user = response.json()["user"]
-    user_id = user["id"]
+    user_id = response.json()["user"]["id"]
     if not isinstance(user_id, str) or not user_id:
         raise ValueError("WorkOS returned no user id")
-    email = user.get("email")
-    return user_id, email if isinstance(email, str) and email else None
+    return user_id
 
 
 @router.get("/workos/callback", include_in_schema=False)

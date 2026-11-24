@@ -13,11 +13,9 @@ import stripe
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from api_server.auth.unified_auth import AuthenticatedUser
 from api_server.billing.limits import ensure_daily_limit
 from api_server.dashboard import session as dash_session
 from api_server.dashboard.billing import _parse_plan
-from api_server.routes.payments.checkout import create_checkout
 from api_server.server import app
 from common import global_config
 from db.models.subscription_types import SubscriptionStatus, SubscriptionTier
@@ -39,6 +37,11 @@ def _client():
         return_value=SimpleNamespace(url=_CHECKOUT_URL, id="cs_test_1")
     )
     portal = MagicMock(return_value=SimpleNamespace(url=_PORTAL_URL))
+    stripe_subs: list[SimpleNamespace] = []
+    subs = MagicMock(
+        return_value=SimpleNamespace(auto_paging_iter=lambda: iter(stripe_subs))
+    )
+    email = MagicMock(return_value="human@example.com")
     with (
         _patch_db() as factory,
         patch.object(global_config, "WORKOS_CLIENT_ID", None),
@@ -48,22 +51,30 @@ def _client():
         patch.object(stripe.Customer, "create", customer),
         patch.object(stripe.checkout.Session, "create", checkout),
         patch.object(stripe.billing_portal.Session, "create", portal),
+        patch.object(stripe.Subscription, "list", subs),
+        patch("api_server.dashboard.billing.fetch_workos_email", email),
         TestClient(app) as client,
     ):
         yield (
             client,
             factory,
-            SimpleNamespace(customer=customer, checkout=checkout, portal=portal),
+            SimpleNamespace(
+                customer=customer,
+                checkout=checkout,
+                portal=portal,
+                subs=subs,
+                stripe_subs=stripe_subs,
+                email=email,
+            ),
         )
 
 
-def _login(client, user="human", email: str | None = "human@example.com") -> str:
+def _login(client, user="human") -> str:
     """Sign in by minting the session cookie the WorkOS callback would set."""
     csrf = f"csrf-{user}"
-    data = {"uid": user, "csrf": csrf}
-    if email:
-        data["email"] = email
-    token = dash_session._serializer(dash_session._SESSION_SALT).dumps(data)
+    token = dash_session._serializer(dash_session._SESSION_SALT).dumps(
+        {"uid": user, "csrf": csrf}
+    )
     client.cookies.set(dash_session._cookie("session"), token)
     return csrf
 
@@ -150,6 +161,15 @@ class TestDeepLink(TestTemplate):
             assert "Checkout finished" in client.get(f"{_PAGE}?checkout=success").text
             assert "Nothing was charged" in client.get(f"{_PAGE}?checkout=cancel").text
 
+    def test_back_from_checkout_shows_confirming_not_a_button(self):
+        with _client() as (client, _, _):
+            _login(client)
+            page = client.get(f"{_PAGE}?checkout=success").text
+            assert "Confirming payment" in page
+            assert "action='/dashboard/billing/checkout'" not in page
+            cancelled = client.get(f"{_PAGE}?checkout=cancel").text
+            assert "action='/dashboard/billing/checkout'" in cancelled
+
     def test_already_on_the_linked_plan(self):
         with _client() as (client, factory, _):
             _add_sub(factory, **_plus())
@@ -232,20 +252,46 @@ class TestCheckout(TestTemplate):
             assert kwargs["line_items"] == [{"price": "price_plus", "quantity": 1}]
             assert kwargs["success_url"].endswith("/dashboard/billing?checkout=success")
             assert kwargs["cancel_url"].endswith("/dashboard/billing?checkout=cancel")
-            assert kwargs["idempotency_key"].startswith("dashboard-checkout-human-")
-            assert mocks.customer.call_args.kwargs["email"] == "human@example.com"
+            assert kwargs["idempotency_key"].startswith("checkout-human-price_plus-")
+            mocks.email.assert_called_once_with("human")
+            customer = mocks.customer.call_args.kwargs
+            assert customer["email"] == "human@example.com"
+            assert customer["idempotency_key"].startswith("create-customer-human-")
+            mocks.subs.assert_not_called()  # a brand-new customer has no subs
             row = _sub(factory)
             assert row is not None and row.stripe_customer_id == "cus_new"
 
     def test_reuses_the_stored_customer(self):
         with _client() as (client, factory, mocks):
             _add_sub(factory, stripe_customer_id="cus_human")
-            csrf = _login(client, email=None)  # no email needed once a customer exists
+            csrf = _login(client)
             client.post(
                 f"{_PAGE}/checkout", data={"csrf": csrf}, follow_redirects=False
             )
             mocks.customer.assert_not_called()
+            mocks.email.assert_not_called()  # only looked up for a new customer
+            assert mocks.subs.call_args.kwargs["customer"] == "cus_human"
             assert mocks.checkout.call_args.kwargs["customer"] == "cus_human"
+
+    @pytest.mark.parametrize("live", ["active", "trialing", "past_due"])
+    def test_refused_when_stripe_has_a_sub_the_webhook_missed(self, live):
+        with _client() as (client, factory, mocks):
+            _add_sub(factory, stripe_customer_id="cus_human")  # row still says free
+            mocks.stripe_subs.append(SimpleNamespace(status=live))
+            csrf = _login(client)
+            resp = client.post(f"{_PAGE}/checkout", data={"csrf": csrf})
+            assert resp.status_code == 409
+            mocks.checkout.assert_not_called()
+
+    def test_canceled_stripe_subs_dont_block(self):
+        with _client() as (client, factory, mocks):
+            _add_sub(factory, stripe_customer_id="cus_human")
+            mocks.stripe_subs.append(SimpleNamespace(status="canceled"))
+            csrf = _login(client)
+            resp = client.post(
+                f"{_PAGE}/checkout", data={"csrf": csrf}, follow_redirects=False
+            )
+            assert resp.status_code == 303
 
     @pytest.mark.parametrize(
         "status", [SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIALING.value]
@@ -259,13 +305,15 @@ class TestCheckout(TestTemplate):
             assert "already exists" in resp.text
             mocks.checkout.assert_not_called()
 
-    def test_without_an_email_nothing_reaches_stripe(self):
-        with _client() as (client, _, mocks):
-            csrf = _login(client, email=None)
+    def test_without_an_email_the_page_says_what_to_do(self):
+        with _client() as (client, factory, mocks):
+            mocks.email.return_value = None  # dev sign-in / WorkOS unset
+            csrf = _login(client)
             resp = client.post(f"{_PAGE}/checkout", data={"csrf": csrf})
             assert resp.status_code == 422
-            assert "email address is required" in resp.text
+            assert "Sign in with WorkOS" in resp.text
             mocks.customer.assert_not_called()
+            assert _sub(factory) is None
 
     def test_billing_not_configured(self):
         with _client() as (client, _, mocks):
@@ -284,27 +332,25 @@ class TestCheckout(TestTemplate):
             assert resp.status_code == 502
             assert "Stripe could not start checkout" in resp.text
 
-    def test_non_https_stripe_url_is_not_followed(self):
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "javascript:x",
+            "http://checkout.stripe.com/c/pay/x",
+            "https://evil.example/c/pay/x",
+            "https://checkout.stripe.com.evil.example/x",
+            None,
+        ],
+    )
+    def test_only_stripe_pages_are_followed(self, url):
         with _client() as (client, _, mocks):
-            mocks.checkout.return_value = SimpleNamespace(url="javascript:x", id="c")
+            mocks.checkout.return_value = SimpleNamespace(url=url, id="c")
             csrf = _login(client)
             resp = client.post(
                 f"{_PAGE}/checkout", data={"csrf": csrf}, follow_redirects=False
             )
             assert resp.status_code == 502
             assert "location" not in resp.headers
-
-
-class TestRestCheckoutSharesTheHelper(TestTemplate):
-    def test_rest_route_keeps_its_frontend_return_urls(self):
-        with _client() as (_, factory, mocks), factory() as db:
-            user = AuthenticatedUser(user_id="api-user", email="a@example.com")
-            body = create_checkout(user=user, session=db)
-        assert body == {"checkout_url": _CHECKOUT_URL, "session_id": "cs_test_1"}
-        kwargs = mocks.checkout.call_args.kwargs
-        frontend = global_config.FRONTEND_URL.rstrip("/")
-        assert kwargs["cancel_url"] == f"{frontend}/billing/cancel"
-        assert kwargs["idempotency_key"].startswith("checkout-api-user-")
 
 
 class TestPortal(TestTemplate):

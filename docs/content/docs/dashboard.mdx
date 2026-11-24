@@ -46,7 +46,14 @@ with the linked one highlighted. Upgrade takes you to Stripe Checkout, where
 you confirm the payment; Open billing portal takes you to Stripe's portal to
 change card, read invoices or cancel. A link only names a plan: the price,
 trial and quantity come from the server's config, never from the URL. The
-page reads the database only, so opening it never calls Stripe.
+page reads the database only, so opening it never calls Stripe. Back from a
+paid checkout, Plus shows "Confirming payment" instead of a button until
+Stripe's webhook lands, so a second click can't start a second subscription.
+
+Before each checkout the server also asks Stripe whether the customer already
+has a live subscription. Two checkout pages opened side by side can still both
+be paid, so turn on Stripe's **Limit customers to one subscription** setting
+(Settings, Checkout and Payment Links) as well.
 
 When an agent runs out of daily quota, the `402 quota_exceeded` error carries
 this link as `billing_url` and at the end of its `message`, so the agent can

@@ -6,7 +6,7 @@
                                            cancel)
 
 An agent that runs out of daily quota can't pay for you, so the quota error
-carries this page's link (``billing_url`` in ``api_server/billing/limits.py``)
+carries this page's link (``billing_url``, built by ``dashboard/links.py``)
 for the agent to pass on. Opening it never charges or changes anything: GET
 reads only the database (not even Stripe) and highlights the plan the link
 names. Both POSTs need the signed-in human's CSRF token, and the payment itself
@@ -20,10 +20,15 @@ note saying so):
   quantity come from server config, so no link can pick a price, a coupon or a
   seat count, and the button still has to be clicked.
 - ``checkout``: ``success`` or ``cancel``, which Stripe's return URLs set.
+  On ``success`` the Upgrade button gives way to "Confirming payment" until
+  the webhook moves the plan to Plus, so a second click can't open a second
+  subscription.
 
 Everything is read for the signed-in user only, and the portal opens the
 Stripe customer stored on that user's own subscription row. Checkout and the
 portal are the helpers the REST billing routes use (``billing/checkout.py``).
+The session holds no email: a first checkout, which has to create the Stripe
+customer, looks it up from WorkOS by user id.
 """
 
 from __future__ import annotations
@@ -31,24 +36,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse, Response
 
-from api_server.auth.unified_auth import AuthenticatedUser
+from api_server.auth.workos_auth import fetch_workos_email
 from api_server.billing.checkout import (
+    STRIPE_PAGE_HOSTS,
+    EmailRequiredError,
     has_active_plus,
     open_billing_portal,
     start_checkout,
 )
-from api_server.branded_page import PAGE_CSP
+from api_server.dashboard.links import billing_url
 from api_server.dashboard.session import (
+    DashboardForm,
     DashboardSession,
-    require_csrf,
-    require_session,
+    DashboardUser,
 )
 from api_server.dashboard.ui import box, csrf_field, dashboard_page, esc
-from api_server.oauth.flow import issuer_url
 from common import global_config
 from db.engine import use_db_session
 from db.models.subscription_types import SubscriptionStatus, SubscriptionTier
@@ -57,9 +64,6 @@ from db.models.user_subscriptions import UserSubscription
 router = APIRouter(
     prefix="/dashboard/billing", tags=["dashboard"], include_in_schema=False
 )
-
-Session = Annotated[DashboardSession, Depends(require_session)]
-FormSession = Annotated[DashboardSession, Depends(require_csrf)]
 
 _FREE, _PLUS = SubscriptionTier.FREE.value, SubscriptionTier.PLUS.value
 _PLANS = {"free": _FREE, "plus": _PLUS}
@@ -77,11 +81,13 @@ _TONES = {
     SubscriptionStatus.INCOMPLETE.value: "bad",
     SubscriptionStatus.CANCELED.value: "bad",
 }
-# The page's forms end in a redirect to Stripe, which the shared CSP's
-# ``form-action 'self'`` would block in the browser.
-_CSP = PAGE_CSP.replace(
-    "form-action 'self'",
-    "form-action 'self' https://checkout.stripe.com https://billing.stripe.com",
+# The page's forms end in a redirect to Stripe, which the browser checks
+# against the CSP's form-action.
+_FORM_TARGETS = tuple(f"https://{host}" for host in STRIPE_PAGE_HOSTS)
+_NO_EMAIL = (
+    "Couldn't start checkout: Stripe needs an email address for your billing "
+    "account, and none is on file for this sign-in. Sign in with WorkOS (the "
+    "development sign-in has no email) and try again."
 )
 
 
@@ -187,7 +193,9 @@ def _current(account: _Account) -> str:
     )
 
 
-def _plans(session: DashboardSession, account: _Account, plan: str | None) -> str:
+def _plans(
+    session: DashboardSession, account: _Account, plan: str | None, confirming: bool
+) -> str:
     trial = global_config.subscription_config.trial_period_days
     rows = []
     for tier, extra in (
@@ -197,6 +205,10 @@ def _plans(session: DashboardSession, account: _Account, plan: str | None) -> st
         current = (tier == _PLUS) == account.plus
         if current:
             action = "<span class='pill on'>Current</span>"
+        elif tier == _PLUS and confirming:
+            # Back from a paid checkout before Stripe's webhook landed: no
+            # button, or a second click could open a second subscription.
+            action = "<span class='pill'>Confirming payment</span>"
         elif tier == _PLUS:
             action = (
                 "<form method='post' action='/dashboard/billing/checkout'>"
@@ -223,6 +235,7 @@ def _page(
     *,
     account: _Account | None = None,
     plan: str | None = None,
+    confirming: bool = False,
     notes: list[str] | None = None,
     problem: str | None = None,
     status_code: int = 200,
@@ -244,7 +257,7 @@ def _page(
         if account.has_customer
         else ""
     )
-    response = dashboard_page(
+    return dashboard_page(
         session,
         active="billing",
         eyebrow="Billing",
@@ -252,17 +265,16 @@ def _page(
         lead="Your plan and today's usage. Paying happens on Stripe, after you click.",
         body=lead
         + box("Current plan", _current(account))
-        + box("Plans", _plans(session, account, plan))
+        + box("Plans", _plans(session, account, plan, confirming))
         + manage,
         status_code=status_code,
+        form_action=_FORM_TARGETS,
     )
-    response.headers["Content-Security-Policy"] = _CSP
-    return response
 
 
 @router.get("")
 def billing_page(
-    session: Session,
+    session: DashboardUser,
     plan: Annotated[str | None, Query()] = None,
     checkout: Annotated[str | None, Query()] = None,
 ) -> Response:
@@ -275,31 +287,39 @@ def billing_page(
     account = _account(session.user_id)
     if tier is not None:
         notes.append(_plan_note(account, tier))
-    return _page(session, account=account, plan=tier, notes=notes)
+    return _page(
+        session,
+        account=account,
+        plan=tier,
+        confirming=checkout == "success",
+        notes=notes,
+    )
 
 
 def _to_stripe(url: str | None) -> Response:
-    if not url or not url.startswith("https://"):
+    """Redirect to a Stripe-hosted page, and nowhere else."""
+    parts = urlsplit(url or "")
+    if parts.scheme != "https" or parts.hostname not in STRIPE_PAGE_HOSTS:
         raise HTTPException(status_code=502, detail="Stripe returned no page to open")
-    return RedirectResponse(url, status_code=303)
+    return RedirectResponse(parts.geturl(), status_code=303)
 
 
 @router.post("/checkout")
-def checkout_submit(session: FormSession) -> Response:
-    base = issuer_url()
-    user = AuthenticatedUser(
-        user_id=session.user_id, email=session.email, auth_method="dashboard"
-    )
+def checkout_submit(session: DashboardForm) -> Response:
     try:
         with use_db_session() as db:
             url, _ = start_checkout(
-                user,
+                session.user_id,
+                lambda: fetch_workos_email(session.user_id),
                 db,
-                success_url=f"{base}/dashboard/billing?checkout=success",
-                cancel_url=f"{base}/dashboard/billing?checkout=cancel",
-                key_prefix="dashboard-checkout",
+                success_url=billing_url("?checkout=success"),
+                cancel_url=billing_url("?checkout=cancel"),
             )
         return _to_stripe(url)
+    except EmailRequiredError as exc:
+        return _page(
+            session, plan=_PLUS, problem=_NO_EMAIL, status_code=exc.status_code
+        )
     except HTTPException as exc:
         return _page(
             session,
@@ -310,12 +330,10 @@ def checkout_submit(session: FormSession) -> Response:
 
 
 @router.post("/portal")
-def portal_submit(session: FormSession) -> Response:
+def portal_submit(session: DashboardForm) -> Response:
     try:
         with use_db_session() as db:
-            url = open_billing_portal(
-                session.user_id, db, return_url=f"{issuer_url()}/dashboard/billing"
-            )
+            url = open_billing_portal(session.user_id, db, return_url=billing_url())
         return _to_stripe(url)
     except HTTPException as exc:
         return _page(
