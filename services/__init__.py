@@ -209,3 +209,8 @@ def discover_services() -> None:
 def get_registry() -> list[ServiceEntry]:
     """Return all registered services."""
     return list(_registry)
+
+
+def dangerous_tool_names() -> frozenset[str]:
+    """Names of ``risk="dangerous"`` services (the ones approval can hold)."""
+    return frozenset(e.name for e in _registry if e.risk == "dangerous")

@@ -37,10 +37,10 @@ from loguru import logger as log
 
 from api_server.oauth.flow import (
     WORKOS_AUTHORIZE_URL,
-    _authenticate_with_workos,
-    _page,
-    _pkce_challenge,
+    authenticate_with_workos,
     issuer_url,
+    pkce_challenge,
+    render_page,
 )
 from common import global_config
 
@@ -130,7 +130,7 @@ def _start_session(user_id: str, next_path: str) -> RedirectResponse:
 
 
 def _error(message: str, status_code: int = 400) -> Response:
-    return _page(
+    return render_page(
         "Dashboard",
         f"<h1>Can't sign in</h1><p>{html.escape(message)}</p>",
         status_code=status_code,
@@ -161,7 +161,7 @@ def login(
                 "redirect_uri": f"{issuer_url()}/dashboard/callback",
                 "provider": "authkit",
                 "state": state,
-                "code_challenge": _pkce_challenge(_pkce_verifier(nonce)),
+                "code_challenge": pkce_challenge(_pkce_verifier(nonce)),
                 "code_challenge_method": "S256",
             }
         )
@@ -181,7 +181,7 @@ def login(
             "Dashboard sign-in needs WorkOS (WORKOS_CLIENT_ID and WORKOS_API_KEY).",
             status_code=503,
         )
-    return _page(
+    return render_page(
         "Dashboard sign-in (dev)",
         "<h1>Dashboard sign-in</h1>"
         "<p class='warn'>Development only: WorkOS is not configured, so you can "
@@ -223,7 +223,7 @@ def callback(
     if not code:
         return _error("Sign-in was cancelled.")
     try:
-        user_id = _authenticate_with_workos(code, _pkce_verifier(nonce))
+        user_id = authenticate_with_workos(code, _pkce_verifier(nonce))
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
         log.warning("dashboard: WorkOS code exchange failed: {}", type(exc).__name__)
         return _error("Sign-in failed. Try again.", status_code=502)

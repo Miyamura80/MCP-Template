@@ -29,15 +29,21 @@ statelessly), `elicitation` falls back to `browser`, never to a looser mode.
 
 A held call doesn't run. The agent gets an error explaining what to do:
 
-- **agent:** call `confirm_action(approval_id)`, which runs the stored call.
-- **browser:** give you the approval link. Hosts that support URL
-  elicitation open it directly.
+- **agent:** call `confirm_action(approval_id)`, then retry the call.
+- **elicitation:** the app asks you; the call runs when you say yes.
+- **browser:** give you the approval link (hosts that support URL
+  elicitation open it directly), then retry the call once
+  `get_approval(approval_id)` says `approved`.
 
-The stored arguments are what runs, so nothing can be swapped between the
-request and the approval. Retrying the same call (same tool, same
-arguments) while its approval is live never asks twice: it re-shows the
-pending approval, returns the result once it ran, or reports that you denied
-it. `get_approval(approval_id)` reports the same.
+Approving never runs anything by itself. The call runs when the agent retries
+it, through the normal path (metering, errors), and only with the exact
+arguments that were approved: a retry with different arguments is a new
+request. Retrying while an approval is live never asks twice: it re-shows the
+pending approval, runs it once approved, then returns the stored result, or
+reports that you denied it. If your settings get stricter while a call is
+held (or the agent's URL asks for a stricter mode), the call moves to the
+stricter mode and any looser approval is dropped. Loosening your settings
+doesn't release calls already held; approve or deny those on the dashboard.
 
 Held calls expire: 10 minutes for `agent` and `elicitation`, 24 hours for
 `browser` (`approvals.*_expiry_seconds` in config).
@@ -48,7 +54,7 @@ The CLI is never gated, since it is you at your own terminal.
 ## Dashboard
 
 `/dashboard/approvals` lists held calls; each one shows its exact arguments
-with Approve and Deny buttons. Approving runs the call on the server.
+with Approve and Deny buttons. Approving lets the agent's next retry run it.
 
 The dashboard only accepts a browser session from signing in with WorkOS,
 never an agent's API key or token. Register `{your server}/dashboard/callback`
@@ -64,7 +70,7 @@ routes with the session cookie and its `X-CSRF-Token`:
 |-------|--|
 | `GET /api/v1/dashboard/session` | `user_id` and `csrf_token` |
 | `GET /api/v1/approvals` | held and recent calls |
-| `POST /api/v1/approvals/{id}/approve` | run it |
+| `POST /api/v1/approvals/{id}/approve` | approve it (the agent's retry runs it) |
 | `POST /api/v1/approvals/{id}/deny` | refuse it |
 | `GET`/`PUT /api/v1/settings/approval` | your mode and overrides |
 

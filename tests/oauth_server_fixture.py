@@ -104,7 +104,7 @@ class OAuthServerCase(TestTemplate):
             ),
             patch("api_server.oauth.cimd._fetch_document", side_effect=self._fetch),
             patch(
-                "api_server.oauth.flow._authenticate_with_workos",
+                "api_server.oauth.flow.authenticate_with_workos",
                 return_value=USER_ID,
             ),
         ]

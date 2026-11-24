@@ -1,37 +1,44 @@
 """Human-in-the-loop approval for ``risk="dangerous"`` tools.
 
-    tools/call(gmail_send) ──► check_gate ──► mode = stricter(dashboard, ?approval=)
+    tools/call(gmail_send) ──► check_gate ── mode = stricter(dashboard, ?approval=)
                                   │
-         automatic ───────────────┤ run now
-         agent ───────────────────┤ PendingAction ─► agent calls confirm_action(id)
-         elicitation ─────────────┤ PendingAction ─► host asks the human (MCP only;
-                                  │                  no inline channel -> browser)
-         browser ─────────────────┘ PendingAction ─► human approves on a dashboard
-                                                     page; the server runs it
+       automatic ─────────────────┤ Proceed: run now
+       agent / elicitation /      │ hold: PendingAction(pending) + ApprovalRequiredError
+       browser                    │
+                                  ▼
+       confirm_action (agent) ─┐
+       host prompt (elicit) ───┼─► pending -> approved      (nothing runs here)
+       dashboard (browser) ────┘
+                                  │
+       retry of the same call ────┴─► check_gate: RunHeld -> run via the
+                                      transport (metered), record the outcome
+       later retries ──────────────► Replay the stored result
 
-Every non-automatic call stores the exact arguments, so what runs on approval
-is what was asked for. Rows are single use (status transitions are atomic
-compare-and-set updates) and bound to the user who made the call.
+There is one way an approved call runs: the caller retries it, and it goes
+through the normal transport path with its metering and error handling. The
+arguments that run are the stored ones (same tool, same arguments, same user),
+so nothing can be swapped between the request and the approval. Every status
+change is a compare-and-set, and one active row per exact call is enforced by
+a unique index.
 
-Retrying the same call (same tool, same arguments) while its approval is live
-never creates a second one: a pending call raises the same approval again, an
-executed one replays its stored result, a denied one stays denied. That makes a
-plain retry the natural way to pick up a browser approval, and it stops a
-retry loop from sending the same email twice.
+Retrying a held call never asks twice: a pending one raises the same approval,
+an approved one runs, an executed one replays its result, a denied one stays
+denied. If the mode got stricter since the row was made (the dashboard was
+tightened, or this connection asks ``?approval=browser``), the row moves to the
+stricter mode and any looser approval is dropped.
 
-The transports own the "how": the MCP layer turns an elicitation-mode approval
-into a host prompt and a browser-mode one into a URL elicitation; REST answers
-``202 Accepted``. The CLI is the operator at their own terminal and is never
-gated, the same way it is never metered.
+``user_id=None`` means a local, unauthenticated transport (the CLI, stdio MCP):
+the operator at their own machine, never gated, like it is never metered.
+Authenticated transports always pass the user.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
-from loguru import logger as log
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -41,25 +48,23 @@ from models.approvals import (
     ApprovalIdInput,
     ApprovalMode,
     ApprovalSettings,
-    ApprovalStatus,
     ApprovalView,
     stricter,
 )
-from services import (
-    ConnectRequiredError,
-    InvalidArgument,
-    ModelFacingError,
-    ServiceEntry,
-    get_registry,
-    service,
+from services import InvalidArgument, ServiceEntry, dangerous_tool_names, service
+from services.approvals_errors import (
+    ApprovalBusyError,
+    ApprovalDeniedError,
+    required,
 )
 from services.approvals_store import (
     args_hash,
     create_action,
-    live_action,
+    escalate,
+    find_call,
     owned,
-    refresh,
-    registry_entry,
+    record,
+    shown_args,
     to_view,
     transition,
 )
@@ -70,97 +75,26 @@ APPROVAL_TOOLS = frozenset({"confirm_action", "get_approval"})
 
 
 # ---------------------------------------------------------------------------
-# Errors the transports translate
-# ---------------------------------------------------------------------------
-
-
-class ApprovalGateError(ModelFacingError):
-    """The gate stopped a call before it ran (held, denied, or already running).
-
-    Nothing happened yet, so transports treat it like a rejected argument: the
-    REST idempotency claim is released and the call may be retried.
-    """
-
-
-class ApprovalBusyError(ApprovalGateError):
-    """The same approved call is running right now."""
-
-
-class ApprovalRequiredError(ApprovalGateError):
-    """A dangerous call is held for approval. The message tells the agent what to do."""
-
-    def __init__(self, view: ApprovalView) -> None:
-        self.view = view
-        # Not super(): the browser subclass also inherits ConnectRequiredError,
-        # whose __init__ takes different arguments.
-        ModelFacingError.__init__(self, _instructions(view))
-
-
-class BrowserApprovalRequiredError(ApprovalRequiredError, ConnectRequiredError):
-    """Browser-mode approval: also a connect-style flow, so MCP hosts that
-    support URL elicitation open the approval page natively."""
-
-    def __init__(self, view: ApprovalView, user_id: str) -> None:
-        self.view = view
-        ConnectRequiredError.__init__(
-            self,
-            user_id,
-            _instructions(view),
-            elicitation_message=(
-                f"Approve {view.tool} before it runs. Open the page to approve or deny."
-            ),
-        )
-
-    def build_auth_url(self) -> str | None:
-        return self.view.approve_url
-
-
-class ApprovalDeniedError(ApprovalGateError):
-    """A human denied this exact call. Retrying it will not help."""
-
-
-def _instructions(view: ApprovalView) -> str:
-    expires = view.expires_at.isoformat(timespec="seconds")
-    if view.mode == "agent":
-        return (
-            f"{view.tool} needs confirmation before it runs. Re-read the arguments "
-            f"you sent; if they are what the user wants, call "
-            f"confirm_action(approval_id='{view.id}'). Expires {expires}."
-        )
-    if view.mode == "elicitation":
-        return (
-            f"{view.tool} is waiting for the user to confirm in this app "
-            f"(approval {view.id}, expires {expires})."
-        )
-    return (
-        f"{view.tool} is waiting for the user to approve it at {view.approve_url} "
-        f"(approval {view.id}, expires {expires}). Give the user that link. "
-        f"Check the outcome with get_approval(approval_id='{view.id}'), or retry "
-        "this same call after they approve to get its result."
-    )
-
-
-# ---------------------------------------------------------------------------
 # Settings (dashboard only; agents never write these)
 # ---------------------------------------------------------------------------
 
 
-def _dangerous_tools() -> set[str]:
-    return {e.name for e in get_registry() if e.risk == "dangerous"}
+def _load_settings(s: Session, user_id: str) -> ApprovalSettings:
+    row = s.get(ApprovalSetting, user_id)
+    if row is None:
+        return ApprovalSettings()
+    return ApprovalSettings.model_validate(
+        {"mode": row.mode, "overrides": row.overrides or {}}
+    )
 
 
 def get_settings(user_id: str) -> ApprovalSettings:
     with use_db_session() as s:
-        row = s.get(ApprovalSetting, user_id)
-        if row is None:
-            return ApprovalSettings()
-        return ApprovalSettings.model_validate(
-            {"mode": row.mode, "overrides": row.overrides or {}}
-        )
+        return _load_settings(s, user_id)
 
 
 def save_settings(user_id: str, settings: ApprovalSettings) -> ApprovalSettings:
-    unknown = set(settings.overrides) - _dangerous_tools()
+    unknown = set(settings.overrides) - dangerous_tool_names()
     if unknown:
         raise InvalidArgument(
             f"Overrides apply to dangerous tools only; not dangerous: "
@@ -177,13 +111,17 @@ def save_settings(user_id: str, settings: ApprovalSettings) -> ApprovalSettings:
     return settings
 
 
+def _floor(s: Session, user_id: str, tool: str) -> ApprovalMode:
+    settings = _load_settings(s, user_id)
+    return settings.overrides.get(tool, settings.mode)
+
+
 def effective_mode(
     user_id: str, tool: str, url_mode: ApprovalMode | None
 ) -> ApprovalMode:
     """The dashboard floor for ``tool``, tightened (never loosened) by the URL."""
-    settings = get_settings(user_id)
-    floor = settings.overrides.get(tool, settings.mode)
-    return stricter(floor, url_mode)
+    with use_db_session() as s:
+        return stricter(_floor(s, user_id, tool), url_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -192,15 +130,26 @@ def effective_mode(
 
 
 @dataclass(frozen=True)
-class GateDecision:
-    """``proceed``: run the tool. ``action_id`` set: record the outcome on it.
-    ``replay`` set: return this stored output instead of running."""
-
-    action_id: str | None = None
-    replay: dict[str, Any] | None = None
+class Proceed:
+    """Run the call; nothing to record."""
 
 
-PROCEED = GateDecision()
+@dataclass(frozen=True)
+class RunHeld:
+    """Run the approved held call, then record its outcome on ``action_id``."""
+
+    action_id: str
+
+
+@dataclass(frozen=True)
+class Replay:
+    """Return this stored output instead of running again."""
+
+    output: dict[str, Any]
+
+
+GateDecision = Proceed | RunHeld | Replay
+PROCEED = Proceed()
 
 
 def check_gate(
@@ -211,131 +160,133 @@ def check_gate(
     url_mode: ApprovalMode | None,
     can_confirm_inline: bool,
 ) -> GateDecision:
-    """Decide whether a call runs now. Raises ``ApprovalRequiredError`` or
-    ``ApprovalDeniedError`` when it doesn't.
+    """Decide what a call does now. Raises an ``ApprovalGateError`` when held.
 
-    ``can_confirm_inline`` is whether the transport can ask the human right
-    now (an MCP host that supports elicitation). When it can't, an
+    ``can_confirm_inline``: the transport can put a confirmation in front of
+    the human right now (an MCP host that can elicit). When it can't, an
     elicitation-mode call escalates to browser, never to a looser mode.
     """
-    if entry.risk != "dangerous" or not user_id:
+    if entry.risk != "dangerous" or user_id is None:
         return PROCEED
+    if not user_id:
+        raise InvalidArgument("A dangerous call needs an authenticated user.")
 
     args = input_obj.model_dump(mode="json")
     call_hash = args_hash(entry.name, args)
     with use_db_session() as s:
-        existing = live_action(s, user_id, entry.name, call_hash)
-        if existing is not None:
-            decision = _resume(s, existing)
-            if decision is not None:
-                return decision
-
-        mode = effective_mode(user_id, entry.name, url_mode)
-        if mode == "automatic":
-            return PROCEED
+        mode = stricter(_floor(s, user_id, entry.name), url_mode)
         if mode == "elicitation" and not can_confirm_inline:
             mode = "browser"
-        action = create_action(s, user_id, entry.name, args, call_hash, mode)
-        view = to_view(action)
-    raise _required(view, user_id)
+        row = find_call(s, user_id, entry.name, call_hash)
+        if row is None:
+            if mode == "automatic":
+                return PROCEED
+            row = create_action(s, user_id, entry.name, args, call_hash, mode)
+        return _resume(s, row, mode)
 
 
-def _resume(s: Session, action: PendingAction) -> GateDecision | None:
-    """What a retry of an already-gated call does. ``None``: gate it afresh."""
-    status = action.status
-    if status == "approved" and transition(s, action.id, "approved", "executing"):
-        return GateDecision(action_id=action.id)
-    if status == "executed":
-        return GateDecision(replay=action.result or {})
-    if status == "denied":
+def _resume(s: Session, row: PendingAction, mode: ApprovalMode) -> GateDecision:
+    """What this call does given the row already held for it."""
+    if row.status in ("pending", "approved"):
+        current: ApprovalMode = row.mode  # ty: ignore[invalid-assignment]
+        if stricter(current, mode) != current:
+            escalate(s, row, mode)  # loses to a concurrent change: re-read either way
+            s.refresh(row)
+        elif row.status == "approved":
+            return RunHeld(row.id)
+        raise required(to_view(row), row.args_hash, row.user_id)
+    if row.status == "executed" and row.result is not None:
+        return Replay(row.result)
+    if row.status == "denied":
         raise ApprovalDeniedError(
-            f"The user denied this {action.tool} call (approval {action.id}). "
+            f"The user denied this {row.tool} call (approval {row.id}). "
             "Do not retry it; ask the user what they want instead."
         )
-    if status in ("pending", "approved"):
-        raise _required(to_view(action), action.user_id)
-    if status == "executing":
-        raise ApprovalBusyError(
-            f"This {action.tool} call is already running (approval {action.id}). "
-            f"Check it with get_approval(approval_id='{action.id}')."
-        )
-    return None  # failed: a fresh attempt may be approved again
+    raise ApprovalBusyError(
+        f"This {row.tool} call is already running (approval {row.id}). "
+        f"Check it with get_approval(approval_id='{row.id}')."
+    )
 
 
-def record_outcome(
-    action_id: str, *, result: BaseModel | None = None, error: str | None = None
-) -> None:
-    """Store how an approved call ended, so retries and ``get_approval`` see it."""
+@contextmanager
+def running(decision: GateDecision) -> Iterator[Callable[[BaseModel], None]]:
+    """Claim an approved call for the duration of its run and record how it ended.
+
+    Yields ``done(result)``; call it with the tool's output. Anything else
+    (an exception, a cancelled request) records the call as failed, so a row
+    is never left ``executing``. A no-op for anything but ``RunHeld``.
+    """
+    if not isinstance(decision, RunHeld):
+        yield lambda _result: None
+        return
+    approval_id = decision.action_id
     with use_db_session() as s:
-        action = s.get(PendingAction, action_id)
-        if action is None:
-            return
-        action.status = "failed" if error is not None else "executed"
-        action.result = result.model_dump(mode="json") if result is not None else None
-        action.error = error
-        action.resolved_at = datetime.now(UTC)
-        s.commit()
+        if not transition(s, approval_id, "approved", "executing"):
+            raise ApprovalBusyError(
+                f"Approval {approval_id} is no longer runnable (it is running, "
+                "expired or was denied). Check it with get_approval."
+            )
+    finished = False
+
+    def done(result: BaseModel) -> None:
+        nonlocal finished
+        with use_db_session() as s:
+            record(s, approval_id, result=result.model_dump(mode="json"), error=None)
+        finished = True
+
+    try:
+        yield done
+    finally:
+        if not finished:
+            with use_db_session() as s:
+                record(s, approval_id, result=None, error="The call failed.")
 
 
 # ---------------------------------------------------------------------------
-# Decisions
+# Decisions (none of these run anything; the retried call does)
 # ---------------------------------------------------------------------------
 
 
-def approve_elicitation(user_id: str, approval_id: str, tool: str) -> bool:
-    """The host relayed a human "yes". The retried call then runs it."""
+def _approve(s: Session, user_id: str, approval_id: str) -> ApprovalView:
+    action = owned(s, user_id, approval_id)
+    if action is None:
+        raise InvalidArgument(f"No approval {approval_id!r} for this user.")
+    transition(s, approval_id, "pending", "approved")
+    s.refresh(action)
+    return to_view(action)
+
+
+def approve_as_human(user_id: str, approval_id: str) -> ApprovalView:
+    """The dashboard: a signed-in human may approve a call in any mode."""
+    with use_db_session() as s:
+        return _approve(s, user_id, approval_id)
+
+
+def approve_elicitation(
+    user_id: str, approval_id: str, tool: str, call_hash: str
+) -> bool:
+    """The host relayed a human "yes" for exactly this call."""
     with use_db_session() as s:
         action = owned(s, user_id, approval_id)
-        if action is None or action.mode != "elicitation" or action.tool != tool:
+        if (
+            action is None
+            or action.mode != "elicitation"
+            or action.tool != tool
+            or action.args_hash != call_hash
+        ):
             return False
         return transition(s, approval_id, "pending", "approved")
 
 
-def approve_and_execute(
-    user_id: str, approval_id: str, *, modes: frozenset[str]
-) -> ApprovalView:
-    """Run a pending call now. ``modes`` limits who may do this: an agent may
-    only confirm agent-mode calls; a human on the dashboard may approve any."""
+def deny(user_id: str, approval_id: str, *, tool: str | None = None) -> ApprovalView:
     with use_db_session() as s:
         action = owned(s, user_id, approval_id)
-        if action is None:
+        if action is None or (tool is not None and action.tool != tool):
             raise InvalidArgument(f"No approval {approval_id!r} for this user.")
-        if action.mode not in modes:
-            raise InvalidArgument(
-                f"Approval {approval_id} is in {action.mode} mode, so only the user "
-                "can approve it."
-            )
-        if not transition(s, approval_id, "pending", "executing"):
-            return to_view(refresh(s, action))
-        tool = action.tool
-        entry = registry_entry(tool)
-        input_model: type[BaseModel] = entry.input_model  # ty: ignore[invalid-assignment]
-        args = dict(action.args)
-        if "user_id" in input_model.model_fields:
-            args["user_id"] = action.user_id  # never trust a stored user_id
-        input_obj = input_model.model_validate(args)
-    try:
-        record_outcome(approval_id, result=entry.func(input_obj))
-    except ModelFacingError as exc:
-        record_outcome(approval_id, error=str(exc))
-    except Exception:  # noqa: BLE001
-        # Approval boundary: the stored call is arbitrary service code. Record
-        # the failure on the row (agents poll it) instead of crashing the
-        # confirm call or the dashboard request; the traceback goes to logs.
-        log.exception("approved {} call {} failed", tool, approval_id)
-        record_outcome(approval_id, error=f"{tool} failed.")
-    return get_approval_view(user_id, approval_id)
-
-
-def deny(user_id: str, approval_id: str) -> ApprovalView:
-    with use_db_session() as s:
-        action = owned(s, user_id, approval_id)
-        if action is None:
-            raise InvalidArgument(f"No approval {approval_id!r} for this user.")
-        for current in ("pending", "approved"):
-            if transition(s, approval_id, current, "denied"):
-                break
-        return to_view(refresh(s, action))
+        if not transition(s, approval_id, "pending", "denied"):
+            transition(s, approval_id, "approved", "denied")
+        s.refresh(action)
+        return to_view(action)
 
 
 def get_approval_view(user_id: str, approval_id: str) -> ApprovalView:
@@ -346,16 +297,16 @@ def get_approval_view(user_id: str, approval_id: str) -> ApprovalView:
         return to_view(action)
 
 
-def get_action_args(user_id: str, approval_id: str) -> dict[str, Any] | None:
-    """The stored arguments, for the dashboard's review page."""
+def get_review(user_id: str, approval_id: str) -> tuple[ApprovalView, dict[str, Any]]:
+    """One read for a human reviewing a call: its state and exact arguments."""
     with use_db_session() as s:
         action = owned(s, user_id, approval_id)
-        return dict(action.args) if action is not None else None
+        if action is None:
+            raise InvalidArgument(f"No approval {approval_id!r} for this user.")
+        return to_view(action), shown_args(action)
 
 
-def list_approvals(
-    user_id: str, status: ApprovalStatus | None = None, limit: int = 50
-) -> list[ApprovalView]:
+def list_approvals(user_id: str, limit: int = 50) -> list[ApprovalView]:
     with use_db_session() as s:
         rows = (
             s.query(PendingAction)
@@ -364,8 +315,7 @@ def list_approvals(
             .limit(limit)
             .all()
         )
-        views = [to_view(r) for r in rows]
-    return [v for v in views if status is None or v.status == status]
+        return [to_view(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -376,35 +326,39 @@ def list_approvals(
 @service(
     name="confirm_action",
     description=(
-        "Run a dangerous call that is waiting for your confirmation (agent "
-        "approval mode). Only confirm when the held arguments match what the "
-        "user asked for. Calls held for the user's own approval cannot be "
-        "confirmed here."
+        "Approve a dangerous call that is waiting for your confirmation (agent "
+        "approval mode), then retry that exact call to run it. Only confirm when "
+        "the held arguments match what the user asked for. Calls held for the "
+        "user's own approval cannot be confirmed here."
     ),
     input_model=ApprovalIdInput,
     output_model=ApprovalView,
     mutating=True,
 )
 def confirm_action(input: ApprovalIdInput) -> ApprovalView:
-    return approve_and_execute(
-        input.user_id, input.approval_id, modes=frozenset({"agent"})
-    )
+    with use_db_session() as s:
+        action = owned(s, input.user_id, input.approval_id)
+        if action is None:
+            raise InvalidArgument(f"No approval {input.approval_id!r} for this user.")
+        # The row's mode, and the user's current floor, must both still allow
+        # an agent to approve. A tightened dashboard revokes agent approval.
+        floor = _floor(s, input.user_id, action.tool)
+        if action.mode != "agent" or stricter(floor, "agent") != "agent":
+            raise InvalidArgument(
+                f"Approval {input.approval_id} needs the user, not the agent. "
+                "Give them its link and check back with get_approval."
+            )
+        return _approve(s, input.user_id, input.approval_id)
 
 
 @service(
     name="get_approval",
     description=(
-        "Check a held dangerous call: whether it is still pending, was approved "
-        "and ran (with its result), was denied, or expired."
+        "Check a held dangerous call: still pending, approved (retry the call to "
+        "run it), executed (with its result), denied, or expired."
     ),
     input_model=ApprovalIdInput,
     output_model=ApprovalView,
 )
 def get_approval(input: ApprovalIdInput) -> ApprovalView:
     return get_approval_view(input.user_id, input.approval_id)
-
-
-def _required(view: ApprovalView, user_id: str) -> ApprovalRequiredError:
-    if view.mode == "browser":
-        return BrowserApprovalRequiredError(view, user_id)
-    return ApprovalRequiredError(view)

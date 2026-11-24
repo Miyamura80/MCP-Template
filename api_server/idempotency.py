@@ -32,7 +32,7 @@ from sqlalchemy.exc import IntegrityError
 from db.engine import use_db_session
 from db.models.idempotency_keys import IdempotencyRecord
 from services import InvalidArgument
-from services.approvals_svc import ApprovalGateError
+from services.approvals_errors import ApprovalGateError
 
 # Mirror the DB column width and (loosely) Stripe's own key-length guidance.
 _KEY_MAX_LEN = 255

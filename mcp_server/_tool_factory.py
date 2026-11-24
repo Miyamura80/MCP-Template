@@ -28,6 +28,7 @@ from mcp_server.enhancers import EnhancerEntry, get_enhancer
 from mcp_server.enhancers.base import EnhancedTool, build_app_meta
 from mcp_server.url_elicitation import reraise_with_elicitation
 from services import ConnectRequiredError, ServiceEntry
+from services.approvals_svc import Replay, running
 from src.utils.current_user import current_user
 
 
@@ -196,6 +197,10 @@ def tool_annotations(entry: ServiceEntry) -> ToolAnnotations:
 def make_tool(mcp: MCPServer, entry: ServiceEntry) -> None:
     """Register a service as an MCP tool - enhanced if an enhancer exists, else headless."""
     enhancer_entry = get_enhancer(entry.name)
+    if enhancer_entry is not None and entry.risk == "dangerous":
+        # The approval bookkeeping in the async path writes on the event loop,
+        # and an enhancer's elicitation/app UI could blur what was approved.
+        raise ValueError(f"dangerous service {entry.name!r} cannot have an enhancer")
     if enhancer_entry is not None:
         _make_enhanced_tool(mcp, entry, enhancer_entry)
     else:
@@ -217,27 +222,21 @@ def _make_headless_tool(mcp: MCPServer, entry: ServiceEntry) -> None:
             elif not kwargs.get("user_id"):
                 kwargs.setdefault("user_id", "")
         input_obj = _build_input(input_model, kwargs)
-        # Dangerous tools may be held for approval (raises) or, on a retry of
-        # an already-approved call, answered from the stored result.
+        # Dangerous tools may be held for approval (raises), replayed from a
+        # stored result, or run once approved (``running`` records how it ended).
         decision = approval_gate.gate(entry, input_obj, ctx)
-        if decision.replay is not None:
-            return output_model.model_validate(decision.replay)  # ty: ignore[unresolved-attribute]
-        _meter(entry)
-        try:
-            result = func(input_obj)
-        except ConnectRequiredError as exc:
-            approval_gate.record(decision, None, str(exc))
-            # MCP-only affordance: upgrade to the SEP-1036 URL-elicitation
-            # error (-32042) so capable hosts open the consent flow natively.
-            reraise_with_elicitation(_current_session(ctx), exc)
-        except Exception as exc:  # noqa: BLE001
-            # Approval bookkeeping only: a held call that was approved must not
-            # stay "executing" forever. Re-raised unchanged.
-            approval_gate.record(
-                decision, None, f"{entry.name} failed: {type(exc).__name__}"
-            )
-            raise
-        approval_gate.record(decision, result, None)
+        if isinstance(decision, Replay):
+            return output_model.model_validate(decision.output)  # ty: ignore[unresolved-attribute]
+        # Claim the approved call first, so a lost race isn't charged quota.
+        with running(decision) as done:
+            _meter(entry)
+            try:
+                result = func(input_obj)
+            except ConnectRequiredError as exc:
+                # MCP-only affordance: upgrade to the SEP-1036 URL-elicitation
+                # error (-32042) so capable hosts open the consent flow natively.
+                reraise_with_elicitation(_current_session(ctx), exc)
+            done(result)
         return result
 
     _apply_tool_signature(
@@ -273,19 +272,15 @@ def _make_enhanced_tool(
         input_obj = _build_input(input_model, kwargs)
         decision = await approval_gate.gate_async(entry, input_obj, ctx)
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
-        if decision.replay is not None:
-            replayed = output_model.model_validate(decision.replay)  # ty: ignore[unresolved-attribute]
+        if isinstance(decision, Replay):
+            replayed = output_model.model_validate(decision.output)  # ty: ignore[unresolved-attribute]
             return _build_call_tool_result(replayed, tool)
-        await _meter_async(entry)
-        try:
+        # Claim/record are quick single-row writes, and make_tool keeps
+        # dangerous tools headless, so for every other tool this is a no-op.
+        with running(decision) as done:
+            await _meter_async(entry)
             result = await _run_enhancer(tool, entry, enhancer_entry, ctx)
-        except Exception as exc:  # noqa: BLE001
-            # Approval bookkeeping only (see the headless wrapper). Re-raised.
-            approval_gate.record(
-                decision, None, f"{entry.name} failed: {type(exc).__name__}"
-            )
-            raise
-        approval_gate.record(decision, result, None)
+            done(result)
         return _build_call_tool_result(result, tool)
 
     _apply_tool_signature(

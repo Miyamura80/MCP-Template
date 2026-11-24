@@ -31,8 +31,14 @@ from common import global_config
 from mcp_server import approval_gate
 from mcp_server._tool_errors import model_facing_message
 from mcp_server._tool_factory import make_tool
-from services import ServiceEntry, discover_services, get_registry
-from services.approvals_svc import APPROVAL_TOOLS, ApprovalRequiredError
+from services import (
+    ServiceEntry,
+    dangerous_tool_names,
+    discover_services,
+    get_registry,
+)
+from services.approvals_errors import ApprovalRequiredError
+from services.approvals_svc import APPROVAL_TOOLS
 from src.utils.mcp_url_flags import current_url_flags
 
 _APPS_DIR = Path(__file__).parent / "apps"
@@ -160,12 +166,12 @@ class _TemplateMCPServer(MCPServer):
         tools = await super().list_tools()
         if current_url_flags().dangerous_tools:
             return tools
-        hidden = _dangerous_tool_names() | APPROVAL_TOOLS
+        hidden = dangerous_tool_names() | APPROVAL_TOOLS
         return [t for t in tools if t.name not in hidden]
 
     async def call_tool(self, name, arguments, context=None):
         if not current_url_flags().dangerous_tools and (
-            name in _dangerous_tool_names() or name in APPROVAL_TOOLS
+            name in dangerous_tool_names() or name in APPROVAL_TOOLS
         ):
             # Mirrors the hidden tools/list entry. A ToolError so the model
             # reads why, rather than a bare "unknown tool".
@@ -183,15 +189,16 @@ class _TemplateMCPServer(MCPServer):
         except UnexpectedToolError as exc:
             held = exc.__cause__
             if (
-                isinstance(held, ApprovalRequiredError)
+                may_confirm
+                and isinstance(held, ApprovalRequiredError)
                 and held.view.mode == "elicitation"
                 and context is not None
-                and may_confirm
+                and approval_gate.can_confirm_inline(context)
             ):
                 # The gate held the call for the human; ask them in the host.
                 # The rerun may not ask again, so a stale answer can't loop.
                 return await approval_gate.confirm_inline(
-                    held.view,
+                    held,
                     context,
                     lambda: self._dispatch(name, arguments, context, may_confirm=False),
                 )
@@ -249,11 +256,6 @@ def build_mcp_server() -> MCPServer:
 
     _populated = True
     return mcp
-
-
-def _dangerous_tool_names() -> frozenset[str]:
-    """Names of ``risk="dangerous"`` services. The registry is fixed after startup."""
-    return frozenset(e.name for e in get_registry() if e.risk == "dangerous")
 
 
 def llm_tool_surface() -> list[ServiceEntry]:

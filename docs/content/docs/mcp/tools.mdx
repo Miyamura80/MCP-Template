@@ -104,8 +104,8 @@ webhooks) can be held for approval. See [Approvals](/docs/mcp/approvals).
 
 | Tool | Description |
 |------|-------------|
-| `confirm_action` | Run a dangerous call that is waiting for your confirmation (agent approval mode). |
-| `get_approval` | Check a held dangerous call: whether it is still pending, was approved and ran (with its result), was denied, or expired. |
+| `confirm_action` | Approve a dangerous call that is waiting for your confirmation (agent approval mode), then retry that exact call to run it. |
+| `get_approval` | Check a held dangerous call: still pending, approved (retry the call to run it), executed (with its result), denied, or expired. |
 
 ## Feedback
 

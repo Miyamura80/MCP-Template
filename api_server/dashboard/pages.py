@@ -6,7 +6,7 @@
 
     GET  /api/v1/dashboard/session          {user_id, csrf_token}
     GET  /api/v1/approvals                  list
-    POST /api/v1/approvals/{id}/approve     (X-CSRF-Token)
+    POST /api/v1/approvals/{id}/approve     (X-CSRF-Token; the agent's retry runs it)
     POST /api/v1/approvals/{id}/deny        (X-CSRF-Token)
     GET  /api/v1/settings/approval
     PUT  /api/v1/settings/approval          (X-CSRF-Token)
@@ -32,19 +32,18 @@ from api_server.dashboard.session import (
     current_session,
     login_redirect,
 )
-from api_server.oauth.flow import _page
+from api_server.oauth.flow import render_page
 from models.approvals import (
     APPROVAL_MODES,
     ApprovalList,
     ApprovalSettings,
     ApprovalView,
 )
-from services import InvalidArgument, get_registry
+from services import InvalidArgument, dangerous_tool_names
 from services.approvals_svc import (
-    approve_and_execute,
+    approve_as_human,
     deny,
-    get_action_args,
-    get_approval_view,
+    get_review,
     get_settings,
     list_approvals,
     save_settings,
@@ -53,7 +52,6 @@ from services.approvals_svc import (
 pages = APIRouter(prefix="/dashboard", tags=["dashboard"], include_in_schema=False)
 api = APIRouter(prefix="/api/v1", tags=["approvals"])
 
-_ANY_MODE = frozenset({"agent", "elicitation", "browser"})
 _MODE_HELP = {
     "automatic": "runs without asking",
     "agent": "your agent confirms with confirm_action",
@@ -63,7 +61,7 @@ _MODE_HELP = {
 
 
 def _dangerous_tools() -> list[str]:
-    return sorted(e.name for e in get_registry() if e.risk == "dangerous")
+    return sorted(dangerous_tool_names())
 
 
 def _esc(value: object) -> str:
@@ -104,7 +102,7 @@ def approvals_page(request: Request) -> Response:
         f"{_esc(v.created_at.isoformat(timespec='minutes'))}</li>"
         for v in rows
     )
-    return _page(
+    return render_page(
         "Approvals",
         "<h1>Approvals</h1>"
         + _nav(session)
@@ -118,14 +116,9 @@ def approval_page(request: Request, approval_id: str) -> Response:
     if session is None:
         return login_redirect(request)
     try:
-        view = get_approval_view(session.user_id, approval_id)
+        view, args = get_review(session.user_id, approval_id)
     except InvalidArgument:
-        return _page("Approval", "<h1>Not found</h1>" + _nav(session), 404)
-    args = {
-        k: v
-        for k, v in (get_action_args(session.user_id, approval_id) or {}).items()
-        if k != "user_id"
-    }
+        return render_page("Approval", "<h1>Not found</h1>" + _nav(session), 404)
     body = (
         f"<h1>{_esc(view.tool)}</h1>"
         + _nav(session)
@@ -138,12 +131,14 @@ def approval_page(request: Request, approval_id: str) -> Response:
             f"<form method='post' action='/dashboard/approvals/{_esc(view.id)}'>"
             + _csrf_field(session)
             + "<button class='allow' name='decision' value='approve' type='submit'>"
-            "Approve and run</button>"
+            "Approve</button>"
             "<button name='decision' value='deny' type='submit'>Deny</button></form>"
         )
+    elif view.status == "approved":
+        body += "<p>Approved. It runs when your agent retries the call.</p>"
     elif view.error:
         body += f"<p class='warn'>{_esc(view.error)}</p>"
-    return _page(f"Approve {view.tool}", body)
+    return render_page(f"Approve {view.tool}", body)
 
 
 @pages.post("/approvals/{approval_id}")
@@ -157,13 +152,13 @@ def decide_page(
     if session is None:
         return login_redirect(request)
     if not csrf_ok(session, csrf):
-        return _page(
+        return render_page(
             "Approval", "<h1>Request expired</h1><p>Reload and retry.</p>", 403
         )
     try:
         _decide(session.user_id, approval_id, decision)
     except InvalidArgument as exc:
-        return _page("Approval", f"<h1>Can't do that</h1><p>{_esc(exc)}</p>", 400)
+        return render_page("Approval", f"<h1>Can't do that</h1><p>{_esc(exc)}</p>", 400)
     return RedirectResponse(f"/dashboard/approvals/{approval_id}", status_code=303)
 
 
@@ -188,7 +183,7 @@ def settings_page(request: Request) -> Response:
         f"{select('tool:' + tool, settings.overrides.get(tool), True)}</label></p>"
         for tool in _dangerous_tools()
     )
-    return _page(
+    return render_page(
         "Approval settings",
         "<h1>Approval settings</h1>"
         + _nav(session)
@@ -209,7 +204,7 @@ async def save_settings_page(request: Request) -> Response:
         return login_redirect(request)
     form = await request.form()
     if not csrf_ok(session, str(form.get("csrf", ""))):
-        return _page("Approval settings", "<h1>Request expired</h1>", 403)
+        return render_page("Approval settings", "<h1>Request expired</h1>", 403)
     overrides = {
         str(key).removeprefix("tool:"): str(value)
         for key, value in form.multi_items()
@@ -223,7 +218,9 @@ async def save_settings_page(request: Request) -> Response:
             ),
         )
     except (InvalidArgument, ValueError) as exc:
-        return _page("Approval settings", f"<h1>Not saved</h1><p>{_esc(exc)}</p>", 400)
+        return render_page(
+            "Approval settings", f"<h1>Not saved</h1><p>{_esc(exc)}</p>", 400
+        )
     return RedirectResponse("/dashboard/approval", status_code=303)
 
 
@@ -243,7 +240,7 @@ def _require(request: Request, csrf: str | None = None, write: bool = False):
 
 def _decide(user_id: str, approval_id: str, decision: str) -> ApprovalView:
     if decision == "approve":
-        return approve_and_execute(user_id, approval_id, modes=_ANY_MODE)
+        return approve_as_human(user_id, approval_id)
     if decision == "deny":
         return deny(user_id, approval_id)
     raise InvalidArgument("decision must be approve or deny")

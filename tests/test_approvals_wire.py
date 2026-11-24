@@ -11,14 +11,12 @@ from fastapi.testclient import TestClient
 from api_server.server import app
 from common import global_config
 from services import _registry
-from services.approvals_svc import (
+from services.approvals_errors import (
     ApprovalRequiredError,
     BrowserApprovalRequiredError,
-    approve_and_execute,
-    check_gate,
-    effective_mode,
 )
-from src.utils.current_user import reset_current_user, set_current_user
+from services.approvals_store import args_hash, create_action
+from services.approvals_svc import approve_as_human, check_gate, effective_mode
 from tests.test_approvals import _TOOL, _calls, _danger_tool, _EchoIn, _set_mode
 from tests.test_mcp_e2e import _McpSession, _patch_db, _wire_client
 from tests.test_mcp_protocol_eras import _ModernMcpClient
@@ -43,9 +41,11 @@ class TestMcp(TestTemplate):
                 "tools/call",
                 {"name": "confirm_action", "arguments": {"approval_id": approval_id}},
             )
-            assert done["structuredContent"]["status"] == "executed"
-            # Retrying the original call replays the result.
-            again = session.request("tools/call", args)
+            assert done["structuredContent"]["status"] == "approved"
+            assert _calls == []  # confirming runs nothing
+            ran = session.request("tools/call", args)
+            assert ran["structuredContent"] == {"text": "send it", "run": 1}
+            again = session.request("tools/call", args)  # replayed, not rerun
             assert again["structuredContent"] == {"text": "send it", "run": 1}
             assert _calls == ["send it"]
 
@@ -138,9 +138,7 @@ class TestRest(TestTemplate):
             headers={"X-API-KEY": key, "Idempotency-Key": idem},
         )
 
-    def test_202_then_replay(self):
-        from models.gmail import GmailDisconnectResult  # noqa: PLC0415
-
+    def test_202_then_approve_then_run_then_replay(self):
         with _wire_client("u-rest") as (client, key):
             _set_mode("u-rest", "agent")
             resp = self._post(client, key, "k1")
@@ -148,15 +146,27 @@ class TestRest(TestTemplate):
             body = resp.json()
             assert body["status"] == "approval_required"
             assert "confirm_action" in body["message"]
-            entry = next(e for e in _registry if e.name == "gmail_disconnect")
-            fake = GmailDisconnectResult(revoked=True)
-            with patch.object(entry, "func", return_value=fake):
-                approve_and_execute(
-                    "u-rest", body["approval"]["id"], modes=frozenset({"agent"})
-                )
-            replay = self._post(client, key, "k2")
-            assert replay.status_code == 200, replay.text
-            assert replay.json() == {"revoked": True}
+            # Held again on a same-key retry: the claim was released, not cached.
+            assert self._post(client, key, "k1").status_code == 202
+            confirm = client.post(
+                "/api/v1/services/confirm_action",
+                json={"approval_id": body["approval"]["id"]},
+                headers={"X-API-KEY": key, "Idempotency-Key": "c1"},
+            )
+            assert confirm.json()["status"] == "approved", confirm.text
+            ran = self._post(client, key, "k2")
+            assert ran.status_code == 200, ran.text
+            replay = self._post(client, key, "k3")
+            assert replay.status_code == 200 and replay.json() == ran.json()
+
+    def test_denied_is_403(self):
+        with _wire_client("u-rest2") as (client, key):
+            _set_mode("u-rest2", "browser")
+            approval_id = self._post(client, key, "k1").json()["approval"]["id"]
+            from services.approvals_svc import deny  # noqa: PLC0415
+
+            deny("u-rest2", approval_id)
+            assert self._post(client, key, "k2").status_code == 403
 
 
 class TestDashboard(TestTemplate):
@@ -204,17 +214,20 @@ class TestDashboard(TestTemplate):
         with self._client() as client:
             csrf = self._login(client)
             _set_mode("human", "browser")
-            with set_user("human"), pytest.raises(BrowserApprovalRequiredError) as info:
-                check_gate(
-                    next(e for e in _registry if e.name == _TOOL),
-                    _EchoIn(user_id="human", text="from page"),
-                    user_id="human",
-                    url_mode=None,
+            entry = next(e for e in _registry if e.name == _TOOL)
+            call = _EchoIn(user_id="human", text="from page")
+
+            def gate():
+                return check_gate(
+                    entry, call, user_id="human", url_mode=None,
                     can_confirm_inline=False,
-                )
+                )  # fmt: skip
+
+            with pytest.raises(BrowserApprovalRequiredError) as info:
+                gate()
             approval_id = info.value.view.id
             page = client.get(f"/dashboard/approvals/{approval_id}")
-            assert "from page" in page.text and "Approve and run" in page.text
+            assert "from page" in page.text and "Approve" in page.text
             # Missing CSRF is refused.
             bad = client.post(f"/api/v1/approvals/{approval_id}/approve")
             assert bad.status_code == 403 and _calls == []
@@ -222,8 +235,9 @@ class TestDashboard(TestTemplate):
                 f"/api/v1/approvals/{approval_id}/approve",
                 headers={"X-CSRF-Token": csrf},
             )
-            assert ok.status_code == 200 and ok.json()["status"] == "executed"
-            assert _calls == ["from page"]
+            assert ok.status_code == 200 and ok.json()["status"] == "approved"
+            assert _calls == []  # the agent's retry runs it
+            assert type(gate()).__name__ == "RunHeld"
 
     def test_other_users_approval_is_invisible(self):
         with self._client() as client:
@@ -273,14 +287,24 @@ class TestDashboard(TestTemplate):
             assert resp.headers["location"] == "/dashboard/approvals"
 
 
-@contextmanager
-def set_user(user_id: str):
-    from api_server.auth.unified_auth import AuthenticatedUser  # noqa: PLC0415
+class TestConcurrency(TestTemplate):
+    def test_identical_calls_share_one_row(self):
+        with _patch_db() as factory:
+            call_hash = args_hash("t", {"a": 1})
+            with factory() as s1, factory() as s2:
+                first = create_action(s1, "u", "t", {"a": 1}, call_hash, "agent")
+                # A concurrent identical call loses the unique index race and
+                # gets the winner back instead of a second approval.
+                second = create_action(s2, "u", "t", {"a": 1}, call_hash, "agent")
+            assert first.id == second.id
 
-    token = set_current_user(
-        AuthenticatedUser(user_id=user_id, auth_method="api_key", scopes=["*"])
-    )
-    try:
-        yield
-    finally:
-        reset_current_user(token)
+    def test_dashboard_approval_runs_nothing(self):
+        with _patch_db(), _danger_tool() as entry:
+            _set_mode("u", "browser")
+            with pytest.raises(ApprovalRequiredError) as info:
+                check_gate(
+                    entry, _EchoIn(user_id="u", text="x"), user_id="u",
+                    url_mode=None, can_confirm_inline=False,
+                )  # fmt: skip
+            assert approve_as_human("u", info.value.view.id).status == "approved"
+            assert _calls == []

@@ -10,6 +10,9 @@ open the consent flow natively and may retry the original call; the conversion
 is MCP-only, so CLI/API consumers of the same services still see the plain
 exception.
 
+A browser-mode approval of a dangerous tool (``BrowserApprovalRequiredError``)
+takes the same path: the URL is the approval page.
+
 This module is feature-agnostic: everything integration-specific (the auth
 URL, the elicitation message, the textual recovery script) travels on the
 ``ConnectRequiredError`` contract defined in ``services/__init__.py``.
@@ -52,6 +55,7 @@ from mcp.types import ElicitRequestURLParams
 from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 
 from services import ConnectRequiredError
+from services.approvals_errors import BrowserApprovalRequiredError
 
 
 def _client_url_support(session: ServerSession | None) -> bool | None:
@@ -73,7 +77,8 @@ def _client_url_support(session: ServerSession | None) -> bool | None:
 
 
 def reraise_with_elicitation(
-    session: ServerSession | None, exc: ConnectRequiredError
+    session: ServerSession | None,
+    exc: ConnectRequiredError | BrowserApprovalRequiredError,
 ) -> NoReturn:
     """Raise the SEP-1036 error for ``exc`` when possible, else re-raise ``exc``.
 

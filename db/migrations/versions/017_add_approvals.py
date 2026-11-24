@@ -51,9 +51,19 @@ def upgrade() -> None:
         "pending_actions",
         ["user_id", "tool", "args_hash"],
     )
+    active = sa.text("status IN ('pending', 'approved', 'executing')")
+    op.create_index(
+        "uq_pending_actions_active_call",
+        "pending_actions",
+        ["user_id", "tool", "args_hash"],
+        unique=True,
+        sqlite_where=active,
+        postgresql_where=active,
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("uq_pending_actions_active_call", table_name="pending_actions")
     op.drop_index("ix_pending_actions_user_call", table_name="pending_actions")
     op.drop_index("ix_pending_actions_user_status", table_name="pending_actions")
     op.drop_table("pending_actions")

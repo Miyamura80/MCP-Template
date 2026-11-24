@@ -9,14 +9,12 @@ from api_server.billing.limits import ensure_daily_limit
 from api_server.billing.paywall import enforce_payment
 from api_server.idempotency import execute_idempotent
 from services import ServiceEntry, discover_services, get_registry
-from services.approvals_svc import (
+from services.approvals_errors import (
     ApprovalDeniedError,
     ApprovalGateError,
     ApprovalRequiredError,
-    GateDecision,
-    check_gate,
-    record_outcome,
 )
+from services.approvals_svc import Replay, check_gate, running
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
@@ -62,28 +60,32 @@ def _make_route(entry: ServiceEntry) -> None:
                 entry, body, user_id=_user.user_id, url_mode=None,
                 can_confirm_inline=False,
             )  # fmt: skip
-            if decision.replay is not None:
-                return output_model.model_validate(decision.replay)
-            # Priced services are gated by the x402 paywall (verify + settle the
-            # X-PAYMENT header). When the paywall actually charges the call it
-            # bypasses the free quota; when it's inactive (x402 disabled) it
-            # returns False and we still apply the daily quota, so a priced
-            # service is never unlimited. Both run inside the compute so
-            # idempotent replays don't double-charge or double-count.
-            charged = False
-            price = entry.price
-            if price is not None:
-                charged = enforce_payment(
-                    user_id=_user.user_id,
-                    route=entry.name,
-                    price=price,
-                    asset=entry.asset,
-                    payment_header=request.headers.get("X-PAYMENT"),
-                    mutating=entry.mutating,
-                )
-            if not charged:
-                ensure_daily_limit(_user.user_id)
-            return _run_recorded(decision, lambda: func(body))
+            if isinstance(decision, Replay):
+                return output_model.model_validate(decision.output)  # ty: ignore[unresolved-attribute]
+            # Claim an approved call before metering, so a lost race isn't charged.
+            with running(decision) as done:
+                # Priced services are gated by the x402 paywall (verify + settle the
+                # X-PAYMENT header). When the paywall actually charges the call it
+                # bypasses the free quota; when it's inactive (x402 disabled) it
+                # returns False and we still apply the daily quota, so a priced
+                # service is never unlimited. Both run inside the compute so
+                # idempotent replays don't double-charge or double-count.
+                charged = False
+                price = entry.price
+                if price is not None:
+                    charged = enforce_payment(
+                        user_id=_user.user_id,
+                        route=entry.name,
+                        price=price,
+                        asset=entry.asset,
+                        payment_header=request.headers.get("X-PAYMENT"),
+                        mutating=entry.mutating,
+                    )
+                if not charged:
+                    ensure_daily_limit(_user.user_id)
+                result = func(body)
+                done(result)
+            return result
 
         try:
             if not entry.mutating:
@@ -97,21 +99,6 @@ def _make_route(entry: ServiceEntry) -> None:
             )
         except ApprovalGateError as exc:
             return _gate_response(exc)
-
-
-def _run_recorded(decision: GateDecision, run):
-    """Run the service; for an approved held call, store how it ended."""
-    if decision.action_id is None:
-        return run()
-    try:
-        result = run()
-    except Exception as exc:  # noqa: BLE001
-        # Approval bookkeeping only: an approved call must not stay
-        # "executing" forever. Re-raised unchanged for the normal handlers.
-        record_outcome(decision.action_id, error=f"failed: {type(exc).__name__}")
-        raise
-    record_outcome(decision.action_id, result=result)
-    return result
 
 
 def _gate_response(exc: ApprovalGateError) -> JSONResponse:

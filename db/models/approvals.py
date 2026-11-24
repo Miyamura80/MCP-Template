@@ -9,7 +9,7 @@ each row is single use and bound to the user who made the call. See
 
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, Index, String, Text
+from sqlalchemy import JSON, DateTime, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -17,6 +17,11 @@ from db.base import Base
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+# A call in one of these states blocks a second row for the same call.
+ACTIVE_STATUSES = ("pending", "approved", "executing")
+_ACTIVE_SQL = "status IN ('pending', 'approved', 'executing')"
 
 
 class ApprovalSetting(Base):
@@ -55,4 +60,15 @@ class PendingAction(Base):
     __table_args__ = (
         Index("ix_pending_actions_user_status", "user_id", "status"),
         Index("ix_pending_actions_user_call", "user_id", "tool", "args_hash"),
+        # One active row per exact call: two concurrent identical calls must
+        # not produce two approvals (and two sends).
+        Index(
+            "uq_pending_actions_active_call",
+            "user_id",
+            "tool",
+            "args_hash",
+            unique=True,
+            sqlite_where=text(_ACTIVE_SQL),
+            postgresql_where=text(_ACTIVE_SQL),
+        ),
     )
