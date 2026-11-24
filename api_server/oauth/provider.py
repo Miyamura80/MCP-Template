@@ -81,7 +81,7 @@ class BuiltinOAuthProvider(
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         try:
-            return await to_thread.run_sync(cimd.resolve_client, client_id)
+            return await cimd.resolve_client(client_id)
         except cimd.ClientMetadataError as exc:
             log.warning("oauth: rejected client metadata document: {}", exc)
             return None

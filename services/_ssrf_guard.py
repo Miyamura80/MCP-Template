@@ -36,15 +36,12 @@ check), ``follow_redirects=False`` (each hop must be re-validated and
 re-pinned, never followed blindly) and a wall-clock deadline on every socket
 operation.
 
-A fetch of an attacker-chosen URL also holds a worker thread for as long as
-the far end stalls, so :class:`FetchLimiter` caps how many run at once, in
-total and per target. A target is the network prefix of the pinned address,
-``IPV4_PREFIX`` or ``IPV6_PREFIX`` bits wide, not the hostname: subdomains are
-free to mint, but addresses cost money and one operator usually gets a whole
-/24 or /64, so a host's neighbours share its cap. There is no queue: a caller
-that finds no free slot is refused at once with :class:`FetchLimitBusyError`
-and decides for itself what to do instead (the CIMD resolver serves a stale
-record, for example).
+Async callers (the CIMD resolver) use :func:`validate_and_pin_async` and
+:func:`build_async_client` instead, which apply the same validation and pinning
+without holding a worker thread for the exchange. DNS is the one step that
+still needs a thread, because ``getaddrinfo`` has no async form and no timeout;
+:class:`ResolverThreads` caps those threads and counts each one until its
+lookup really returns, so lookups an async caller gave up on cannot pile up.
 """
 
 from __future__ import annotations
@@ -54,12 +51,15 @@ import socket
 import ssl
 import threading
 import time
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Iterable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
+import anyio
+import anyio.from_thread
+import anyio.lowlevel
 import httpcore
 import httpx
 
@@ -74,6 +74,10 @@ class SsrfError(ValueError):
     cannot be resolved, and - the security-critical case - a host that resolves
     to any non-global address.
     """
+
+
+class UnresolvableHostError(SsrfError):
+    """The host could not be resolved; unlike a refusal, this may be transient."""
 
 
 @dataclass(frozen=True)
@@ -92,25 +96,25 @@ class PinnedTarget:
     headers: dict[str, str] = field(default_factory=dict)
     extensions: dict[str, str] = field(default_factory=dict)
 
-    @property
-    def address(self) -> str:
-        """The IP address ``url`` connects to, without IPv6 brackets."""
-        return urlparse(self.url).hostname or ""
+
+def _addresses(host: str, infos: list) -> list[_IPAddress]:
+    """The addresses in a ``getaddrinfo`` answer, or raise :class:`SsrfError`."""
+    if not infos:
+        raise UnresolvableHostError(f"cannot resolve host {host!r}")
+    addresses: list[_IPAddress] = []
+    for info in infos:
+        addr = str(info[4][0]).split("%")[0]  # strip IPv6 scope id
+        addresses.append(ipaddress.ip_address(addr))
+    return addresses
 
 
 def _resolve(host: str, port: int) -> list[_IPAddress]:
     """Resolve ``host`` to every candidate address, or raise :class:`SsrfError`."""
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, OSError) as exc:
-        raise SsrfError(f"cannot resolve host {host!r}") from exc
-    if not infos:
-        raise SsrfError(f"cannot resolve host {host!r}")
-    addresses: list[_IPAddress] = []
-    for info in infos:
-        addr = str(info[4][0]).split("%")[0]  # strip IPv6 scope id
-        addresses.append(ipaddress.ip_address(addr))
-    return addresses
+    except OSError as exc:  # socket.gaierror is an OSError
+        raise UnresolvableHostError(f"cannot resolve host {host!r}") from exc
+    return _addresses(host, infos)
 
 
 # IPv6 ranges that carry or translate to an IPv4 address and that ``is_global``
@@ -145,16 +149,15 @@ def is_public_address(addr: _IPAddress, *, allow_loopback: bool = False) -> bool
     return addr.is_global
 
 
-def validate_and_pin(url: str, *, allow_loopback: bool = False) -> PinnedTarget:
-    """Validate ``url`` and pin it to one resolved, allowlisted IP.
+@dataclass(frozen=True, slots=True)
+class _Url:
+    parsed: ParseResult
+    host: str
+    port: int | None  # as written in the URL
+    connect_port: int  # the port to resolve and connect to
 
-    Resolves the host once, requires every answer to satisfy
-    :func:`is_public_address`, then rewrites the URL to target the first
-    validated IP while preserving the hostname in ``Host`` + SNI. IP-literal
-    hosts are validated and passed through unchanged.
 
-    Raises :class:`SsrfError` on any rejection.
-    """
+def _parse_url(url: str) -> _Url:
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
         raise SsrfError(f"unsupported URL scheme: {parsed.scheme!r}")
@@ -165,9 +168,15 @@ def validate_and_pin(url: str, *, allow_loopback: bool = False) -> PinnedTarget:
         port = parsed.port  # raises ValueError on e.g. "https://h:abc/"
     except ValueError as exc:
         raise SsrfError(f"invalid port in URL {url!r}") from exc
-
     default_port = 80 if parsed.scheme == "http" else 443
-    addresses = _resolve(host, port or default_port)
+    return _Url(parsed, host, port, port or default_port)
+
+
+def _pin(
+    url: str, target: _Url, addresses: list[_IPAddress], *, allow_loopback: bool
+) -> PinnedTarget:
+    """Check every answer, then pin ``url`` to the first. Shared by both paths."""
+    host, port = target.host, target.port
     for addr in addresses:
         if not is_public_address(addr, allow_loopback=allow_loopback):
             # The address itself stays out of the message: it can name
@@ -185,13 +194,28 @@ def validate_and_pin(url: str, *, allow_loopback: bool = False) -> PinnedTarget:
     ip_netloc = f"[{ip}]" if ":" in ip else ip
     if port:
         ip_netloc += f":{port}"
-    pinned = parsed._replace(netloc=ip_netloc).geturl()
+    pinned = target.parsed._replace(netloc=ip_netloc).geturl()
     host_header = host if not port else f"{host}:{port}"
     # sni_hostname keeps cert verification pointed at the real host under https.
-    extensions = {"sni_hostname": host} if parsed.scheme == "https" else {}
+    extensions = {"sni_hostname": host} if target.parsed.scheme == "https" else {}
     return PinnedTarget(
         url=pinned, headers={"Host": host_header}, extensions=extensions
     )
+
+
+def validate_and_pin(url: str, *, allow_loopback: bool = False) -> PinnedTarget:
+    """Validate ``url`` and pin it to one resolved, allowlisted IP.
+
+    Resolves the host once, requires every answer to satisfy
+    :func:`is_public_address`, then rewrites the URL to target the first
+    validated IP while preserving the hostname in ``Host`` + SNI. IP-literal
+    hosts are validated and passed through unchanged.
+
+    Raises :class:`SsrfError` on any rejection.
+    """
+    target = _parse_url(url)
+    addresses = _resolve(target.host, target.connect_port)
+    return _pin(url, target, addresses, allow_loopback=allow_loopback)
 
 
 def build_client(*, timeout: float, deadline: float) -> httpx.Client:
@@ -320,72 +344,97 @@ class _DeadlineBackend(httpcore.NetworkBackend):
         self._backend.sleep(seconds)
 
 
-# -- Concurrency caps (see the module docstring) ---------------------------
-
-IPV4_PREFIX = 24
-IPV6_PREFIX = 64
+# -- Async path ---------------------------------------------------------------
 
 
-class FetchLimitBusyError(RuntimeError):
-    """Every slot for the target, or in total, is taken."""
+class ResolverBusyError(RuntimeError):
+    """Every resolver thread is still inside a lookup."""
 
 
-def target_key(address: str) -> str:
-    """The network a pinned ``address`` counts against, e.g. ``203.0.113.0/24``.
+class ResolverThreads:
+    """Runs ``getaddrinfo`` for async callers on at most ``limit`` threads.
 
-    An IPv4-mapped IPv6 address counts against its IPv4 network, so one host
-    cannot get two caps by being reached both ways.
+    A thread cannot be interrupted, so a caller whose deadline passes stops
+    waiting but leaves the lookup running until the system resolver gives up.
+    Each thread is therefore counted from start until ``getaddrinfo`` really
+    returns, not until its caller stops waiting, and a lookup that finds every
+    thread taken is refused at once with :class:`ResolverBusyError`. These are
+    this class's own threads, so a hung lookup never holds one of anyio's
+    worker threads (the pool that serves /mcp and sync routes).
     """
-    addr = ipaddress.ip_address(address)
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        addr = addr.ipv4_mapped
-    prefix = IPV4_PREFIX if addr.version == 4 else IPV6_PREFIX
-    return str(ipaddress.ip_network((addr, prefix), strict=False))
 
-
-@dataclass(frozen=True, slots=True)
-class FetchLimitSnapshot:
-    """What :class:`FetchLimiter` holds at one moment."""
-
-    running: int
-    per_target: dict[str, int]
-
-
-class FetchLimiter:
-    """At most ``total`` fetches at once, and ``per_target`` per target."""
-
-    def __init__(self, *, total: int, per_target: int) -> None:
-        self._total = total
-        self._per_target = per_target
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
         self._lock = threading.Lock()
         self._running = 0
-        # target -> running fetches; a target is removed when it reaches 0, so
-        # this never holds more than ``total`` entries.
-        self._targets: dict[str, int] = {}
 
-    @contextmanager
-    def hold(self, address: str) -> Iterator[None]:
-        """Hold a slot for the target of ``address`` while the block runs.
-
-        Raises :class:`FetchLimitBusyError` at once if none is free.
-        """
-        key = target_key(address)
+    @property
+    def running(self) -> int:
         with self._lock:
-            held = self._targets.get(key, 0)
-            if self._running >= self._total or held >= self._per_target:
-                raise FetchLimitBusyError
+            return self._running
+
+    async def getaddrinfo(self, host: str, port: int) -> list:
+        with self._lock:
+            if self._running >= self._limit:
+                raise ResolverBusyError
             self._running += 1
-            self._targets[key] = held + 1
+        done = anyio.Event()
+        token = anyio.lowlevel.current_token()
+        answer: list = []
+        failure: list[OSError] = []
+
+        def lookup() -> None:
+            try:
+                answer.extend(socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP))
+            except OSError as exc:  # socket.gaierror is an OSError
+                failure.append(exc)
+            finally:
+                with self._lock:
+                    self._running -= 1
+                # RuntimeError: the event loop is gone, so nobody waits.
+                with suppress(RuntimeError):
+                    anyio.from_thread.run_sync(done.set, token=token)
+
         try:
-            yield
-        finally:
+            threading.Thread(target=lookup, name="ssrf-dns", daemon=True).start()
+        except RuntimeError:  # no thread could be started
             with self._lock:
                 self._running -= 1
-                if self._targets[key] == 1:
-                    del self._targets[key]
-                else:
-                    self._targets[key] -= 1
+            raise
+        await done.wait()
+        if failure:
+            raise UnresolvableHostError(f"cannot resolve host {host!r}") from failure[0]
+        return answer
 
-    def snapshot(self) -> FetchLimitSnapshot:
-        with self._lock:
-            return FetchLimitSnapshot(self._running, dict(self._targets))
+
+async def validate_and_pin_async(
+    url: str, *, resolver: ResolverThreads, allow_loopback: bool = False
+) -> PinnedTarget:
+    """:func:`validate_and_pin` for async callers; DNS runs on ``resolver``.
+
+    Cancel the caller (for example with :func:`anyio.fail_after`) to bound the
+    lookup: the wait ends at once and the thread is released when the system
+    resolver returns. Raises :class:`ResolverBusyError` when ``resolver`` has
+    no free thread, and :class:`SsrfError` on any rejection.
+    """
+    target = _parse_url(url)
+    try:
+        ipaddress.ip_address(target.host)
+    except ValueError:
+        infos = await resolver.getaddrinfo(target.host, target.connect_port)
+    else:  # an IP literal: no lookup, and no thread
+        infos = [(None, None, None, "", (target.host, target.connect_port))]
+    addresses = _addresses(target.host, infos)
+    return _pin(url, target, addresses, allow_loopback=allow_loopback)
+
+
+def build_async_client(*, timeout: float) -> httpx.AsyncClient:
+    """The ``httpx.AsyncClient`` counterpart of :func:`build_client`.
+
+    The same hardening: no environment proxy, no redirects. There is no
+    deadline transport: an async caller bounds the whole exchange by
+    cancelling it (``anyio.fail_after``), which interrupts any await,
+    wherever in the response the server stalls. ``timeout`` still bounds each
+    socket operation.
+    """
+    return httpx.AsyncClient(timeout=timeout, trust_env=False, follow_redirects=False)

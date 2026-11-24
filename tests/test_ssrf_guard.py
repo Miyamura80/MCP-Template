@@ -21,10 +21,14 @@ import pytest
 import services._ssrf_guard as ssrf_guard
 from services._ssrf_guard import (
     PinnedTarget,
+    ResolverBusyError,
+    ResolverThreads,
     SsrfError,
+    UnresolvableHostError,
     build_client,
     is_public_address,
     validate_and_pin,
+    validate_and_pin_async,
 )
 from tests.stall_server import StallServer
 from tests.test_template import TestTemplate
@@ -178,6 +182,64 @@ class TestSsrfGuard(TestTemplate):
                 client.get("http://127.0.0.1:9/")
         finally:
             client.close()
+
+
+class TestAsyncPin(TestTemplate):
+    """validate_and_pin_async: the same validation, DNS on capped threads."""
+
+    @pytest.fixture
+    def anyio_backend(self):
+        return "asyncio"
+
+    async def _pin(self, url: str, addrinfo, resolver=None) -> PinnedTarget:
+        with patch.object(ssrf_guard.socket, "getaddrinfo", return_value=addrinfo):
+            return await validate_and_pin_async(
+                url, resolver=resolver or ResolverThreads(1)
+            )
+
+    @pytest.mark.anyio
+    async def test_pins_like_the_sync_path(self):
+        t = await self._pin("https://hook.example/path", _PUBLIC_ADDRINFO)
+        assert t.url == f"https://{_PUBLIC_IP}/path"
+        assert t.headers["Host"] == "hook.example"
+        assert t.extensions["sni_hostname"] == "hook.example"
+
+    @pytest.mark.anyio
+    async def test_rejects_every_internal_answer(self):
+        for ip in _INTERNAL_ADDRS:
+            with pytest.raises(SsrfError, match="non-public") as info:
+                await self._pin("https://hook.example/p", _addrinfo(ip))
+            assert ip not in str(info.value)  # no internal address in the text
+        mixed = _PUBLIC_ADDRINFO + _addrinfo("10.0.0.9")
+        with pytest.raises(SsrfError, match="non-public"):
+            await self._pin("https://hook.example/p", mixed)
+
+    @pytest.mark.anyio
+    async def test_rejects_scheme_and_internal_literals_without_a_lookup(self):
+        busy = ResolverThreads(0)  # any lookup would be refused as busy
+        with pytest.raises(SsrfError, match="scheme"):
+            await validate_and_pin_async("file:///etc/passwd", resolver=busy)
+        with pytest.raises(SsrfError, match="non-public"):
+            await validate_and_pin_async("https://169.254.169.254/x", resolver=busy)
+        t = await validate_and_pin_async(f"https://{_PUBLIC_IP}/p", resolver=busy)
+        assert t == PinnedTarget(url=f"https://{_PUBLIC_IP}/p")
+
+    @pytest.mark.anyio
+    async def test_unresolvable_host_is_its_own_error(self):
+        resolver = ResolverThreads(1)
+        with (
+            patch.object(ssrf_guard.socket, "getaddrinfo", side_effect=socket.gaierror),
+            pytest.raises(UnresolvableHostError, match="cannot resolve"),
+        ):
+            await validate_and_pin_async("https://nope.invalid/p", resolver=resolver)
+        assert resolver.running == 0
+
+    @pytest.mark.anyio
+    async def test_busy_resolver_refuses_at_once(self):
+        with pytest.raises(ResolverBusyError):
+            await self._pin(
+                "https://hook.example/p", _PUBLIC_ADDRINFO, ResolverThreads(0)
+            )
 
 
 class TestEmbeddedIpv4(TestTemplate):
