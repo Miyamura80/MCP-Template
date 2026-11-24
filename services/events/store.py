@@ -74,7 +74,9 @@ def lock_cursor(s: Session, user_id: str) -> EventCursor:
     """This principal's cursor row, locked until the transaction ends.
 
     Serializes the user's emits (and subscribes, which must see a consistent
-    head) without touching anyone else's.
+    head) without touching anyone else's. The first-insert race relies on READ
+    COMMITTED (the default): the re-query sees the winner's committed row.
+    Under REPEATABLE READ or SERIALIZABLE it would need a retry.
     """
     query = s.query(EventCursor).filter_by(user_id=user_id).with_for_update()
     row = query.one_or_none()
@@ -176,8 +178,10 @@ def start_after(
         raise InvalidArgument("That cursor did not come from this server.") from exc
     if not 0 <= after <= head:
         raise InvalidArgument("That cursor did not come from this server.")
+    # Rows at or below the watermark are already gone, so there is nothing to
+    # skip: just say events may have been missed. The cursor is shared by all
+    # of the user's event types, so never jump it (that would skip other types).
     truncated = after < pruned_through
-    after = max(after, pruned_through)
     if max_age_ms is not None:
         floor = now() - timedelta(milliseconds=max_age_ms)
         aged_out = (
@@ -242,7 +246,9 @@ def poll(
         )
         if not has_more:
             # Caught up on this name: skip ahead past the user's other event
-            # types, read in the same snapshot as ``rows``.
+            # types. Safe because ``head`` was read before ``rows``: emits are
+            # serialized per user, so every seq up to ``head`` had committed
+            # and the rows query saw it. Keep that order.
             position = max(position, head)
     return {
         "resultType": "complete",
@@ -258,16 +264,23 @@ def prune(older_than: timedelta | None = None) -> int:
     """Drop events past retention, recording each user's ``pruned_through``."""
     retention = older_than or timedelta(days=global_config.events.retention_days)
     cutoff = now() - retention
+    # Watermarks first, in their own short transaction (locks taken in user
+    # order, so two pruners can't deadlock). The worst case of this order is a
+    # brief false "truncated"; the reverse would delete events with no signal.
     with use_db_session() as s:
         reached = (
             s.query(EventLog.user_id, func.max(EventLog.user_seq))
             .filter(EventLog.created_at < cutoff)
             .group_by(EventLog.user_id)
+            .order_by(EventLog.user_id)
             .all()
         )
         for user_id, through in reached:
             row = lock_cursor(s, user_id)
             row.pruned_through = max(row.pruned_through, int(through))
+        s.commit()
+    # Then the deletes, holding no cursor locks, so emits never wait on them.
+    with use_db_session() as s:
         stale = s.query(EventLog.event_id).filter(EventLog.created_at < cutoff)
         s.query(WebhookDelivery).filter(
             WebhookDelivery.channel == MCP_CHANNEL,
@@ -287,13 +300,13 @@ def prune(older_than: timedelta | None = None) -> int:
 
 def purge_user(user_id: str, name: str) -> int:
     """Delete a user's events and subscriptions of one type (Gmail disconnect:
-    those payloads bank message content). Recorded as a gap for pollers."""
+    those payloads bank message content).
+
+    Not recorded in ``pruned_through``: that watermark covers all the user's
+    event types, and the user asked for this data to go.
+    """
     with use_db_session() as s:
         mine = (EventLog.user_id == user_id, EventLog.name == name)
-        through = s.query(func.max(EventLog.user_seq)).filter(*mine).scalar()
-        if through is not None:
-            row = lock_cursor(s, user_id)
-            row.pruned_through = max(row.pruned_through, int(through))
         s.query(WebhookDelivery).filter(
             WebhookDelivery.channel == MCP_CHANNEL,
             WebhookDelivery.event_id.in_(

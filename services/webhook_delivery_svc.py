@@ -54,7 +54,8 @@ from services.webhooks_svc import (
 _BACKOFF_BASE_S = 30
 _BACKOFF_CAP_S = 3600
 # MCP Events retry delays: attempts at about t = 0, 1, 4 and 11 minutes, inside
-# the spec's "3 to 5 attempts within 10 to 15 minutes".
+# the spec's "3 to 5 attempts within 10 to 15 minutes". The schedule is the
+# policy (attempts = delays + 1), so it can't be configured out of the window.
 _MCP_SCHEDULE_S = (60, 180, 420)
 _HTTP_TIMEOUT_S = 10.0
 # Wall-clock ceiling on one delivery POST: the per-operation timeout alone lets a
@@ -211,11 +212,7 @@ _CHANNELS: dict[str, Channel] = {
     # The spec: 3 to 5 attempts within 10 to 15 minutes; 410/413 mean stop.
     MCP_CHANNEL: Channel(
         _load_mcp_event,
-        RetryPolicy(
-            lambda: global_config.events.webhook_max_attempts,
-            _mcp_delay,
-            NON_RETRYABLE,
-        ),
+        RetryPolicy(lambda: len(_MCP_SCHEDULE_S) + 1, _mcp_delay, NON_RETRYABLE),
     ),
 }
 

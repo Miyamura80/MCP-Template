@@ -54,7 +54,6 @@ events:
   max_poll_events: 100
   default_subscription_ttl_seconds: 86400
   max_subscription_ttl_seconds: 604800
-  webhook_max_attempts: 4
   verification_cache_seconds: 86400
   max_subscriptions_per_user: 50
 

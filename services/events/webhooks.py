@@ -154,6 +154,18 @@ def _last_verified(s: Session, user_id: str, url: str) -> datetime | None:
     return row[0] if row else None
 
 
+def _at_cap(s: Session, user_id: str) -> bool:
+    count = s.query(EventSubscription).filter_by(user_id=user_id).count()
+    return count >= global_config.events.max_subscriptions_per_user
+
+
+def _cap_error() -> InvalidArgument:
+    cap = global_config.events.max_subscriptions_per_user
+    return InvalidArgument(
+        f"At most {cap} event subscriptions per user; unsubscribe one first."
+    )
+
+
 def subscribe(
     user_id: str,
     name: str,
@@ -181,13 +193,9 @@ def subscribe(
 
     with use_db_session() as s:
         verified_at = _last_verified(s, user_id, url)
-        is_new = s.get(EventSubscription, sub_id) is None
-        count = s.query(EventSubscription).filter_by(user_id=user_id).count()
-    if is_new and count >= cfg.max_subscriptions_per_user:
-        raise InvalidArgument(
-            f"At most {cfg.max_subscriptions_per_user} event subscriptions per "
-            "user; unsubscribe one first."
-        )
+        # Early check, so a capped user doesn't get a challenge POST.
+        if s.get(EventSubscription, sub_id) is None and _at_cap(s, user_id):
+            raise _cap_error()
     if verified_at is None:
         _verify_endpoint(url, secret)  # no DB session held during network I/O
         verified_at = now()
@@ -196,6 +204,8 @@ def subscribe(
     with use_db_session() as s:
         cursor_row = lock_cursor(s, user_id)  # held until commit: see module doc
         sub = s.get(EventSubscription, sub_id)
+        if sub is None and _at_cap(s, user_id):  # re-checked under the lock
+            raise _cap_error()
         if sub is None:
             sub = EventSubscription(
                 id=sub_id, user_id=user_id, name=name, arguments=arguments, url=url
