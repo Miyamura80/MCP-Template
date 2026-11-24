@@ -41,7 +41,7 @@ main --+-- PR1 feedback (+ this doc)
  +------------------------------------------------------------------------------------+
  | services (@service, risk='read'|'write'|'dangerous'; dangerous implies mutating)   |
  |  feedback          -> agent_feedback table -> FeedbackSink[] (Slack built in)      |
- |  search_docs       -> BM25 over a build-time bundled docs index (CI drift check)   |
+ |  search_docs       -> BM25 over the shipped docs (English pages, built on first use)|
  |  confirm_action, get_approval                                                      |
  +------------------------------------------------------------------------------------+
  | event outbox (shared) --> existing webhooks (sha256= signing, unchanged)           |
@@ -74,9 +74,11 @@ Agents that get stuck report it to the operator instead of giving up silently.
 - A `@service` (all three transports) that returns ranked chunks
   `{title, url, snippet}` from the existing BM25 retriever. It uses no LLM: the
   calling agent does the synthesis. `/ask` stays as it is.
-- The index is generated at build time and shipped in the wheel (like the
-  committed MCP App HTML), so deployments that do not copy `docs/` still work. A
-  CI check fails when the bundled index drifts from `docs/content`.
+- No committed index. The docs already ship in the Docker image (`COPY . .`)
+  and the wheel (`force-include` of `docs/content/docs`); the retriever resolves
+  them against the packages root, so installed wheels find them too. The index
+  is built in memory on first search.
+- Translated pages (`*.<locale>.mdx`) are skipped to avoid duplicate hits.
 
 ## PR3: skills over MCP
 
