@@ -23,6 +23,7 @@ from mcp.server.session import ServerSession
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
+from mcp_server import approval_gate
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
 from mcp_server.enhancers.base import EnhancedTool, build_app_meta
 from mcp_server.url_elicitation import reraise_with_elicitation
@@ -216,13 +217,28 @@ def _make_headless_tool(mcp: MCPServer, entry: ServiceEntry) -> None:
             elif not kwargs.get("user_id"):
                 kwargs.setdefault("user_id", "")
         input_obj = _build_input(input_model, kwargs)
+        # Dangerous tools may be held for approval (raises) or, on a retry of
+        # an already-approved call, answered from the stored result.
+        decision = approval_gate.gate(entry, input_obj, ctx)
+        if decision.replay is not None:
+            return output_model.model_validate(decision.replay)  # ty: ignore[unresolved-attribute]
         _meter(entry)
         try:
-            return func(input_obj)
+            result = func(input_obj)
         except ConnectRequiredError as exc:
+            approval_gate.record(decision, None, str(exc))
             # MCP-only affordance: upgrade to the SEP-1036 URL-elicitation
             # error (-32042) so capable hosts open the consent flow natively.
             reraise_with_elicitation(_current_session(ctx), exc)
+        except Exception as exc:  # noqa: BLE001
+            # Approval bookkeeping only: a held call that was approved must not
+            # stay "executing" forever. Re-raised unchanged.
+            approval_gate.record(
+                decision, None, f"{entry.name} failed: {type(exc).__name__}"
+            )
+            raise
+        approval_gate.record(decision, result, None)
+        return result
 
     _apply_tool_signature(
         tool_fn,
@@ -255,25 +271,21 @@ def _make_enhanced_tool(
             elif not kwargs.get("user_id"):
                 kwargs.setdefault("user_id", "")
         input_obj = _build_input(input_model, kwargs)
-        await _meter_async(entry)
+        decision = await approval_gate.gate_async(entry, input_obj, ctx)
         tool = EnhancedTool(ctx=ctx, input=input_obj, service_fn=func)
+        if decision.replay is not None:
+            replayed = output_model.model_validate(decision.replay)  # ty: ignore[unresolved-attribute]
+            return _build_call_tool_result(replayed, tool)
+        await _meter_async(entry)
         try:
-            result = await enhancer_entry.fn(tool)
-        except ConnectRequiredError as exc:
-            # Expected condition, not an enhancer crash: the headless fallback
-            # would only raise it again. MCP-only affordance: upgrade to the
-            # SEP-1036 URL-elicitation error (-32042) when possible.
-            reraise_with_elicitation(_current_session(ctx), exc)
-        except Exception as enhancer_exc:  # noqa: BLE001
-            # Enhancer failures of any kind must fall back to the pure service
-            # so MCP clients still get a structured result on the headless path.
-            if enhancer_entry.fallback == "error":
-                raise
-            result = _recover_from_enhancer_crash(tool, entry, ctx, enhancer_exc)
-            # Discard any partial output the enhancer accumulated before crashing.
-            tool.extra_content = []
-            tool.app_resource_uri = None
-
+            result = await _run_enhancer(tool, entry, enhancer_entry, ctx)
+        except Exception as exc:  # noqa: BLE001
+            # Approval bookkeeping only (see the headless wrapper). Re-raised.
+            approval_gate.record(
+                decision, None, f"{entry.name} failed: {type(exc).__name__}"
+            )
+            raise
+        approval_gate.record(decision, result, None)
         return _build_call_tool_result(result, tool)
 
     _apply_tool_signature(
@@ -293,6 +305,30 @@ def _make_enhanced_tool(
         meta=meta,
     )(tool_fn)
     _patch_output_schema(mcp, entry.name, output_model)
+
+
+async def _run_enhancer(
+    tool: EnhancedTool, entry: ServiceEntry, enhancer_entry: EnhancerEntry, ctx: Context
+) -> BaseModel:
+    """Run the enhancer, falling back to headless on a crash (see below)."""
+    try:
+        result = await enhancer_entry.fn(tool)
+    except ConnectRequiredError as exc:
+        # Expected condition, not an enhancer crash: the headless fallback
+        # would only raise it again. MCP-only affordance: upgrade to the
+        # SEP-1036 URL-elicitation error (-32042) when possible.
+        reraise_with_elicitation(_current_session(ctx), exc)
+    except Exception as enhancer_exc:  # noqa: BLE001
+        # Enhancer failures of any kind must fall back to the pure service
+        # so MCP clients still get a structured result on the headless path.
+        if enhancer_entry.fallback == "error":
+            raise
+        result = _recover_from_enhancer_crash(tool, entry, ctx, enhancer_exc)
+        # Discard any partial output the enhancer accumulated before crashing.
+        tool.extra_content = []
+        tool.app_resource_uri = None
+
+    return result
 
 
 def _recover_from_enhancer_crash(

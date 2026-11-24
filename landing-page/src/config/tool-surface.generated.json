@@ -1,7 +1,15 @@
 [
   {
+    "name": "confirm_action",
+    "description": "Run a dangerous call that is waiting for your confirmation (agent approval mode). Only confirm when the held arguments match what the user asked for. Calls held for the user's own approval cannot be confirmed here."
+  },
+  {
     "name": "feedback",
     "description": "Report a problem with this server so its developers can fix it. Call this when you get stuck: a tool errors in a way you cannot recover from, a description or doc misled you, or a capability you need is missing. Describe what you tried, what happened and what you expected; never include secrets or the user's private data."
+  },
+  {
+    "name": "get_approval",
+    "description": "Check a held dangerous call: whether it is still pending, was approved and ran (with its result), was denied, or expired."
   },
   {
     "name": "gmail_add_attachment",

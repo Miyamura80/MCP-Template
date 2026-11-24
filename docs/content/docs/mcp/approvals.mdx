@@ -1,0 +1,78 @@
+---
+title: Approvals
+description: Hold dangerous tool calls until an agent, or you, says yes
+---
+
+Some tools are marked **dangerous**: their effect is hard to undo or reaches
+other people. Today those are `gmail_send`, `gmail_discard_draft`,
+`gmail_disconnect` and `webhook_unsubscribe`. You choose how much checking
+they get before they run.
+
+## Modes
+
+| Mode | Who approves | Good for |
+|------|--------------|----------|
+| `automatic` (default) | nobody, the tool runs | you are watching, the model is trusted |
+| `agent` | the agent, by calling `confirm_action` | a second look before acting |
+| `elicitation` | you, in the app you are chatting in | in-the-loop use, the agent can't self-approve |
+| `browser` | you, on a dashboard page | background agents; no token can approve |
+
+Set your default mode, and any per-tool overrides, at `/dashboard/approval`.
+An agent's MCP URL can ask for a stricter mode with `?approval=browser`, but
+never a looser one, so an agent that edits its own URL to `approval=automatic`
+gains nothing.
+
+If the app can't show a confirmation (most deployments serve each request
+statelessly), `elicitation` falls back to `browser`, never to a looser mode.
+
+## What the agent sees
+
+A held call doesn't run. The agent gets an error explaining what to do:
+
+- **agent:** call `confirm_action(approval_id)`, which runs the stored call.
+- **browser:** give you the approval link. Hosts that support URL
+  elicitation open it directly.
+
+The stored arguments are what runs, so nothing can be swapped between the
+request and the approval. Retrying the same call (same tool, same
+arguments) while its approval is live never asks twice: it re-shows the
+pending approval, returns the result once it ran, or reports that you denied
+it. `get_approval(approval_id)` reports the same.
+
+Held calls expire: 10 minutes for `agent` and `elicitation`, 24 hours for
+`browser` (`approvals.*_expiry_seconds` in config).
+
+Over REST, a held call answers `202 Accepted` with the approval in the body.
+The CLI is never gated, since it is you at your own terminal.
+
+## Dashboard
+
+`/dashboard/approvals` lists held calls; each one shows its exact arguments
+with Approve and Deny buttons. Approving runs the call on the server.
+
+The dashboard only accepts a browser session from signing in with WorkOS,
+never an agent's API key or token. Register `{your server}/dashboard/callback`
+as a redirect URI on your WorkOS client. Without WorkOS, local development
+gets a sign-in form that takes any user id; it is refused unless
+`DEV_ENV` is `local` or `dev`.
+
+To use your own app instead, point `approvals.approve_url_template` at it
+(`{base}` is this server's origin, `{id}` the approval id) and call the JSON
+routes with the session cookie and its `X-CSRF-Token`:
+
+| Route | |
+|-------|--|
+| `GET /api/v1/dashboard/session` | `user_id` and `csrf_token` |
+| `GET /api/v1/approvals` | held and recent calls |
+| `POST /api/v1/approvals/{id}/approve` | run it |
+| `POST /api/v1/approvals/{id}/deny` | refuse it |
+| `GET`/`PUT /api/v1/settings/approval` | your mode and overrides |
+
+## Marking a tool dangerous
+
+```python
+@service(name="wire_money", ..., risk="dangerous")
+```
+
+`risk="dangerous"` implies `mutating=True`. A dangerous tool can't also be
+priced, because an approved call runs later, outside the request that paid.

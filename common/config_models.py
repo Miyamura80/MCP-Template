@@ -299,6 +299,22 @@ class FeedbackConfig(BaseModel):
     sink_timeout_seconds: float = 3.0
 
 
+class ApprovalsConfig(BaseModel):
+    """Human-in-the-loop approval of ``risk="dangerous"`` tools.
+
+    The mode itself is per user, set on the dashboard; this is deployment-wide
+    plumbing. ``approve_url_template`` points browser-mode approvals at a page:
+    ``{base}`` is this server's public origin and ``{id}`` the approval id.
+    Point it at your own dashboard to replace the built-in pages.
+    """
+
+    agent_expiry_seconds: int = Field(default=600, gt=0)
+    elicitation_expiry_seconds: int = Field(default=600, gt=0)
+    browser_expiry_seconds: int = Field(default=86400, gt=0)
+    approve_url_template: str = "{base}/dashboard/approvals/{id}"
+    dashboard_session_seconds: int = Field(default=28800, gt=0)
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 

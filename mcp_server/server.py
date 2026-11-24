@@ -28,9 +28,11 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
 from common import global_config
+from mcp_server import approval_gate
 from mcp_server._tool_errors import model_facing_message
 from mcp_server._tool_factory import make_tool
 from services import ServiceEntry, discover_services, get_registry
+from services.approvals_svc import APPROVAL_TOOLS, ApprovalRequiredError
 from src.utils.mcp_url_flags import current_url_flags
 
 _APPS_DIR = Path(__file__).parent / "apps"
@@ -158,21 +160,42 @@ class _TemplateMCPServer(MCPServer):
         tools = await super().list_tools()
         if current_url_flags().dangerous_tools:
             return tools
-        hidden = _dangerous_tool_names()
+        hidden = _dangerous_tool_names() | APPROVAL_TOOLS
         return [t for t in tools if t.name not in hidden]
 
     async def call_tool(self, name, arguments, context=None):
-        if not current_url_flags().dangerous_tools and name in _dangerous_tool_names():
+        if not current_url_flags().dangerous_tools and (
+            name in _dangerous_tool_names() or name in APPROVAL_TOOLS
+        ):
             # Mirrors the hidden tools/list entry. A ToolError so the model
             # reads why, rather than a bare "unknown tool".
             raise ToolError(
                 f"Tool {name!r} is disabled on this connection "
                 "(dangerous_tools=false in the MCP URL)."
             )
+        # A 2026-07-28 retry carrying the human's answer to our confirmation.
+        await approval_gate.resume_inline(name, context)
+        return await self._dispatch(name, arguments, context, may_confirm=True)
+
+    async def _dispatch(self, name, arguments, context, *, may_confirm: bool):
         try:
             return await super().call_tool(name, arguments, context)
         except UnexpectedToolError as exc:
-            message = model_facing_message(exc.__cause__)
+            held = exc.__cause__
+            if (
+                isinstance(held, ApprovalRequiredError)
+                and held.view.mode == "elicitation"
+                and context is not None
+                and may_confirm
+            ):
+                # The gate held the call for the human; ask them in the host.
+                # The rerun may not ask again, so a stale answer can't loop.
+                return await approval_gate.confirm_inline(
+                    held.view,
+                    context,
+                    lambda: self._dispatch(name, arguments, context, may_confirm=False),
+                )
+            message = model_facing_message(held)
             if message is None:
                 # A real crash: keep its stack in our logs before the SDK
                 # replaces it with a generic message for the client.

@@ -32,6 +32,7 @@ from sqlalchemy.exc import IntegrityError
 from db.engine import use_db_session
 from db.models.idempotency_keys import IdempotencyRecord
 from services import InvalidArgument
+from services.approvals_svc import ApprovalGateError
 
 # Mirror the DB column width and (loosely) Stripe's own key-length guidance.
 _KEY_MAX_LEN = 255
@@ -195,9 +196,10 @@ def execute_idempotent(
             if exc.status_code < 500:
                 _release(session, user_id, route, key)
             raise
-        except InvalidArgument:
-            # A service rejecting its arguments does so before any side effect
-            # (the REST transport answers 400), so it is a client error too.
+        except (InvalidArgument, ApprovalGateError):
+            # A service rejecting its arguments, or the approval gate holding a
+            # dangerous call, happens before any side effect (the REST transport
+            # answers 400 / 202 / 403 / 409), so it is a client outcome too.
             _release(session, user_id, route, key)
             raise
         # Any other failure - a 5xx HTTPException, a network drop, or an
