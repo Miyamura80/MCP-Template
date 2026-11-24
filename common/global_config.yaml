@@ -56,6 +56,12 @@ events:
   max_subscription_ttl_seconds: 604800
   verification_cache_seconds: 86400
   max_subscriptions_per_user: 50
+  stream_check_ms: 1000
+  stream_heartbeat_ms: 30000
+  stream_heartbeat_min_ms: 1000
+  stream_heartbeat_max_ms: 55000
+  stream_max_seconds: 300
+  max_streams_per_user: 5
 
 ########################################################
 # Debugging

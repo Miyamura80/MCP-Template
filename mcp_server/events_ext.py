@@ -4,9 +4,10 @@
     events/poll         -> events since a cursor, for the authenticated principal
     events/subscribe    -> create or refresh a webhook subscription
     events/unsubscribe  -> remove one
+    events/stream       -> push: a long-lived request that streams events
+                           (``mcp_server/events_stream.py``)
 
-Push delivery (``events/stream``) is not offered, so no type lists ``push``
-and ``listChanged`` is not advertised: the catalog only changes with a deploy.
+``listChanged`` is not advertised: the catalog only changes with a deploy.
 Every method needs an authenticated principal (stdio has none: ``Forbidden``),
 and events are always that principal's own.
 
@@ -17,7 +18,7 @@ the current spec before changing them.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal
 
 from anyio.to_thread import run_sync
@@ -28,9 +29,15 @@ from mcp.types import INVALID_PARAMS, PaginatedRequestParams, RequestParams
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from mcp_server.events_stream import (
+    StreamParams,
+    StreamStart,
+    stream,
+    stream_slot,
+)
 from services import InvalidArgument
 from services.events.catalog import EVENT_TYPES
-from services.events.store import UnknownEventError, poll
+from services.events.store import UnknownEventError, poll, stream_start
 from services.events.webhooks import CallbackEndpointError, subscribe, unsubscribe
 from src.utils.current_user import current_user
 
@@ -102,6 +109,29 @@ async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         raise MCPError(INVALID_PARAMS, str(exc)) from exc
 
 
+def _reverifier(
+    ctx: ServerRequestContext[Any, Any], user_id: str
+) -> Callable[[], Awaitable[bool]]:
+    """Re-run the /mcp authentication on this request's credentials, so a
+    revoked API key or token ends an open stream (spec: SHOULD re-verify).
+
+    Without an HTTP request to re-check (in-process callers) the stream keeps
+    the principal it started with; ``stream_max_seconds`` still bounds it.
+    """
+    scope = getattr(ctx.request, "scope", None)
+
+    async def still_authorized() -> bool:
+        if scope is None:
+            return True
+        # Circular import: api_server.server mounts this package; load at call.
+        from api_server.middleware.mcp_auth import authenticate_scope  # noqa: PLC0415
+
+        user = await run_sync(authenticate_scope, scope)
+        return user is not None and user.user_id == user_id
+
+    return still_authorized
+
+
 class Events(Extension):
     """Serve first-party events by poll and webhook."""
 
@@ -113,6 +143,7 @@ class Events(Extension):
             MethodBinding("events/poll", PollParams, self._poll),
             MethodBinding("events/subscribe", SubscribeParams, self._subscribe),
             MethodBinding("events/unsubscribe", UnsubscribeParams, self._unsubscribe),
+            MethodBinding("events/stream", StreamParams, self._stream),
         ]
 
     async def _list(
@@ -151,6 +182,27 @@ class Events(Extension):
             max_age_ms=params.max_age_ms,
             ttl_ms=params.ttl_ms,
         )
+
+    async def _stream(
+        self, ctx: ServerRequestContext[Any, Any], params: StreamParams
+    ) -> dict[str, Any]:
+        user_id = _principal()
+        # Validation errors happen here, before the stream opens, so they are
+        # plain JSON-RPC errors; the loop itself never raises for a stream
+        # problem (it sends frames instead).
+        kind, arguments, after, truncated = await _call(
+            stream_start,
+            user_id,
+            params.name,
+            params.arguments,
+            params.cursor,
+            params.max_age_ms,
+        )
+        start = StreamStart(kind, arguments, after, truncated)
+        async with stream_slot(user_id):
+            return await stream(
+                ctx, user_id, start, params.heartbeat_ms, _reverifier(ctx, user_id)
+            )
 
     async def _unsubscribe(
         self, _ctx: ServerRequestContext[Any, Any], params: UnsubscribeParams

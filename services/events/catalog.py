@@ -18,7 +18,7 @@ APPROVAL_RESOLVED = "approval.resolved"
 FEEDBACK_RECEIVED = "feedback.received"
 GMAIL_MESSAGE_RECEIVED = "gmail.message_received"
 
-DELIVERY_MODES = ("poll", "webhook")
+DELIVERY_MODES = ("poll", "push", "webhook")
 
 
 @dataclass(frozen=True)

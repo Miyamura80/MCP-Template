@@ -66,4 +66,29 @@ event that commits late is never skipped.
   event.
 - **Limits.** 50 subscriptions per user (`events.max_subscriptions_per_user`).
 
-Push delivery (`events/stream`) is not offered.
+## Push
+
+A client that keeps a connection open can have events pushed instead, which is
+how a host wakes an agent thread on an event:
+
+```json
+{"method": "events/stream", "params": {"name": "approval.resolved", "cursor": null}}
+```
+
+The response is a stream. It opens with `notifications/events/active`
+(`cursor`, `truncated`, `heartbeatMs`), then sends one
+`notifications/events/event` per event, each with its own `cursor`, and a
+`notifications/events/heartbeat` when there is nothing else to send. Every
+frame, and the final result, carries
+`_meta["io.modelcontextprotocol/subscriptionId"]`.
+
+- **Heartbeats.** Every 30 seconds by default. Ask for another interval with
+  `heartbeatMs`; it is clamped to 1 to 55 seconds rather than refused.
+- **Access.** The server re-checks your credentials on every heartbeat. If the
+  API key or token was revoked, it sends `notifications/events/terminated`
+  (`Forbidden`) and ends the stream.
+- **Limits.** 5 open streams per user (`events.max_streams_per_user`); one
+  more is refused with `-32025` (`ResourceExhausted`).
+- **Reconnecting.** The server ends a stream after 5 minutes
+  (`events.stream_max_seconds`), and on deploys. Reconnect with the last
+  cursor you received and nothing is missed. Disconnect to stop early.
