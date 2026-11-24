@@ -36,12 +36,12 @@ from fastapi.responses import RedirectResponse, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from loguru import logger as log
 
+from api_server.branded_page import render_page
 from api_server.oauth.flow import (
     WORKOS_AUTHORIZE_URL,
     authenticate_with_workos,
     issuer_url,
     pkce_challenge,
-    render_page,
 )
 from common import global_config
 
@@ -155,7 +155,10 @@ def install(app: FastAPI) -> None:
 
     async def stale(_request: Request, _exc: Exception) -> Response:
         return render_page(
-            "Dashboard", "<h1>Request expired</h1><p>Reload and retry.</p>", 403
+            "Dashboard",
+            "<span class='eyebrow'>Dashboard</span><h1>Request expired</h1>"
+            "<p class='warn'>This form is out of date. Reload the page and retry.</p>",
+            403,
         )
 
     app.add_exception_handler(_SignInRequired, sign_in)
@@ -189,7 +192,8 @@ def _start_session(user_id: str, next_path: str) -> RedirectResponse:
 def _error(message: str, status_code: int = 400) -> Response:
     return render_page(
         "Dashboard",
-        f"<h1>Can't sign in</h1><p>{html.escape(message)}</p>",
+        "<span class='eyebrow'>Dashboard</span><h1>Can't sign in</h1>"
+        f"<p class='warn'>{html.escape(message)}</p>",
         status_code=status_code,
     )
 
@@ -240,13 +244,16 @@ def login(
         )
     return render_page(
         "Dashboard sign-in (dev)",
-        "<h1>Dashboard sign-in</h1>"
-        "<p class='warn'>Development only: WorkOS is not configured, so you can "
-        "sign in as any user id. This form is refused outside DEV_ENV=local/dev.</p>"
+        "<span class='eyebrow'>Dashboard</span><h1>Sign in</h1>"
+        "<section class='box'><span class='tag'>Development</span>"
+        "<p class='warn'>WorkOS is not configured, so you can sign in as any user "
+        "id. This form is refused outside DEV_ENV=local/dev.</p>"
         "<form method='post' action='/dashboard/login'>"
         f"<input type='hidden' name='next' value='{html.escape(target, quote=True)}'>"
-        "<p><label>User id <input name='user_id' required></label></p>"
-        "<button class='allow' type='submit'>Sign in</button></form>",
+        "<label class='field'><span>User id</span><input name='user_id' required>"
+        "</label><div class='actions'>"
+        "<button class='primary' type='submit'>Sign in</button></div></form>"
+        "</section>",
     )
 
 

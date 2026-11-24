@@ -39,6 +39,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from loguru import logger as log
 from mcp.server.auth.provider import construct_redirect_uri
 
+from api_server.branded_page import render_page
 from api_server.oauth import cimd, signing
 from api_server.oauth.storage import store_authorization_code
 from common import global_config
@@ -47,9 +48,8 @@ WORKOS_AUTHORIZE_URL = "https://api.workos.com/user_management/authorize"
 WORKOS_AUTHENTICATE_URL = "https://api.workos.com/user_management/authenticate"
 _WORKOS_TIMEOUT_SECONDS = 10.0
 _FLOW_ID = re.compile(r"[0-9a-f]{16}")
-# Inline styles only; no script. frame-ancestors stops the Allow button from
-# being framed (clickjacking).
-_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+# Pages come from api_server.branded_page: no script, and frame-ancestors
+# stops the Allow button from being framed (clickjacking).
 
 router = APIRouter(prefix="/oauth", tags=["oauth"])
 
@@ -95,31 +95,12 @@ def pkce_challenge(verifier: str) -> str:
     )
 
 
-def render_page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
-    content = (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>{html.escape(title)}</title>"
-        "<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;"
-        "padding:0 1rem;line-height:1.5;color:#1f2328}"
-        ".warn{background:#fff8c5;border:1px solid #d4a72c;padding:.75rem;border-radius:6px}"
-        "button{font-size:1rem;padding:.5rem 1.25rem;margin-right:.5rem;border-radius:6px;"
-        "border:1px solid #1f2328;cursor:pointer}"
-        ".allow{background:#1f2328;color:#fff}code{word-break:break-all}</style>"
-        f"</head><body>{body}</body></html>"
-    )
-    response = HTMLResponse(content=content, status_code=status_code)
-    response.headers["Content-Security-Policy"] = _PAGE_CSP
-    response.headers["Cache-Control"] = "no-store"
-    return response
-
-
 def _error_page(message: str) -> HTMLResponse:
     return render_page(
         "Sign-in failed",
-        "<h1>Sign-in failed</h1>"
-        f"<p>{html.escape(message)}</p>"
-        "<p>Return to your app and connect again.</p>",
+        "<span class='eyebrow'>Sign-in</span><h1>Sign-in failed</h1>"
+        f"<p class='warn'>{html.escape(message)}</p>"
+        "<p class='lead'>Return to your app and connect again.</p>",
         status_code=400,
     )
 
@@ -175,19 +156,21 @@ async def consent_page(
     server_name = html.escape(global_config.branding.title)
     response = render_page(
         f"Connect to {global_config.branding.title}",
+        "<span class='eyebrow'>Authorize</span>"
         f"<h1>Connect to {server_name}</h1>"
+        "<div class='box'><span class='tag'>Access request</span>"
         f"<p><strong>{html.escape(client_name)}</strong> "
         f"(<code>{html.escape(client_host)}</code>) wants to access your "
         f"{server_name} account.</p>"
         f"<p>After you sign in, you will be sent to <code>{html.escape(redirect_host)}</code>.</p>"
         f"{warning}"
-        "<form method='post' action='/oauth/consent'>"
+        "<form method='post' action='/oauth/consent' class='actions'>"
         f"<input type='hidden' name='request' value='{html.escape(request_token, quote=True)}'>"
         f"<input type='hidden' name='flow' value='{flow_id}'>"
         f"<input type='hidden' name='nonce' value='{html.escape(nonce, quote=True)}'>"
         "<button class='allow' name='decision' value='allow' type='submit'>Allow</button>"
         "<button name='decision' value='deny' type='submit'>Deny</button>"
-        "</form>",
+        "</form></div>",
     )
     response.set_cookie(
         cookie_name(flow_id),

@@ -22,16 +22,17 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Form, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from api_server.dashboard.session import (
+    DashboardSession,
     csrf_ok,
     current_session,
-    login_redirect,
+    require_csrf,
+    require_session,
 )
-from api_server.dashboard.ui import csrf_field, esc, nav
-from api_server.oauth.flow import render_page
+from api_server.dashboard.ui import box, csrf_field, dashboard_page, esc
 from models.approvals import (
     APPROVAL_MODES,
     ApprovalList,
@@ -50,6 +51,9 @@ from services.approvals_svc import (
 
 pages = APIRouter(prefix="/dashboard", tags=["dashboard"], include_in_schema=False)
 api = APIRouter(prefix="/api/v1", tags=["approvals"])
+
+Session = Annotated[DashboardSession, Depends(require_session)]
+FormSession = Annotated[DashboardSession, Depends(require_csrf)]
 
 _MODE_HELP = {
     "automatic": "runs without asking",
@@ -73,121 +77,155 @@ def dashboard_home() -> Response:
     return RedirectResponse("/dashboard/approvals", status_code=303)
 
 
+_STATUS_PILL = {
+    "pending": "on",
+    "approved": "on",
+    "executed": "ok",
+    "denied": "bad",
+    "failed": "bad",
+}
+
+
+def _pill(text: str, tone: str = "") -> str:
+    return f"<span class='pill {tone}'>{esc(text)}</span>"
+
+
 @pages.get("/approvals")
-def approvals_page(request: Request) -> Response:
-    session = current_session(request)
-    if session is None:
-        return login_redirect(request)
+def approvals_page(session: Session) -> Response:
     rows = list_approvals(session.user_id)
-    items = "".join(
-        f"<li><a href='/dashboard/approvals/{esc(v.id)}'><code>{esc(v.tool)}</code></a> "
-        f"· {esc(v.status)} · {esc(v.mode)} · "
-        f"{esc(v.created_at.isoformat(timespec='minutes'))}</li>"
-        for v in rows
+    table = (
+        "<table><thead><tr><th>Tool</th><th>Status</th><th>Mode</th>"
+        "<th>Requested</th></tr></thead><tbody>"
+        + "".join(
+            f"<tr><td><a href='/dashboard/approvals/{esc(v.id)}'><code>{esc(v.tool)}"
+            f"</code></a></td><td>{_pill(v.status, _STATUS_PILL.get(v.status, ''))}</td>"
+            f"<td>{_pill(v.mode)}</td>"
+            f"<td class='mono'>{esc(v.created_at.strftime('%Y-%m-%d %H:%M'))}</td></tr>"
+            for v in rows
+        )
+        + "</tbody></table>"
     )
-    return render_page(
-        "Approvals",
-        "<h1>Approvals</h1>"
-        + nav(session)
-        + (f"<ul>{items}</ul>" if items else "<p>Nothing waiting.</p>"),
+    return dashboard_page(
+        session,
+        active="approvals",
+        eyebrow="Human in the loop",
+        title="Approvals",
+        lead="Dangerous calls your agents asked to make. Approve one and the "
+        "agent's next retry runs it.",
+        body=box(
+            "Held calls", table if rows else "<p class='empty'>Nothing waiting.</p>"
+        ),
     )
 
 
 @pages.get("/approvals/{approval_id}")
-def approval_page(request: Request, approval_id: str) -> Response:
-    session = current_session(request)
-    if session is None:
-        return login_redirect(request)
+def approval_page(session: Session, approval_id: str) -> Response:
     try:
         view, args = get_review(session.user_id, approval_id)
     except InvalidArgument:
-        return render_page("Approval", "<h1>Not found</h1>" + nav(session), 404)
-    body = (
-        f"<h1>{esc(view.tool)}</h1>"
-        + nav(session)
-        + f"<p>Status: <strong>{esc(view.status)}</strong> · mode {esc(view.mode)} · "
-        f"expires {esc(view.expires_at.isoformat(timespec='minutes'))}</p>"
-        f"<pre>{esc(json.dumps(args, indent=2, ensure_ascii=False))}</pre>"
+        return dashboard_page(
+            session, active="approvals", eyebrow="Approval", title="Not found",
+            body="", status_code=404,
+        )  # fmt: skip
+    meta = (
+        "<div class='meta'>"
+        + _pill(view.status, _STATUS_PILL.get(view.status, ""))
+        + _pill(f"mode {view.mode}")
+        + _pill(f"expires {view.expires_at.strftime('%Y-%m-%d %H:%M')}")
+        + "</div>"
     )
+    inner = meta + f"<pre>{esc(json.dumps(args, indent=2, ensure_ascii=False))}</pre>"
     if view.status == "pending":
-        body += (
-            f"<form method='post' action='/dashboard/approvals/{esc(view.id)}'>"
+        inner += (
+            f"<form method='post' action='/dashboard/approvals/{esc(view.id)}' "
+            "class='actions'>"
             + csrf_field(session)
-            + "<button class='allow' name='decision' value='approve' type='submit'>"
+            + "<button class='primary' name='decision' value='approve' type='submit'>"
             "Approve</button>"
             "<button name='decision' value='deny' type='submit'>Deny</button></form>"
         )
     elif view.status == "approved":
-        body += "<p>Approved. It runs when your agent retries the call.</p>"
+        inner += (
+            "<p class='note'>Approved. It runs when your agent retries the call.</p>"
+        )
     elif view.error:
-        body += f"<p class='warn'>{esc(view.error)}</p>"
-    return render_page(f"Approve {view.tool}", body)
+        inner += f"<p class='warn'>{esc(view.error)}</p>"
+    return dashboard_page(
+        session,
+        active="approvals",
+        eyebrow="Approval",
+        title=view.tool,
+        lead="These are the exact arguments that will run. Nothing else can.",
+        body=box("Held call", inner),
+        narrow=True,
+    )
 
 
 @pages.post("/approvals/{approval_id}")
 def decide_page(
-    request: Request,
-    approval_id: str,
-    decision: Annotated[str, Form()],
-    csrf: Annotated[str, Form()] = "",
+    session: FormSession, approval_id: str, decision: Annotated[str, Form()]
 ) -> Response:
-    session = current_session(request)
-    if session is None:
-        return login_redirect(request)
-    if not csrf_ok(session, csrf):
-        return render_page(
-            "Approval", "<h1>Request expired</h1><p>Reload and retry.</p>", 403
-        )
     try:
         _decide(session.user_id, approval_id, decision)
     except InvalidArgument as exc:
-        return render_page("Approval", f"<h1>Can't do that</h1><p>{esc(exc)}</p>", 400)
+        return dashboard_page(
+            session, active="approvals", eyebrow="Approval", title="Can't do that",
+            body=f"<p class='warn'>{esc(exc)}</p>", status_code=400,
+        )  # fmt: skip
     return RedirectResponse(f"/dashboard/approvals/{approval_id}", status_code=303)
 
 
+def _select(name: str, current: str | None, allow_default: bool) -> str:
+    opts = ["<option value=''>Use default</option>"] if allow_default else []
+    opts += [
+        f"<option value='{m}'{' selected' if m == current else ''}>"
+        f"{m}: {_MODE_HELP[m]}</option>"
+        for m in APPROVAL_MODES
+    ]
+    return f"<select name='{esc(name)}'>{''.join(opts)}</select>"
+
+
 @pages.get("/approval")
-def settings_page(request: Request) -> Response:
-    session = current_session(request)
-    if session is None:
-        return login_redirect(request)
+def settings_page(session: Session) -> Response:
     settings = get_settings(session.user_id)
-
-    def select(name: str, current: str | None, allow_default: bool) -> str:
-        opts = ["<option value=''>(use default)</option>"] if allow_default else []
-        opts += [
-            f"<option value='{m}'{' selected' if m == current else ''}>"
-            f"{m}: {_MODE_HELP[m]}</option>"
-            for m in APPROVAL_MODES
-        ]
-        return f"<select name='{esc(name)}'>{''.join(opts)}</select>"
-
-    rows = "".join(
-        f"<p><label><code>{esc(tool)}</code> "
-        f"{select('tool:' + tool, settings.overrides.get(tool), True)}</label></p>"
+    overrides = "".join(
+        f"<label class='field'><span>{esc(tool)}</span>"
+        f"{_select('tool:' + tool, settings.overrides.get(tool), True)}</label>"
         for tool in _dangerous_tools()
     )
-    return render_page(
-        "Approval settings",
-        "<h1>Approval settings</h1>"
-        + nav(session)
-        + "<p>Applies to dangerous tools. An agent's MCP URL "
-        "(<code>?approval=</code>) can make this stricter, never looser.</p>"
+    form = (
         "<form method='post' action='/dashboard/approval'>"
         + csrf_field(session)
-        + f"<p><label>Default {select('mode', settings.mode, False)}</label></p>"
-        + rows
-        + "<button class='allow' type='submit'>Save</button></form>",
+        + box(
+            "Default",
+            "<label class='field'><span>Every dangerous tool</span>"
+            + _select("mode", settings.mode, False)
+            + "</label>",
+        )
+        + box("Per tool", overrides or "<p class='empty'>No dangerous tools.</p>")
+        + "<div class='actions'><button class='primary' type='submit'>Save</button></div>"
+        "</form>"
+    )
+    return dashboard_page(
+        session,
+        active="approval",
+        eyebrow="Settings",
+        title="Approval settings",
+        lead="How much checking dangerous tools get. An agent's MCP URL "
+        "(<code>?approval=</code>) can make this stricter, never looser.",
+        body=form,
+        narrow=True,
     )
 
 
 @pages.post("/approval")
-async def save_settings_page(request: Request) -> Response:
-    session = current_session(request)
-    if session is None:
-        return login_redirect(request)
-    form = await request.form()
+async def save_settings_page(request: Request, session: Session) -> Response:
+    form = await request.form()  # per-tool fields are dynamic, so read it whole
     if not csrf_ok(session, str(form.get("csrf", ""))):
-        return render_page("Approval settings", "<h1>Request expired</h1>", 403)
+        return dashboard_page(
+            session, active="approval", eyebrow="Settings", title="Request expired",
+            body="<p class='warn'>Reload and retry.</p>", status_code=403,
+        )  # fmt: skip
     overrides = {
         str(key).removeprefix("tool:"): str(value)
         for key, value in form.multi_items()
@@ -201,9 +239,10 @@ async def save_settings_page(request: Request) -> Response:
             ),
         )
     except (InvalidArgument, ValueError) as exc:
-        return render_page(
-            "Approval settings", f"<h1>Not saved</h1><p>{esc(exc)}</p>", 400
-        )
+        return dashboard_page(
+            session, active="approval", eyebrow="Settings", title="Not saved",
+            body=f"<p class='warn'>{esc(exc)}</p>", status_code=400,
+        )  # fmt: skip
     return RedirectResponse("/dashboard/approval", status_code=303)
 
 
