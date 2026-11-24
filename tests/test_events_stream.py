@@ -84,6 +84,27 @@ def _feedback(user: str, i: int) -> None:
     emit(user, FEEDBACK_RECEIVED, {"id": f"f{i}", "category": "bug", "toolName": None})
 
 
+def _revoke_all_keys(timeout: float = 2.0) -> None:
+    """Revoke every key, retrying until the revocation is really committed.
+
+    The e2e client runs on one shared in-memory SQLite connection
+    (``StaticPool``), so this thread's UPDATE shares a transaction with the
+    stream's own auth check. When that check's session closes, its rollback can
+    undo the UPDATE before this thread commits it. Production pools hand each
+    session its own connection, so this only affects the test harness.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with use_db_session() as s:
+            s.query(APIKey).update({"revoked": True})
+            s.commit()
+        with use_db_session() as s:
+            if s.query(APIKey).filter_by(revoked=False).count() == 0:
+                return
+        time.sleep(0.01)
+    raise AssertionError("could not revoke the test keys")
+
+
 class TestStream(TestTemplate):
     def test_active_then_events_then_final_result(self):
         with _wire_client("u-push") as (client, key), _short_streams():
@@ -171,9 +192,7 @@ class TestStream(TestTemplate):
 
             def revoke():
                 time.sleep(0.3)
-                with use_db_session() as s:
-                    s.query(APIKey).update({"revoked": True})
-                    s.commit()
+                _revoke_all_keys()
 
             worker = threading.Thread(target=revoke)
             worker.start()
