@@ -138,6 +138,14 @@ GROUPS: tuple[Group, ...] = (
         ),
     ),
     Group(
+        heading="Feedback",
+        intro=(
+            "For agents that get stuck. Submissions are stored, then forwarded "
+            "to the\noperator's configured sinks (Slack by default)."
+        ),
+        tools=("feedback",),
+    ),
+    Group(
         heading="Docs",
         intro=(
             "Keyword search over these docs, so an agent can look things up "
