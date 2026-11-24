@@ -268,8 +268,10 @@ class Config(BaseSettings):
     STRIPE_ALLOW_LIVE_KEY_IN_DEV: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
 
-    # Agent feedback sink: Slack incoming-webhook URL (optional)
+    # Agent feedback sinks (optional): Slack incoming-webhook URL, and a Linear
+    # personal API key (the Linear sink also needs feedback.linear.team_id)
     FEEDBACK_SLACK_WEBHOOK_URL: str | None = None
+    FEEDBACK_LINEAR_API_KEY: str | None = None
 
     # Redis
     REDIS_URL: str | None = None

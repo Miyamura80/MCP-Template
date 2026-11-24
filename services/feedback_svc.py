@@ -2,62 +2,52 @@
 
 An agent that gets stuck calls ``feedback`` instead of giving up silently. The
 submission is written to the ``agent_feedback`` table first (the durable
-record), then offered to every registered :class:`FeedbackSink` on a
-best-effort basis: a sink that is down or misconfigured is logged and skipped,
-and never fails the agent's call.
+record), then offered to every sink on a best-effort basis: a sink that is
+down or misconfigured is logged and skipped, and never fails the agent's call.
 
-One sink ships built in - Slack, via an incoming-webhook URL in
-``FEEDBACK_SLACK_WEBHOOK_URL``. To add another (Linear, Jira, email), implement
-the protocol and register it at import time::
+Two sinks ship built in (``services/feedback_sinks/``), each enabled by its
+settings:
 
-    class LinearSink:
-        name = "linear"
+- Slack: ``FEEDBACK_SLACK_WEBHOOK_URL`` in ``.env``.
+- Linear: ``FEEDBACK_LINEAR_API_KEY`` in ``.env`` plus
+  ``feedback.linear.team_id`` in YAML. One issue per category + tool; repeats
+  become comments.
+
+To add another (Jira, email), implement ``FeedbackSink`` and register it at
+import time; a registered sink named ``slack`` or ``linear`` replaces the
+built-in one::
+
+    from services.feedback_sinks import FeedbackRecord, SinkClient
+
+    class JiraSink:
+        name = "jira"
 
         def send(self, record: FeedbackRecord) -> None:
-            ...  # POST to Linear's API; raise on failure
+            with SinkClient() as client:  # raises SinkError on failure
+                client.post_json(JIRA_URL, {...}, headers={...})
 
-    register_feedback_sink(LinearSink())
+    register_feedback_sink(JiraSink())
+
+Latency: the fan-out runs inline, after the row is committed, so the result
+can report ``forwarded_to``. Each sink gets its own total budget of
+``feedback.sink_timeout_seconds`` (enforced by ``SinkClient``), so the call
+takes at most about one budget per enabled sink.
 """
 
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
 
-import httpx
 from loguru import logger as log
 
-from common import global_config
 from db.engine import use_db_session
 from db.models.feedback import AgentFeedback
 from models.feedback import FeedbackInput, FeedbackResult
 from services import service
 from services.events import emit
 from services.events.catalog import FEEDBACK_RECEIVED
-
-
-@dataclass(frozen=True)
-class FeedbackRecord:
-    """The stored submission, as handed to sinks."""
-
-    id: str
-    user_id: str
-    category: str
-    message: str
-    tool_name: str | None
-    context: str | None
-    created_at: datetime
-
-
-class FeedbackSink(Protocol):
-    """An outbound destination for feedback. ``send`` raises on failure."""
-
-    name: str
-
-    def send(self, record: FeedbackRecord) -> None: ...
-
+from services.feedback_sinks import BUILTINS, FeedbackRecord, FeedbackSink
 
 _sinks: list[FeedbackSink] = []
 
@@ -70,57 +60,14 @@ def register_feedback_sink(sink: FeedbackSink) -> None:
 
 def _active_sinks() -> list[FeedbackSink]:
     sinks = list(_sinks)
-    url = global_config.FEEDBACK_SLACK_WEBHOOK_URL
-    if url and not any(s.name == "slack" for s in sinks):
-        sinks.append(SlackWebhookSink(url))
+    taken = {s.name for s in sinks}
+    for name, factory in BUILTINS:
+        if name in taken:
+            continue
+        sink = factory()
+        if sink is not None:
+            sinks.append(sink)
     return sinks
-
-
-# ---------------------------------------------------------------------------
-# Built-in Slack sink
-# ---------------------------------------------------------------------------
-
-
-def _slack_escape(text: str) -> str:
-    """Escape Slack mrkdwn control characters.
-
-    The message is agent-written, so treat it as untrusted: escaping ``&``,
-    ``<`` and ``>`` (Slack's documented set) neutralises ``<!channel>`` /
-    ``<!here>`` pings and disguised ``<url|label>`` links.
-    """
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-class SlackWebhookSink:
-    """Post feedback to a Slack incoming webhook."""
-
-    name = "slack"
-
-    def __init__(self, webhook_url: str) -> None:
-        self._url = webhook_url
-
-    def send(self, record: FeedbackRecord) -> None:
-        lines = [
-            f"*Agent feedback* `{record.category}`"
-            + (f" on `{_slack_escape(record.tool_name)}`" if record.tool_name else ""),
-            _slack_escape(record.message),
-        ]
-        if record.context:
-            lines.append(f"```{_slack_escape(record.context)}```")
-        lines.append(
-            f"user `{_slack_escape(record.user_id or 'anonymous')}` · id `{record.id}`"
-        )
-        resp = httpx.post(
-            self._url,
-            json={"text": "\n".join(lines)},
-            timeout=global_config.feedback.sink_timeout_seconds,
-        )
-        resp.raise_for_status()
-
-
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
 
 
 def _fan_out(record: FeedbackRecord) -> list[str]:
@@ -128,11 +75,18 @@ def _fan_out(record: FeedbackRecord) -> list[str]:
     for sink in _active_sinks():
         try:
             sink.send(record)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # Defensive boundary: sinks are third-party/user-supplied adapters
             # and the row is already stored, so a failing sink must not fail
-            # the agent's call.
-            log.exception("feedback sink {} failed for {}", sink.name, record.id)
+            # the agent's call. Log type + message only: a traceback would
+            # print frame locals (loguru diagnose), which can hold secrets.
+            log.warning(
+                "feedback sink {} failed for {}: {}: {}",
+                sink.name,
+                record.id,
+                type(exc).__name__,
+                exc,
+            )
             continue
         delivered.append(sink.name)
     return delivered
