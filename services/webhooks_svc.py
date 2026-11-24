@@ -230,7 +230,7 @@ def webhook_list(input: WebhookListInput) -> WebhookListResult:
     description="Deactivate a webhook subscription so it stops receiving events",
     input_model=WebhookUnsubscribeInput,
     output_model=WebhookUnsubscribeResult,
-    mutating=True,
+    risk="dangerous",
 )
 def webhook_unsubscribe(
     input: WebhookUnsubscribeInput,

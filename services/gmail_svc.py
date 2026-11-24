@@ -328,7 +328,7 @@ def _revoke_with_google(row: GoogleToken) -> None:
     description="Revoke and remove the user's linked Gmail account",
     input_model=GmailDisconnectInput,
     output_model=GmailDisconnectResult,
-    mutating=True,
+    risk="dangerous",
 )
 def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
     """Revoke the stored refresh token with Google + erase every trace of it.

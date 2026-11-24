@@ -21,14 +21,20 @@ llm_config:
     min_wait_seconds: 1
     max_wait_seconds: 5
 
-# NLWeb /ask natural-language Q&A endpoint over the docs corpus.
-# Ships inert: when disabled, /ask returns 404 and the CLI prints a notice.
+# Docs corpus, shared by the `search_docs` tool (always on, no LLM) and the
+# NLWeb /ask natural-language Q&A endpoint. `enabled` gates /ask only: when
+# false, /ask returns 404 and the CLI prints a notice.
 ask:
   enabled: false
   corpus_path: docs/content/docs
   docs_base_url: https://docs.gmailmcp.com
   top_k: 5
   rate_limit_per_minute: 20
+
+# Agent-facing `feedback` tool. Always stored in the agent_feedback table;
+# set FEEDBACK_SLACK_WEBHOOK_URL in .env to also post to Slack.
+feedback:
+  sink_timeout_seconds: 3.0
 
 ########################################################
 # Debugging

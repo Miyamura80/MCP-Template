@@ -118,7 +118,8 @@ class BuiltinOAuthProvider(
                 "code_challenge": params.code_challenge,
                 "state": params.state,
                 "scopes": params.scopes or [],
-                "resource": resource,
+                # Store the bare URL: the query was connection flags.
+                "resource": mcp_resource_url(),
             }
         )
         # Consent comes first: the user must see which client is asking before

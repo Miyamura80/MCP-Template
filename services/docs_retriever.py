@@ -5,8 +5,9 @@ replace it later without touching the core layer. The built index is cached at
 module level (lazy singleton) so the corpus is parsed once, on first
 ``search()`` - never at import/boot time.
 
-This module lives under ``api_server`` because ``ask`` is an api_server-only
-feature; it is not part of the shared service registry.
+Shared by the ``search_docs`` service (all transports) and the api_server-only
+``/ask`` route. Translated pages (``*.<locale>.mdx``) are skipped so a query
+does not return near-duplicate hits in several languages.
 """
 
 import re
@@ -23,6 +24,8 @@ _IMPORT_RE = re.compile(r"^\s*import\s.+$", re.MULTILINE)
 _JSX_RE = re.compile(r"^\s*<[^>]+>\s*$", re.MULTILINE)
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+# index.ja.mdx, guide.zh-CN.mdx - a locale suffix before the extension.
+_LOCALE_PAGE_RE = re.compile(r"\.[a-z]{2}(-[A-Za-z]{2,4})?$")
 
 
 @dataclass
@@ -36,7 +39,7 @@ class DocChunk:
     score: float
 
 
-def _tokenize(text: str) -> list[str]:
+def tokenize(text: str) -> list[str]:
     """Lowercase and split on non-alphanumerics."""
     return _TOKEN_RE.findall(text.lower())
 
@@ -95,29 +98,29 @@ def _chunk_page(raw: str, rel_path: Path, base_url: str) -> list[DocChunk]:
     return chunks
 
 
-def _find_repo_root() -> Path | None:
-    """Walk up from this file to the directory containing ``pyproject.toml``."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent
-    return None
+# The directory that holds the top-level packages: the repo root in a checkout,
+# site-packages in an installed wheel. ``pyproject.toml`` force-includes
+# ``docs/content/docs`` at that same level, so one lookup covers both.
+_PACKAGES_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _resolve_corpus_dir(corpus_path: str) -> Path | None:
     """Resolve the corpus directory robustly.
 
     Try the configured path relative to CWD first; if that is missing, join it
-    onto the discovered repo root. Returns ``None`` if neither exists.
+    onto the packages root. Returns ``None`` if neither exists.
     """
     cwd_candidate = Path(corpus_path)
     if cwd_candidate.is_dir():
         return cwd_candidate.resolve()
-    repo_root = _find_repo_root()
-    if repo_root is not None:
-        root_candidate = (repo_root / corpus_path).resolve()
-        if root_candidate.is_dir():
-            return root_candidate
+    root_candidate = (_PACKAGES_ROOT / corpus_path).resolve()
+    if root_candidate.is_dir():
+        return root_candidate
     return None
+
+
+def _is_locale_page(path: Path) -> bool:
+    return bool(_LOCALE_PAGE_RE.search(path.stem))
 
 
 class DocsRetriever:
@@ -133,10 +136,12 @@ class DocsRetriever:
     def _build(self) -> None:
         corpus_dir = _resolve_corpus_dir(self._corpus_path)
         if corpus_dir is None:
-            log.warning("Ask corpus path not found: {}", self._corpus_path)
+            log.warning("Docs corpus path not found: {}", self._corpus_path)
             return
         for mdx in sorted(corpus_dir.rglob("*.mdx")):
             rel = mdx.relative_to(corpus_dir)
+            if _is_locale_page(rel):
+                continue
             try:
                 raw = mdx.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
@@ -144,16 +149,16 @@ class DocsRetriever:
                 continue
             self._chunks.extend(_chunk_page(raw, rel, self._base_url))
         if not self._chunks:
-            log.warning("Ask corpus is empty: {}", corpus_dir)
+            log.warning("Docs corpus is empty: {}", corpus_dir)
             return
-        tokenized = [_tokenize(c.text + " " + c.heading) for c in self._chunks]
+        tokenized = [tokenize(c.text + " " + c.heading) for c in self._chunks]
         self._index = BM25Okapi(tokenized)
 
     def search(self, query: str, top_k: int) -> list[DocChunk]:
         """Return the ``top_k`` highest-scoring chunks for ``query``."""
         if self._index is None or not self._chunks:
             return []
-        scores = self._index.get_scores(_tokenize(query))
+        scores = self._index.get_scores(tokenize(query))
         ranked = sorted(
             zip(self._chunks, scores, strict=True),
             key=lambda pair: pair[1],

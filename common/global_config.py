@@ -24,6 +24,7 @@ from .config_models import (
     DefaultLlm,
     ExampleParent,
     FeaturesConfig,
+    FeedbackConfig,
     GmailConfig,
     LlmConfig,
     LoggingConfig,
@@ -204,6 +205,7 @@ class Config(BaseSettings):
         default_factory=lambda: AgenticPaymentsConfig()
     )
     ask: AskConfig = Field(default_factory=lambda: AskConfig())
+    feedback: FeedbackConfig = Field(default_factory=lambda: FeedbackConfig())
     web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
     gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
     pdf_forms: PdfFormsConfig = Field(default_factory=lambda: PdfFormsConfig())
@@ -259,6 +261,9 @@ class Config(BaseSettings):
     STRIPE_TEST_WEBHOOK_SECRET: str | None = None
     STRIPE_ALLOW_LIVE_KEY_IN_DEV: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
+
+    # Agent feedback sink: Slack incoming-webhook URL (optional)
+    FEEDBACK_SLACK_WEBHOOK_URL: str | None = None
 
     # Redis
     REDIS_URL: str | None = None

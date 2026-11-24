@@ -20,7 +20,7 @@ from loguru import logger as log
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.session import ServerSession
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
 from mcp_server.enhancers import EnhancerEntry, get_enhancer
@@ -178,6 +178,20 @@ def _current_session(ctx: Context | None) -> ServerSession | None:
         return None
 
 
+def tool_annotations(entry: ServiceEntry) -> ToolAnnotations:
+    """MCP behaviour hints derived from the service's ``risk``.
+
+    ``destructiveHint`` defaults to true in the spec whenever ``readOnlyHint``
+    is false, so ``write`` tools set it to false explicitly; otherwise hosts
+    would treat creating a draft like sending one. Hints are advisory: the
+    server enforces nothing because of them.
+    """
+    return ToolAnnotations(
+        read_only_hint=entry.risk == "read",
+        destructive_hint=entry.risk == "dangerous" if entry.risk != "read" else None,
+    )
+
+
 def make_tool(mcp: MCPServer, entry: ServiceEntry) -> None:
     """Register a service as an MCP tool - enhanced if an enhancer exists, else headless."""
     enhancer_entry = get_enhancer(entry.name)
@@ -217,7 +231,11 @@ def _make_headless_tool(mcp: MCPServer, entry: ServiceEntry) -> None:
         include_context=True,
         optional_context=True,
     )
-    mcp.tool(name=entry.name, description=entry.description)(tool_fn)
+    mcp.tool(
+        name=entry.name,
+        description=entry.description,
+        annotations=tool_annotations(entry),
+    )(tool_fn)
 
 
 def _make_enhanced_tool(
@@ -268,7 +286,12 @@ def _make_enhanced_tool(
         if enhancer_entry.app_uri is not None
         else None
     )
-    mcp.tool(name=entry.name, description=entry.description, meta=meta)(tool_fn)
+    mcp.tool(
+        name=entry.name,
+        description=entry.description,
+        annotations=tool_annotations(entry),
+        meta=meta,
+    )(tool_fn)
     _patch_output_schema(mcp, entry.name, output_model)
 
 

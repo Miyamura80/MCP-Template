@@ -1,5 +1,9 @@
 [
   {
+    "name": "feedback",
+    "description": "Report a problem with this server so its developers can fix it. Call this when you get stuck: a tool errors in a way you cannot recover from, a description or doc misled you, or a capability you need is missing. Describe what you tried, what happened and what you expected; never include secrets or the user's private data."
+  },
+  {
     "name": "gmail_add_attachment",
     "description": "Attach one file to an existing Gmail draft and return the draft's full attachment list (each with attachment_id, filename, mime_type, size_bytes). Only the attachments change - body, subject, and recipients are preserved exactly. Pass the file as 'attachment' (filename + mime_type + base64 data_base64)."
   },
@@ -114,6 +118,10 @@
   {
     "name": "pdf_request_signature",
     "description": "Hand a filled PDF document over to the user for signing. Locks the document (no further edits) and opens the signing ceremony: the user reviews the document and types their full legal name themselves - signing can never be performed by the assistant. placement says where the signature stamp goes: a signature field's name from pdf_open's fields[], or {page, x, y} in PDF user-space coordinates (origin bottom-left, points) for flat PDFs. Call pdf_export afterwards to deliver the signed file."
+  },
+  {
+    "name": "search_docs",
+    "description": "Search this server's documentation and return the most relevant sections with their URLs. Use it when you are unsure how a tool, auth flow, webhook or setting works, before guessing or giving up."
   },
   {
     "name": "webhook_list",

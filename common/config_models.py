@@ -289,6 +289,16 @@ class AskConfig(BaseModel):
     rate_limit_per_minute: int = 20
 
 
+class FeedbackConfig(BaseModel):
+    """Agent ``feedback`` tool configuration.
+
+    Submissions are always stored in the ``agent_feedback`` table; the Slack
+    sink is enabled by setting ``FEEDBACK_SLACK_WEBHOOK_URL`` in ``.env``.
+    """
+
+    sink_timeout_seconds: float = 3.0
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 
