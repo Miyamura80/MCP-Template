@@ -194,6 +194,7 @@ app.include_router(dashboard_session.router)
 app.include_router(dashboard_pages.pages)
 app.include_router(dashboard_pages.api)
 app.include_router(dashboard_api_keys.router)
+dashboard_session.install(app)
 
 # --- Built-in OAuth server for MCP clients (opt-in) ------------------------
 # Only with MCP_AUTH_MODE=self (api_server/oauth/). Registered before the MCP

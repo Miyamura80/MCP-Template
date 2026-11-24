@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api_server.auth.api_key_auth import validate_api_key
-from api_server.dashboard.api_keys import _parse_expiration, create_link
+from api_server.dashboard.api_keys import _parse_expiration
 from api_server.server import app
 from common import global_config
 from db.models.api_keys import APIKey
@@ -76,7 +76,7 @@ class TestDeepLink(TestTemplate):
         with _client() as (client, _):
             _login(client)
             page = client.get(f"{_CREATE}?expiration=forever&scope=root")
-            assert "Ignored expiration" in page.text and "Ignored scope" in page.text
+            assert "Dropped expiration" in page.text and "Dropped scope" in page.text
             assert "<option value='standard' selected>" in page.text
 
     @pytest.mark.parametrize(
@@ -87,12 +87,6 @@ class TestDeepLink(TestTemplate):
 
     def test_out_of_range_expiration(self):
         assert _parse_expiration("400d")[2] is not None
-
-    def test_create_link(self):
-        link = create_link(name="ci bot", expiration="30d", scope="read_only")
-        assert link.endswith(
-            "/dashboard/settings/api-keys/create?name=ci+bot&expiration=30d&scope=read_only"
-        )
 
 
 class TestCreateAndRevoke(TestTemplate):
@@ -143,9 +137,44 @@ class TestCreateAndRevoke(TestTemplate):
                 data={"csrf": mallory_csrf},
                 follow_redirects=False,
             )
-            assert resp.status_code == 303  # a valid request, just not her key
+            assert resp.status_code == 404  # a valid request, just not her key
             with factory() as s:
                 assert s.query(APIKey).one().revoked is False
+
+    def test_admin_is_never_preselected_by_a_link(self):
+        with _client() as (client, _):
+            _login(client)
+            page = client.get(f"{_CREATE}?scope=admin")
+            assert "choose admin yourself" in page.text
+            assert "<option value='admin' selected>" not in page.text
+
+    def test_query_with_slashes_survives_sign_in(self):
+        with _client() as (client, _):
+            link = f"{_CREATE}?name=see+https://x.example"
+            _, resp = _login(client, next_path=link)
+            assert resp.headers["location"] == link
+
+    def test_long_name_is_refused_on_post(self):
+        with _client() as (client, factory):
+            _login(client)
+            page = client.get(_CREATE)
+            resp = client.post(
+                _CREATE, data={"csrf": _csrf(page.text), "name": "x" * 101}
+            )
+            assert resp.status_code == 400
+            with factory() as s:
+                assert s.query(APIKey).count() == 0
+
+    def test_list_shows_access(self):
+        with _client() as (client, _):
+            _login(client)
+            page = client.get(_CREATE)
+            client.post(
+                _CREATE,
+                data={"csrf": _csrf(page.text), "name": "root", "scope": "admin"},
+            )
+            assert "root" in client.get("/dashboard/settings/api-keys").text
+            assert "admin" in client.get("/dashboard/settings/api-keys").text
 
     def test_api_key_is_not_a_session(self):
         with _client() as (client, _):

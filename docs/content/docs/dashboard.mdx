@@ -21,11 +21,12 @@ button.
 |-----------|--------|---------|
 | `name` | up to 100 characters | empty |
 | `expiration` | `none`, or `1d` to `365d` | `none` |
-| `scope` | `read_only`, `standard`, `admin` | `standard` |
+| `scope` | `read_only`, `standard` | `standard` |
 
-A value the page doesn't understand is ignored, with a note saying so. The new
-key is shown once, after you click Create, and never appears in a URL. Send it
-as the `X-API-KEY` header.
+A value the page can't use is dropped, with a note saying so. `admin` (full
+access) is never taken from a link; pick it on the page yourself. The new key
+is shown once, after you click Create, and never appears in a URL. Send it as
+the `X-API-KEY` header.
 
 `/dashboard/settings/api-keys` lists your keys and revokes them.
 
