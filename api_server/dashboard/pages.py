@@ -19,7 +19,6 @@ and calling the JSON routes.
 
 from __future__ import annotations
 
-import html
 import json
 from typing import Annotated, Literal
 
@@ -27,11 +26,11 @@ from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from api_server.dashboard.session import (
-    DashboardSession,
     csrf_ok,
     current_session,
     login_redirect,
 )
+from api_server.dashboard.ui import csrf_field, esc, nav
 from api_server.oauth.flow import render_page
 from models.approvals import (
     APPROVAL_MODES,
@@ -64,22 +63,6 @@ def _dangerous_tools() -> list[str]:
     return sorted(dangerous_tool_names())
 
 
-def _esc(value: object) -> str:
-    return html.escape(str(value), quote=True)
-
-
-def _nav(session: DashboardSession) -> str:
-    return (
-        "<p><a href='/dashboard/approvals'>Approvals</a> · "
-        "<a href='/dashboard/approval'>Settings</a> · "
-        f"signed in as <code>{_esc(session.user_id)}</code></p>"
-    )
-
-
-def _csrf_field(session: DashboardSession) -> str:
-    return f"<input type='hidden' name='csrf' value='{_esc(session.csrf)}'>"
-
-
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
@@ -97,15 +80,15 @@ def approvals_page(request: Request) -> Response:
         return login_redirect(request)
     rows = list_approvals(session.user_id)
     items = "".join(
-        f"<li><a href='/dashboard/approvals/{_esc(v.id)}'><code>{_esc(v.tool)}</code></a> "
-        f"· {_esc(v.status)} · {_esc(v.mode)} · "
-        f"{_esc(v.created_at.isoformat(timespec='minutes'))}</li>"
+        f"<li><a href='/dashboard/approvals/{esc(v.id)}'><code>{esc(v.tool)}</code></a> "
+        f"· {esc(v.status)} · {esc(v.mode)} · "
+        f"{esc(v.created_at.isoformat(timespec='minutes'))}</li>"
         for v in rows
     )
     return render_page(
         "Approvals",
         "<h1>Approvals</h1>"
-        + _nav(session)
+        + nav(session)
         + (f"<ul>{items}</ul>" if items else "<p>Nothing waiting.</p>"),
     )
 
@@ -118,18 +101,18 @@ def approval_page(request: Request, approval_id: str) -> Response:
     try:
         view, args = get_review(session.user_id, approval_id)
     except InvalidArgument:
-        return render_page("Approval", "<h1>Not found</h1>" + _nav(session), 404)
+        return render_page("Approval", "<h1>Not found</h1>" + nav(session), 404)
     body = (
-        f"<h1>{_esc(view.tool)}</h1>"
-        + _nav(session)
-        + f"<p>Status: <strong>{_esc(view.status)}</strong> · mode {_esc(view.mode)} · "
-        f"expires {_esc(view.expires_at.isoformat(timespec='minutes'))}</p>"
-        f"<pre>{_esc(json.dumps(args, indent=2, ensure_ascii=False))}</pre>"
+        f"<h1>{esc(view.tool)}</h1>"
+        + nav(session)
+        + f"<p>Status: <strong>{esc(view.status)}</strong> · mode {esc(view.mode)} · "
+        f"expires {esc(view.expires_at.isoformat(timespec='minutes'))}</p>"
+        f"<pre>{esc(json.dumps(args, indent=2, ensure_ascii=False))}</pre>"
     )
     if view.status == "pending":
         body += (
-            f"<form method='post' action='/dashboard/approvals/{_esc(view.id)}'>"
-            + _csrf_field(session)
+            f"<form method='post' action='/dashboard/approvals/{esc(view.id)}'>"
+            + csrf_field(session)
             + "<button class='allow' name='decision' value='approve' type='submit'>"
             "Approve</button>"
             "<button name='decision' value='deny' type='submit'>Deny</button></form>"
@@ -137,7 +120,7 @@ def approval_page(request: Request, approval_id: str) -> Response:
     elif view.status == "approved":
         body += "<p>Approved. It runs when your agent retries the call.</p>"
     elif view.error:
-        body += f"<p class='warn'>{_esc(view.error)}</p>"
+        body += f"<p class='warn'>{esc(view.error)}</p>"
     return render_page(f"Approve {view.tool}", body)
 
 
@@ -158,7 +141,7 @@ def decide_page(
     try:
         _decide(session.user_id, approval_id, decision)
     except InvalidArgument as exc:
-        return render_page("Approval", f"<h1>Can't do that</h1><p>{_esc(exc)}</p>", 400)
+        return render_page("Approval", f"<h1>Can't do that</h1><p>{esc(exc)}</p>", 400)
     return RedirectResponse(f"/dashboard/approvals/{approval_id}", status_code=303)
 
 
@@ -176,21 +159,21 @@ def settings_page(request: Request) -> Response:
             f"{m}: {_MODE_HELP[m]}</option>"
             for m in APPROVAL_MODES
         ]
-        return f"<select name='{_esc(name)}'>{''.join(opts)}</select>"
+        return f"<select name='{esc(name)}'>{''.join(opts)}</select>"
 
     rows = "".join(
-        f"<p><label><code>{_esc(tool)}</code> "
+        f"<p><label><code>{esc(tool)}</code> "
         f"{select('tool:' + tool, settings.overrides.get(tool), True)}</label></p>"
         for tool in _dangerous_tools()
     )
     return render_page(
         "Approval settings",
         "<h1>Approval settings</h1>"
-        + _nav(session)
+        + nav(session)
         + "<p>Applies to dangerous tools. An agent's MCP URL "
         "(<code>?approval=</code>) can make this stricter, never looser.</p>"
         "<form method='post' action='/dashboard/approval'>"
-        + _csrf_field(session)
+        + csrf_field(session)
         + f"<p><label>Default {select('mode', settings.mode, False)}</label></p>"
         + rows
         + "<button class='allow' type='submit'>Save</button></form>",
@@ -219,7 +202,7 @@ async def save_settings_page(request: Request) -> Response:
         )
     except (InvalidArgument, ValueError) as exc:
         return render_page(
-            "Approval settings", f"<h1>Not saved</h1><p>{_esc(exc)}</p>", 400
+            "Approval settings", f"<h1>Not saved</h1><p>{esc(exc)}</p>", 400
         )
     return RedirectResponse("/dashboard/approval", status_code=303)
 
