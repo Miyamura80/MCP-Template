@@ -16,12 +16,20 @@ from fastapi.responses import HTMLResponse
 
 from common import global_config
 
-PAGE_CSP = (
-    "default-src 'none'; "
-    "style-src 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src https://fonts.gstatic.com; "
-    "img-src data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
-)
+
+def page_csp(form_action: tuple[str, ...] = ()) -> str:
+    """The pages' CSP. ``form_action`` adds origins a form may end up at: a
+    browser checks a form's redirects against it too, so a form that 303s to
+    another site needs that site listed."""
+    targets = " ".join(("'self'", *form_action))
+    return (
+        "default-src 'none'; "
+        "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com; "
+        f"img-src data:; base-uri 'none'; form-action {targets}; "
+        "frame-ancestors 'none'"
+    )
+
 
 _FONT = (
     "https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap"
@@ -115,6 +123,12 @@ text-transform:uppercase;color:var(--subtle);font-weight:500;padding:0 .75rem .6
 border-bottom:1px solid var(--border)}
 td{padding:.85rem .75rem .85rem 0;border-bottom:1px solid var(--s2);vertical-align:middle}
 td:last-child,th:last-child{text-align:right;padding-right:0}
+tr.pick td{background:rgba(195,255,253,.06)}
+table.plans td:first-child,table.plans th:first-child{padding-left:.75rem}
+table.plans th{white-space:nowrap}
+tr.pick td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+.meter{height:.5rem;border:1px solid var(--border);background:var(--bg);margin:0 0 .75rem}
+.meter>span{display:block;height:100%;background:var(--accent)}
 .empty{color:var(--muted);margin:0}
 pre{background:var(--bg);border:1px solid var(--border);padding:1rem;overflow-x:auto;
 font-size:.85rem;color:var(--fg);margin:0 0 1rem}
@@ -130,6 +144,7 @@ def render_page(
     *,
     header: str = "",
     narrow: bool = True,
+    form_action: tuple[str, ...] = (),
 ) -> HTMLResponse:
     """One branded page. ``header`` replaces the default brand-only top bar."""
     brand = html.escape(global_config.branding.title)
@@ -149,6 +164,6 @@ def render_page(
         f"<main class='{'narrow' if narrow else ''}'>{body}</main></body></html>"
     )
     response = HTMLResponse(content=content, status_code=status_code)
-    response.headers["Content-Security-Policy"] = PAGE_CSP
+    response.headers["Content-Security-Policy"] = page_csp(form_action)
     response.headers["Cache-Control"] = "no-store"
     return response

@@ -19,7 +19,11 @@ curl -X POST -H "X-API-KEY: sk_live_..." \
   http://localhost:8080/api/v1/billing/checkout
 ```
 
-Returns a Stripe checkout URL to complete the upgrade.
+Returns a Stripe checkout URL to complete the upgrade. A person can do the
+same from the dashboard: `/dashboard/billing?plan=plus` (see
+[Dashboard deep links](/docs/dashboard#billing)). Either way, a user who
+already has a live Plus subscription in Stripe gets `409`; also turn on
+Stripe's "Limit customers to one subscription" Checkout setting.
 
 ## Check Subscription Status
 

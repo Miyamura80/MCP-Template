@@ -146,6 +146,12 @@ def require_csrf(
     return session
 
 
+# Route-parameter types: the signed-in human, and the same for form POSTs
+# (CSRF token checked). Named apart from SQLAlchemy's ``Session``.
+DashboardUser = Annotated[DashboardSession, Depends(require_session)]
+DashboardForm = Annotated[DashboardSession, Depends(require_csrf)]
+
+
 def install(app: FastAPI) -> None:
     """Turn the two dependencies' refusals into a redirect and a 403 page."""
 

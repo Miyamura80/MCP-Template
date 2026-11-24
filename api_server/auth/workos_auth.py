@@ -5,9 +5,12 @@ Supports a test-mode bypass for local development.
 """
 
 import json
+from urllib.parse import quote
 
+import httpx
 import jwt
 from jwt import PyJWKClient
+from loguru import logger as log
 
 from common import global_config
 
@@ -24,6 +27,33 @@ def _get_jwks_client() -> PyJWKClient:
     if _jwks_client is None:
         _jwks_client = PyJWKClient("https://api.workos.com/sso/jwks/")
     return _jwks_client
+
+
+_USERS_URL = "https://api.workos.com/user_management/users/"
+_LOOKUP_TIMEOUT_SECONDS = 5.0
+
+
+def fetch_workos_email(user_id: str) -> str | None:
+    """The email WorkOS holds for *user_id*, or None when it can't be had.
+
+    None when WorkOS isn't configured (dev sign-in) or the lookup fails; the
+    caller decides what a missing email means.
+    """
+    api_key = global_config.WORKOS_API_KEY
+    if not api_key:
+        return None
+    try:
+        response = httpx.get(
+            _USERS_URL + quote(user_id, safe=""),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=_LOOKUP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        email = response.json().get("email")
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        log.warning("WorkOS user lookup failed: {}", type(exc).__name__)
+        return None
+    return email if isinstance(email, str) and email else None
 
 
 class WorkOSUser:

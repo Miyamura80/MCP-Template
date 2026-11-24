@@ -22,15 +22,14 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request
+from fastapi import APIRouter, Form, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from api_server.dashboard.session import (
-    DashboardSession,
+    DashboardForm,
+    DashboardUser,
     csrf_ok,
     current_session,
-    require_csrf,
-    require_session,
 )
 from api_server.dashboard.ui import box, csrf_field, dashboard_page, esc
 from models.approvals import (
@@ -51,9 +50,6 @@ from services.approvals_svc import (
 
 pages = APIRouter(prefix="/dashboard", tags=["dashboard"], include_in_schema=False)
 api = APIRouter(prefix="/api/v1", tags=["approvals"])
-
-Session = Annotated[DashboardSession, Depends(require_session)]
-FormSession = Annotated[DashboardSession, Depends(require_csrf)]
 
 _MODE_HELP = {
     "automatic": "runs without asking",
@@ -91,7 +87,7 @@ def _pill(text: str, tone: str = "") -> str:
 
 
 @pages.get("/approvals")
-def approvals_page(session: Session) -> Response:
+def approvals_page(session: DashboardUser) -> Response:
     rows = list_approvals(session.user_id)
     table = (
         "<table><thead><tr><th>Tool</th><th>Status</th><th>Mode</th>"
@@ -119,7 +115,7 @@ def approvals_page(session: Session) -> Response:
 
 
 @pages.get("/approvals/{approval_id}")
-def approval_page(session: Session, approval_id: str) -> Response:
+def approval_page(session: DashboardUser, approval_id: str) -> Response:
     try:
         view, args = get_review(session.user_id, approval_id)
     except InvalidArgument:
@@ -163,7 +159,7 @@ def approval_page(session: Session, approval_id: str) -> Response:
 
 @pages.post("/approvals/{approval_id}")
 def decide_page(
-    session: FormSession, approval_id: str, decision: Annotated[str, Form()]
+    session: DashboardForm, approval_id: str, decision: Annotated[str, Form()]
 ) -> Response:
     try:
         _decide(session.user_id, approval_id, decision)
@@ -186,7 +182,7 @@ def _select(name: str, current: str | None, allow_default: bool) -> str:
 
 
 @pages.get("/approval")
-def settings_page(session: Session) -> Response:
+def settings_page(session: DashboardUser) -> Response:
     settings = get_settings(session.user_id)
     overrides = "".join(
         f"<label class='field'><span>{esc(tool)}</span>"
@@ -219,7 +215,7 @@ def settings_page(session: Session) -> Response:
 
 
 @pages.post("/approval")
-async def save_settings_page(request: Request, session: Session) -> Response:
+async def save_settings_page(request: Request, session: DashboardUser) -> Response:
     form = await request.form()  # per-tool fields are dynamic, so read it whole
     if not csrf_ok(session, str(form.get("csrf", ""))):
         return dashboard_page(

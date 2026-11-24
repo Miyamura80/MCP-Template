@@ -30,7 +30,7 @@ import re
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Query
+from fastapi import APIRouter, Form, Query
 from fastapi.responses import RedirectResponse, Response
 from pydantic import ValidationError
 
@@ -47,9 +47,9 @@ from api_server.auth.scopes import (
     validate_scopes,
 )
 from api_server.dashboard.session import (
+    DashboardForm,
     DashboardSession,
-    require_csrf,
-    require_session,
+    DashboardUser,
 )
 from api_server.dashboard.ui import box, csrf_field, dashboard_page, esc
 from db.engine import use_db_session
@@ -65,9 +65,6 @@ _DEFAULT_SCOPE = "standard"
 _LINKABLE_SCOPES = frozenset(SCOPE_TEMPLATES) - {"admin"}
 _EXPIRATION = re.compile(r"^(?:none|([1-9][0-9]{0,2})d)$")
 _EXPIRY_CHOICES = ("none", "7d", "30d", "90d", "365d")
-
-Session = Annotated[DashboardSession, Depends(require_session)]
-FormSession = Annotated[DashboardSession, Depends(require_csrf)]
 
 
 def _parse_expiration(raw: str | None) -> tuple[str, int | None, str | None]:
@@ -146,7 +143,7 @@ def _form(
 
 @router.get("/create")
 def create_page(
-    session: Session,
+    session: DashboardUser,
     name: Annotated[str | None, Query()] = None,
     expiration: Annotated[str | None, Query()] = None,
     scope: Annotated[str | None, Query()] = None,
@@ -164,7 +161,7 @@ def create_page(
 
 @router.post("/create")
 def create_submit(
-    session: FormSession,
+    session: DashboardForm,
     name: Annotated[str, Form()] = "",
     expiration: Annotated[str, Form()] = "none",
     scope: Annotated[str, Form()] = _DEFAULT_SCOPE,
@@ -250,7 +247,7 @@ def _row(session: DashboardSession, row: APIKey, now: datetime) -> str:
 
 
 @router.get("")
-def list_page(session: Session) -> Response:
+def list_page(session: DashboardUser) -> Response:
     with use_db_session() as db:
         now = datetime.now(UTC)
         rows = "".join(
@@ -276,7 +273,7 @@ def list_page(session: Session) -> Response:
 
 
 @router.post("/{key_id}/revoke")
-def revoke(session: FormSession, key_id: int) -> Response:
+def revoke(session: DashboardForm, key_id: int) -> Response:
     with use_db_session() as db:
         revoked = revoke_api_key(db, key_id=key_id, user_id=session.user_id)
     if not revoked:
