@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 from common import global_config
 from db.engine import use_db_session
 from db.models.webhooks import WebhookDelivery, WebhookEvent, WebhookSubscription
+from services._ssrf_guard import ResolverThreads, build_client, validate_and_pin
 from services.webhooks_svc import (
     DELIVERY_ID_HEADER,
     EVENT_ID_HEADER,
@@ -49,6 +50,12 @@ from services.webhooks_svc import (
 _BACKOFF_BASE_S = 30
 _BACKOFF_CAP_S = 3600
 _HTTP_TIMEOUT_S = 10.0
+# Wall-clock ceiling on one delivery POST: the per-operation timeout alone lets a
+# subscriber that trickles its response hold the runner indefinitely.
+_DELIVERY_DEADLINE_S = 30.0
+# Delivery DNS runs on these threads; a hung lookup holds one (and only one
+# per host) until the system resolver gives up, never the runner itself.
+_RESOLVER = ResolverThreads(8)
 _DEFAULT_BATCH = 20
 # A claimed ("sending") row left behind by a crashed runner is reclaimable
 # after this many seconds so deliveries never get stranded.
@@ -104,7 +111,18 @@ def _claim_batch(session: Session, now: datetime, limit: int) -> list[str]:
 def _post(
     url: str, secret: str, delivery: WebhookDelivery, event: WebhookEvent
 ) -> None:
-    """POST the signed payload; raises httpx.HTTPError on transport/HTTP failure."""
+    """POST the signed payload; raises on transport/HTTP failure or SSRF reject.
+
+    The subscriber URL was validated at subscribe time, but DNS can be flipped
+    between then and now (rebinding). We therefore re-resolve here and PIN the
+    connection to a validated global IP - the original hostname is preserved via
+    the ``Host`` header + TLS SNI, so the socket lands on the IP that just passed
+    the allowlist and never on a rebind target like 169.254.169.254 or an
+    RFC1918 host. ``validate_and_pin`` raises :class:`SsrfError` (a ValueError)
+    if the host now resolves to a non-global address; that propagates to
+    ``_process``'s defensive boundary, which records it as a delivery failure so
+    the POST is refused, not silently retried against internal infrastructure.
+    """
     body = json.dumps(
         {
             "id": event.id,
@@ -124,8 +142,26 @@ def _post(
         EVENT_TYPE_HEADER: event.event_type,
         DELIVERY_ID_HEADER: delivery.id,
     }
-    with httpx.Client(timeout=_HTTP_TIMEOUT_S) as client:
-        resp = client.post(url, content=body, headers=headers)
+    # Loopback subscribers exist only in dev (subscribe-time guard enforces this),
+    # so mirror that allowance here rather than resolving them to a hard reject.
+    # The deadline starts before DNS, and the lookup is timed against it: a
+    # subscriber whose DNS never answers cannot hold the runner thread.
+    deadline = time.monotonic() + _DELIVERY_DEADLINE_S
+    target = validate_and_pin(
+        url,
+        allow_loopback=global_config.is_dev,
+        resolver=_RESOLVER,
+        timeout=_HTTP_TIMEOUT_S,
+    )
+    with build_client(timeout=_HTTP_TIMEOUT_S, deadline=deadline) as client:
+        resp = client.post(
+            target.url,
+            content=body,
+            headers={**headers, **target.headers},
+            extensions=target.extensions,
+        )
+    # follow_redirects=False: a 3xx (e.g. Location: http://169.254.169.254/) is
+    # non-success, so raise_for_status refuses it instead of chasing it inward.
     resp.raise_for_status()
 
 
