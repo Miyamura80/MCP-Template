@@ -99,11 +99,16 @@ class TestStream(TestTemplate):
         assert final["id"] == 7 and final["result"]["resultType"] == "complete"
         assert final["result"]["_meta"][_SUB] == 7  # the spec's StreamEventsResult
 
-    def test_live_event_is_pushed(self):
-        with _wire_client("u-live") as (client, key), _short_streams(max_seconds=2.0):
-            # Make the user's cursor row up front: the test DB is one shared
-            # SQLite connection, and a first emit's savepoint would collide
-            # with the stream's read on the other thread.
+    def test_live_event_is_pushed(self, tmp_path):
+        # A file DB: the emit runs on its own thread while the stream polls,
+        # and the shared in-memory connection lets one thread's session
+        # commit or roll back the other's transaction.
+        with (
+            _wire_client("u-live", str(tmp_path / "live.db")) as (client, key),
+            _short_streams(max_seconds=2.0),
+        ):
+            # Make the user's cursor row up front, so the stream reads a
+            # stable head before the live emit lands.
             emit("u-live", APPROVAL_RESOLVED, {"approvalId": "a", "tool": "t"})
 
             def later():
