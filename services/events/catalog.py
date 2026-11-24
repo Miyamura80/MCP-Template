@@ -105,13 +105,13 @@ EVENT_TYPES: dict[str, EventType] = {
                 "gmail_watch_start)."
             ),
             payload_schema=_object(
-                message_id=_string("Gmail message id."),
-                thread_id=_string("Gmail thread id."),
+                messageId=_string("Gmail message id."),
+                threadId=_string("Gmail thread id."),
                 **{"from": _string("The From header.")},
                 subject=_string("The Subject header."),
                 snippet=_string("Gmail's short preview."),
                 date=_string("The Date header."),
-                label_ids={"type": "array", "items": {"type": "string"}},
+                labelIds={"type": "array", "items": {"type": "string"}},
             ),
             input_properties={
                 "from": _string("Only messages whose From header contains this.")
@@ -120,3 +120,16 @@ EVENT_TYPES: dict[str, EventType] = {
         ),
     )
 }
+
+
+def gmail_message_payload(legacy: dict[str, Any]) -> dict[str, Any]:
+    """The legacy webhook's snake_case Gmail payload, in this catalog's casing."""
+    return {
+        "messageId": legacy.get("message_id"),
+        "threadId": legacy.get("thread_id"),
+        "from": legacy.get("from"),
+        "subject": legacy.get("subject"),
+        "snippet": legacy.get("snippet"),
+        "date": legacy.get("date"),
+        "labelIds": legacy.get("label_ids", []),
+    }

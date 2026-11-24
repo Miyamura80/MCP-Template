@@ -249,24 +249,28 @@ def running(decision: GateDecision) -> Iterator[Callable[[BaseModel], None]]:
 # ---------------------------------------------------------------------------
 
 
-def _announce(s: Session, action: PendingAction, status: str) -> None:
-    """Tell subscribers (MCP Events) that a held call was decided, so a
-    background agent can retry it without polling ``get_approval``."""
+def _decide(s: Session, action: PendingAction, from_: str, to: str) -> bool:
+    """Move a held call to a decision and tell subscribers (MCP Events), in one
+    transaction, so a background agent can retry it without polling
+    ``get_approval`` and never hears of a decision that didn't stick."""
+    if not transition(s, action.id, from_, to, commit=False):
+        s.rollback()
+        return False
     emit(
         action.user_id,
         APPROVAL_RESOLVED,
-        {"approvalId": action.id, "tool": action.tool, "status": status},
+        {"approvalId": action.id, "tool": action.tool, "status": to},
         session=s,
     )
     s.commit()
+    return True
 
 
 def _approve(s: Session, user_id: str, approval_id: str) -> ApprovalView:
     action = owned(s, user_id, approval_id)
     if action is None:
         raise InvalidArgument(f"No approval {approval_id!r} for this user.")
-    if transition(s, approval_id, "pending", "approved"):
-        _announce(s, action, "approved")
+    _decide(s, action, "pending", "approved")
     s.refresh(action)
     return to_view(action)
 
@@ -290,10 +294,7 @@ def approve_elicitation(
             or action.args_hash != call_hash
         ):
             return False
-        if not transition(s, approval_id, "pending", "approved"):
-            return False
-        _announce(s, action, "approved")
-        return True
+        return _decide(s, action, "pending", "approved")
 
 
 def deny(user_id: str, approval_id: str, *, tool: str | None = None) -> ApprovalView:
@@ -301,10 +302,8 @@ def deny(user_id: str, approval_id: str, *, tool: str | None = None) -> Approval
         action = owned(s, user_id, approval_id)
         if action is None or (tool is not None and action.tool != tool):
             raise InvalidArgument(f"No approval {approval_id!r} for this user.")
-        if transition(s, approval_id, "pending", "denied") or transition(
-            s, approval_id, "approved", "denied"
-        ):
-            _announce(s, action, "denied")
+        if not _decide(s, action, "pending", "denied"):
+            _decide(s, action, "approved", "denied")
         s.refresh(action)
         return to_view(action)
 

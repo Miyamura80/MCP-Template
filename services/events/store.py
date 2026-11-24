@@ -1,13 +1,16 @@
 """Emit events, read them back by cursor (poll), and age them out.
 
-    emit(user, name, data) ─► event_log row ─┬─► events/poll reads by seq
-                                             └─► one webhook_deliveries row
-                                                 (channel "mcp_event") per
-                                                 matching live subscription
+    emit(user, name, data) ─► lock event_cursors[user], seq += 1
+                              ─► event_log row (user_seq = seq) ─┬─► events/poll
+                              └─► one webhook_deliveries row per  │   reads
+                                  matching live subscription      │   user_seq > cursor
 
-The cursor is the ``event_log.seq`` of the last event a poll consumed, as a
-string. ``null`` means "from now". A cursor older than what retention keeps is
-answered with ``truncated: true``: the spec's one gap signal.
+The cursor is the principal's own counter, as a string. Because every emit for
+a user bumps it under that row's lock, a user's events commit in cursor order,
+so "everything after cursor N" is never missing a row that commits later.
+``null`` means "from now". ``prune`` records how far it deleted
+(``pruned_through``); a cursor below that may have missed events and gets
+``truncated: true``, the spec's one gap signal.
 """
 
 from __future__ import annotations
@@ -17,11 +20,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from common import global_config
 from db.engine import use_db_session
-from db.models.events import EventLog, EventSubscription
+from db.models.events import EventCursor, EventLog, EventSubscription
 from db.models.webhooks import WebhookDelivery
 from services import InvalidArgument
 from services.events.catalog import EVENT_TYPES, EventType
@@ -32,19 +36,13 @@ MCP_CHANNEL = "mcp_event"
 _SCAN_LIMIT = 500
 
 
-def _now() -> datetime:
+def now() -> datetime:
     return datetime.now(UTC)
 
 
-def _aware(dt: datetime) -> datetime:
+def aware(dt: datetime) -> datetime:
+    # SQLite drops the zone on DateTime(timezone=True); every value we write is UTC.
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
-
-
-def event_type(name: str) -> EventType:
-    found = EVENT_TYPES.get(name)
-    if found is None:
-        raise UnknownEventError(name)
-    return found
 
 
 class UnknownEventError(InvalidArgument):
@@ -55,17 +53,39 @@ class UnknownEventError(InvalidArgument):
         super().__init__(f"No event type {name!r}. Call events/list for the types.")
 
 
-def occurrence(row: EventLog, *, with_cursor: bool) -> dict[str, Any]:
-    """The spec's EventOccurrence for one row."""
-    body: dict[str, Any] = {
+def event_type(name: str) -> EventType:
+    found = EVENT_TYPES.get(name)
+    if found is None:
+        raise UnknownEventError(name)
+    return found
+
+
+def occurrence(row: EventLog) -> dict[str, Any]:
+    """The spec's EventOccurrence for one row (push/webhook add ``cursor``)."""
+    return {
         "eventId": row.event_id,
         "name": row.name,
-        "timestamp": _aware(row.created_at).isoformat(),
+        "timestamp": aware(row.created_at).isoformat(),
         "data": row.data,
     }
-    if with_cursor:  # push/webhook carry it per event; poll at the top level
-        body["cursor"] = str(row.seq)
-    return body
+
+
+def lock_cursor(s: Session, user_id: str) -> EventCursor:
+    """This principal's cursor row, locked until the transaction ends.
+
+    Serializes the user's emits (and subscribes, which must see a consistent
+    head) without touching anyone else's.
+    """
+    query = s.query(EventCursor).filter_by(user_id=user_id).with_for_update()
+    row = query.one_or_none()
+    if row is not None:
+        return row
+    try:
+        with s.begin_nested():  # a concurrent first emit may insert it first
+            s.add(EventCursor(user_id=user_id, seq=0, pruned_through=0))
+    except IntegrityError:
+        pass
+    return query.one()
 
 
 def emit(
@@ -87,18 +107,21 @@ def emit(
             return event_id
 
     kind = event_type(name)
+    cursor = lock_cursor(session, user_id)
+    cursor.seq += 1
     row = EventLog(
         event_id=f"evt_{secrets.token_urlsafe(16)}",
+        user_seq=cursor.seq,
         user_id=user_id,
         name=name,
         data=data,
-        created_at=_now(),
+        created_at=now(),
     )
     session.add(row)
-    session.flush()
-    for sub in _live_subscriptions(session, user_id, name):
+    for sub in live_subscriptions(session, user_id, name):
         if kind.matches(sub.arguments or {}, data):
             enqueue(session, sub.id, row.event_id)
+    session.flush()
     return row.event_id
 
 
@@ -111,12 +134,12 @@ def enqueue(session: Session, subscription_id: str, event_id: str) -> None:
             channel=MCP_CHANNEL,
             status="pending",
             attempts=0,
-            next_attempt_at=_now(),
+            next_attempt_at=now(),
         )
     )
 
 
-def _live_subscriptions(
+def live_subscriptions(
     session: Session, user_id: str, name: str
 ) -> list[EventSubscription]:
     return (
@@ -124,60 +147,68 @@ def _live_subscriptions(
         .filter(
             EventSubscription.user_id == user_id,
             EventSubscription.name == name,
-            EventSubscription.verified_at.is_not(None),
-            EventSubscription.expires_at > _now(),
+            EventSubscription.expires_at > now(),
         )
         .all()
     )
 
 
-def _parse_cursor(cursor: str | None) -> int | None:
-    if cursor is None:
-        return None
-    try:
-        value = int(cursor)
-    except ValueError as exc:
-        raise InvalidArgument("That cursor did not come from this server.") from exc
-    if value < 0:
-        raise InvalidArgument("That cursor did not come from this server.")
-    return value
-
-
-def head_cursor(session: Session) -> int:
-    """The cursor meaning "now": the newest seq so far (0 when empty)."""
-    return int(session.query(func.max(EventLog.seq)).scalar() or 0)
-
-
-def _truncated(session: Session, after: int) -> bool:
-    """Whether retention already dropped events after ``after``."""
-    oldest = session.query(func.min(EventLog.seq)).scalar()
-    if oldest is None:
-        return after < head_cursor(session)
-    return after < int(oldest) - 1
-
-
-def replay_from(
-    session: Session, cursor: str | None, max_age_ms: int | None
+def start_after(
+    s: Session,
+    cursor_row: EventCursor | None,
+    user_id: str,
+    name: str,
+    cursor: str | None,
+    max_age_ms: int | None,
 ) -> tuple[int, bool]:
     """Where a poll or subscription starts, and whether that skips events.
 
-    The start is the later of ``cursor`` and now minus ``maxAgeMs`` (spec).
-    ``null`` cursor starts from now.
+    The start is the later of ``cursor`` and now minus ``maxAgeMs`` (spec);
+    ``null`` starts from now. A cursor this server never issued is refused.
     """
-    after = _parse_cursor(cursor)
-    if after is None:
-        return head_cursor(session), False
-    truncated = _truncated(session, after)
+    head = cursor_row.seq if cursor_row else 0
+    pruned_through = cursor_row.pruned_through if cursor_row else 0
+    if cursor is None:
+        return head, False
+    try:
+        after = int(cursor)
+    except ValueError as exc:
+        raise InvalidArgument("That cursor did not come from this server.") from exc
+    if not 0 <= after <= head:
+        raise InvalidArgument("That cursor did not come from this server.")
+    truncated = after < pruned_through
+    after = max(after, pruned_through)
     if max_age_ms is not None:
-        floor = _now() - timedelta(milliseconds=max_age_ms)
+        floor = now() - timedelta(milliseconds=max_age_ms)
         aged_out = (
-            session.query(func.max(EventLog.seq))
-            .filter(EventLog.seq > after, EventLog.created_at < floor)
+            s.query(func.max(EventLog.user_seq))
+            .filter(
+                EventLog.user_id == user_id,
+                EventLog.name == name,
+                EventLog.user_seq > after,
+                EventLog.created_at < floor,
+            )
             .scalar()
         )
         if aged_out is not None:
             after, truncated = int(aged_out), True
     return after, truncated
+
+
+def events_after(
+    s: Session, user_id: str, name: str, after: int, limit: int
+) -> list[EventLog]:
+    return (
+        s.query(EventLog)
+        .filter(
+            EventLog.user_id == user_id,
+            EventLog.name == name,
+            EventLog.user_seq > after,
+        )
+        .order_by(EventLog.user_seq)
+        .limit(limit)
+        .all()
+    )
 
 
 def poll(
@@ -189,38 +220,30 @@ def poll(
     max_age_ms: int | None,
     max_events: int | None,
 ) -> dict[str, Any]:
-    """One ``events/poll``: events after ``cursor`` for this principal."""
+    """One ``events/poll``: this principal's events after ``cursor``."""
     kind = event_type(name)
     arguments = kind.validate_arguments(arguments)
     limit = min(max_events or global_config.events.max_poll_events, 1000)
     with use_db_session() as s:
-        after, truncated = replay_from(s, cursor, max_age_ms)
-        rows = (
-            s.query(EventLog)
-            .filter(
-                EventLog.user_id == user_id,
-                EventLog.name == name,
-                EventLog.seq > after,
-            )
-            .order_by(EventLog.seq)
-            .limit(_SCAN_LIMIT)
-            .all()
-        )
+        cursor_row = s.get(EventCursor, user_id)
+        head = cursor_row.seq if cursor_row else 0
+        after, truncated = start_after(s, cursor_row, user_id, name, cursor, max_age_ms)
+        rows = events_after(s, user_id, name, after, _SCAN_LIMIT)
         events: list[dict[str, Any]] = []
         position = after
         for row in rows:
             if len(events) == limit:
                 break
-            position = row.seq
+            position = row.user_seq
             if kind.matches(arguments, row.data):
-                events.append(occurrence(row, with_cursor=False))
-        # More when we stopped before the scanned rows ran out, or the scan
-        # itself was cut at its limit.
-        has_more = bool(rows) and (position != rows[-1].seq or len(rows) == _SCAN_LIMIT)
-        if not rows:
-            # Nothing of ours: move to the global head so a later poll never
-            # rescans other tenants' rows.
-            position = max(position, head_cursor(s))
+                events.append(occurrence(row))
+        has_more = bool(rows) and (
+            position != rows[-1].user_seq or len(rows) == _SCAN_LIMIT
+        )
+        if not has_more:
+            # Caught up on this name: skip ahead past the user's other event
+            # types, read in the same snapshot as ``rows``.
+            position = max(position, head)
     return {
         "resultType": "complete",
         "events": events,
@@ -232,11 +255,19 @@ def poll(
 
 
 def prune(older_than: timedelta | None = None) -> int:
-    """Drop events past retention, and their now-pointless outbox rows."""
-    cutoff = _now() - (
-        older_than or timedelta(days=global_config.events.retention_days)
-    )
+    """Drop events past retention, recording each user's ``pruned_through``."""
+    retention = older_than or timedelta(days=global_config.events.retention_days)
+    cutoff = now() - retention
     with use_db_session() as s:
+        reached = (
+            s.query(EventLog.user_id, func.max(EventLog.user_seq))
+            .filter(EventLog.created_at < cutoff)
+            .group_by(EventLog.user_id)
+            .all()
+        )
+        for user_id, through in reached:
+            row = lock_cursor(s, user_id)
+            row.pruned_through = max(row.pruned_through, int(through))
         stale = s.query(EventLog.event_id).filter(EventLog.created_at < cutoff)
         s.query(WebhookDelivery).filter(
             WebhookDelivery.channel == MCP_CHANNEL,
@@ -248,27 +279,30 @@ def prune(older_than: timedelta | None = None) -> int:
             .delete(synchronize_session=False)
         )
         s.query(EventSubscription).filter(
-            EventSubscription.expires_at < _now() - timedelta(days=1)
+            EventSubscription.expires_at < now() - timedelta(days=1)
         ).delete(synchronize_session=False)
         s.commit()
     return int(removed)
 
 
-def purge_user(user_id: str, name_prefix: str) -> int:
-    """Delete a user's events under a name prefix (e.g. on Gmail disconnect:
-    those payloads bank message content)."""
+def purge_user(user_id: str, name: str) -> int:
+    """Delete a user's events and subscriptions of one type (Gmail disconnect:
+    those payloads bank message content). Recorded as a gap for pollers."""
     with use_db_session() as s:
-        mine = s.query(EventLog.event_id).filter(
-            EventLog.user_id == user_id, EventLog.name.startswith(name_prefix)
-        )
+        mine = (EventLog.user_id == user_id, EventLog.name == name)
+        through = s.query(func.max(EventLog.user_seq)).filter(*mine).scalar()
+        if through is not None:
+            row = lock_cursor(s, user_id)
+            row.pruned_through = max(row.pruned_through, int(through))
         s.query(WebhookDelivery).filter(
             WebhookDelivery.channel == MCP_CHANNEL,
-            WebhookDelivery.event_id.in_(mine.scalar_subquery()),
+            WebhookDelivery.event_id.in_(
+                s.query(EventLog.event_id).filter(*mine).scalar_subquery()
+            ),
         ).delete(synchronize_session=False)
-        removed = (
-            s.query(EventLog)
-            .filter(EventLog.user_id == user_id, EventLog.name.startswith(name_prefix))
-            .delete(synchronize_session=False)
-        )
+        removed = s.query(EventLog).filter(*mine).delete(synchronize_session=False)
+        s.query(EventSubscription).filter(
+            EventSubscription.user_id == user_id, EventSubscription.name == name
+        ).delete(synchronize_session=False)
         s.commit()
     return int(removed)

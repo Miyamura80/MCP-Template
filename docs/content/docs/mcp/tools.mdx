@@ -200,6 +200,21 @@ crash:
 { "error": "Gmail account not connected. Call gmail_connect first." }
 ```
 
+## Skills
+
+The server also hands its how-to guidance to the host, through the MCP Skills
+extension (`io.modelcontextprotocol/skills`). Every directory under `skills/`
+in the repo is served as a skill: `skills/list` and `skills/get` return each
+one's frontmatter and a manifest of its files (`skill://<name>/<path>`, with a
+SHA-256 digest and size), and `resources/read` returns the files. Hosts that
+support the extension can load a skill on demand without the user installing
+anything.
+
+To add one, create `skills/<name>/SKILL.md` with `name` (equal to the
+directory name) and `description` frontmatter. `tests/test_skills_ext.py`
+fails if a skill names a tool this server doesn't expose, so a renamed tool
+can't leave a skill pointing at nothing.
+
 ## Keeping this list honest
 
 The tool surface has one source of truth: the `@service` registry in the Python

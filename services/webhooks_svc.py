@@ -20,10 +20,12 @@ import hmac
 import ipaddress
 import secrets
 import socket
+import time
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 from loguru import logger as log
 from sqlalchemy.orm import Session
 
@@ -43,6 +45,7 @@ from models.webhooks import (
     WebhookUnsubscribeResult,
 )
 from services import InvalidArgument, service
+from services._ssrf_guard import ResolverThreads, build_client, validate_and_pin
 
 # Header names on delivered POSTs (kept here so the delivery module imports one).
 SIGNATURE_HEADER = "X-Webhook-Signature"
@@ -152,6 +155,47 @@ def validate_webhook_url(url: str) -> None:
             raise InvalidArgument(
                 "Webhook url must not target a private/reserved address"
             )
+
+
+# ---------------------------------------------------------------------------
+# Outbound POST, shared by every webhook channel
+# ---------------------------------------------------------------------------
+
+# Delivery DNS runs on these threads; a hung lookup holds one (and only one
+# per host) until the system resolver gives up, never the caller itself.
+OUTBOUND_RESOLVER = ResolverThreads(8)
+
+
+def pinned_post(
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    *,
+    timeout: float,
+    deadline_s: float,
+    resolver: ResolverThreads = OUTBOUND_RESOLVER,
+) -> httpx.Response:
+    """POST to a subscriber, pinned to an IP that just passed the SSRF check.
+
+    The URL was validated when it was registered, but DNS can be flipped since
+    (rebinding), so it is re-resolved here and the connection pinned to a
+    validated global IP; the hostname rides in ``Host`` and TLS SNI. Redirects
+    are never followed. ``deadline_s`` bounds the whole call, DNS included, so
+    a subscriber that trickles its answer cannot hold the caller. Raises on
+    transport failure or SSRF reject; any HTTP status is returned as is.
+    """
+    deadline = time.monotonic() + deadline_s
+    # Loopback subscribers exist only in dev (registration enforces this).
+    target = validate_and_pin(
+        url, allow_loopback=global_config.is_dev, resolver=resolver, timeout=timeout
+    )
+    with build_client(timeout=timeout, deadline=deadline) as client:
+        return client.post(
+            target.url,
+            content=body,
+            headers={**headers, **target.headers},
+            extensions=target.extensions,
+        )
 
 
 # ---------------------------------------------------------------------------

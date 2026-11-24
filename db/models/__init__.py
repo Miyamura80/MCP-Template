@@ -3,7 +3,7 @@
 from db.base import Base
 from db.models.api_keys import APIKey
 from db.models.approvals import ApprovalSetting, PendingAction
-from db.models.events import EventLog, EventSubscription
+from db.models.events import EventCursor, EventLog, EventSubscription
 from db.models.feedback import AgentFeedback
 from db.models.gmail_push import ProcessedPubsubMessage
 from db.models.idempotency_keys import IdempotencyRecord
@@ -24,6 +24,7 @@ __all__ = [
     "AgentFeedback",
     "ApprovalSetting",
     "Base",
+    "EventCursor",
     "EventLog",
     "EventSubscription",
     "IdempotencyRecord",

@@ -1,4 +1,4 @@
-"""Add event_log and event_subscriptions for MCP Events; channel on deliveries.
+"""Add event_cursors, event_log and event_subscriptions for MCP Events; channel on deliveries.
 
 See ``db/models/events.py``.
 
@@ -20,8 +20,16 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.create_table(
+        "event_cursors",
+        sa.Column("user_id", sa.String(length=255), nullable=False),
+        sa.Column("seq", sa.Integer(), nullable=False),
+        sa.Column("pruned_through", sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint("user_id"),
+    )
+    op.create_table(
         "event_log",
         sa.Column("seq", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("user_seq", sa.Integer(), nullable=False),
         sa.Column("event_id", sa.String(length=64), nullable=False),
         sa.Column("user_id", sa.String(length=255), nullable=False),
         sa.Column("name", sa.String(length=100), nullable=False),
@@ -32,7 +40,10 @@ def upgrade() -> None:
     )
     op.create_index("ix_event_log_created_at", "event_log", ["created_at"])
     op.create_index(
-        "ix_event_log_user_name_seq", "event_log", ["user_id", "name", "seq"]
+        "uq_event_log_user_seq", "event_log", ["user_id", "user_seq"], unique=True
+    )
+    op.create_index(
+        "ix_event_log_user_name_seq", "event_log", ["user_id", "name", "user_seq"]
     )
     op.create_table(
         "event_subscriptions",
@@ -42,7 +53,7 @@ def upgrade() -> None:
         sa.Column("arguments", sa.JSON(), nullable=False),
         sa.Column("url", sa.Text(), nullable=False),
         sa.Column("secret_enc", sa.LargeBinary(), nullable=False),
-        sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("verified_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
@@ -72,5 +83,7 @@ def downgrade() -> None:
     op.drop_index("ix_event_subscriptions_user_id", table_name="event_subscriptions")
     op.drop_table("event_subscriptions")
     op.drop_index("ix_event_log_user_name_seq", table_name="event_log")
+    op.drop_index("uq_event_log_user_seq", table_name="event_log")
     op.drop_index("ix_event_log_created_at", table_name="event_log")
     op.drop_table("event_log")
+    op.drop_table("event_cursors")

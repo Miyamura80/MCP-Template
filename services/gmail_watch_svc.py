@@ -40,7 +40,7 @@ from models.gmail_watch import (
 )
 from services import service
 from services.events import emit
-from services.events.catalog import GMAIL_MESSAGE_RECEIVED
+from services.events.catalog import GMAIL_MESSAGE_RECEIVED, gmail_message_payload
 from services.gmail_svc import (
     GmailNotConnectedError,
     _get_db_session,
@@ -364,7 +364,12 @@ def process_notification(
                 payload=payload,
             )
             # Same notification for MCP Events subscribers (poll and webhook).
-            emit(user_id, GMAIL_MESSAGE_RECEIVED, payload, session=session)
+            emit(
+                user_id,
+                GMAIL_MESSAGE_RECEIVED,
+                gmail_message_payload(payload),
+                session=session,
+            )
         row.watch_history_id = _forward(row.watch_history_id, new_baseline)
         session.commit()
     return {"status": "ok", "enqueued": len(payloads)}

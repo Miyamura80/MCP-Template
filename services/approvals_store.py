@@ -152,9 +152,15 @@ def create_action(
     return action
 
 
-def transition(s: Session, approval_id: str, from_: str, to: str) -> bool:
+def transition(
+    s: Session, approval_id: str, from_: str, to: str, *, commit: bool = True
+) -> bool:
     """Compare-and-set on status. False when another request won, or when
-    leaving ``pending``/``approved`` from a row that has expired."""
+    leaving ``pending``/``approved`` from a row that has expired.
+
+    ``commit=False`` leaves the change in the caller's transaction, so it can
+    commit together with whatever else the decision produces (its event).
+    """
     values: dict[str, Any] = {"status": to}
     if to in ("denied", "executed", "failed"):
         values["resolved_at"] = _now()
@@ -168,7 +174,8 @@ def transition(s: Session, approval_id: str, from_: str, to: str) -> bool:
     if from_ in ("pending", "approved"):
         query = query.filter(PendingAction.expires_at > _now())
     count = query.update(values, synchronize_session=False)  # ty: ignore[invalid-argument-type]
-    s.commit()
+    if commit:
+        s.commit()
     return count == 1
 
 

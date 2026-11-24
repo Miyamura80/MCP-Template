@@ -331,6 +331,7 @@ class EventsConfig(BaseModel):
     max_subscription_ttl_seconds: int = Field(default=604800, gt=0)
     webhook_max_attempts: int = Field(default=4, gt=0)
     verification_cache_seconds: int = Field(default=86400, ge=0)
+    max_subscriptions_per_user: int = Field(default=50, gt=0)
 
 
 class FeaturesConfig(BaseModel):

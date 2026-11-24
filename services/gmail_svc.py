@@ -387,7 +387,8 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
     from services.webhooks_svc import purge_user_events  # noqa: PLC0415
 
     try:
-        # MCP Events payloads carry the same message content.
+        # MCP Events payloads carry the same message content; the user's
+        # subscriptions to them go too.
         purge_user(input.user_id, GMAIL_MESSAGE_RECEIVED)
         events, deliveries = purge_user_events(input.user_id)
         if events or deliveries:
