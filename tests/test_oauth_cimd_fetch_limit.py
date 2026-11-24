@@ -14,12 +14,12 @@ from urllib.parse import urlsplit
 import pytest
 
 from api_server.oauth import cimd
-from services._fetch_limiter import (
+from services._ssrf_guard import (
     FetchLimitBusyError,
     FetchLimiter,
+    PinnedTarget,
     target_key,
 )
-from services._ssrf_guard import PinnedTarget
 from tests.oauth_server_fixture import client_document
 from tests.test_template import TestTemplate
 
@@ -309,7 +309,7 @@ class TestResolveClient(TestTemplate):
         self.on_fetch = explode
         with pytest.raises(RuntimeError):
             cimd.resolve_client(KNOWN)
-        # The fixture asserts no flight or slot is left; the next try refetches.
+        # teardown_method asserts no flight or slot is left; the next try refetches.
         self.on_fetch = None
         assert cimd.resolve_client(KNOWN).client_id == KNOWN
 

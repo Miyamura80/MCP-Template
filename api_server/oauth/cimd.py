@@ -25,7 +25,7 @@ The fetch targets a client-chosen URL, so it is treated as hostile:
   bounds it is that the time it takes is charged to the deadline (a slow
   answer leaves the fetch nothing) and that concurrent resolves of one
   ``client_id`` share a single lookup.
-* Fetches are capped by :class:`services._fetch_limiter.FetchLimiter`:
+* Fetches are capped by :class:`services._ssrf_guard.FetchLimiter`:
   ``_MAX_CONCURRENT_FETCHES`` in total and ``_MAX_FETCHES_PER_TARGET`` per
   pinned network, refused at once when full. Fetches share the worker threads
   that serve /mcp, so a flood of slow client ids must not occupy them. The cap
@@ -55,12 +55,10 @@ from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl, ValidationError
 
 from api_server.auth.scopes import ALL_SCOPES
-from services._fetch_limiter import (
+from services._ssrf_guard import (
     FetchLimitBusyError,
     FetchLimiter,
     FetchLimitSnapshot,
-)
-from services._ssrf_guard import (
     PinnedTarget,
     SsrfError,
     build_client,
