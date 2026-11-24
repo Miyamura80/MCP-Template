@@ -32,9 +32,13 @@ ask:
   rate_limit_per_minute: 20
 
 # Agent-facing `feedback` tool. Always stored in the agent_feedback table;
-# set FEEDBACK_SLACK_WEBHOOK_URL in .env to also post to Slack.
+# set FEEDBACK_SLACK_WEBHOOK_URL in .env to also post to Slack, and
+# LINEAR_API_KEY + LINEAR_TEAM_ID to also file Linear issues (one per
+# category + tool; repeats become comments). Label/project ids are optional.
 feedback:
   sink_timeout_seconds: 3.0
+  linear_label_ids: []
+  linear_project_id: null
 
 # Approval of dangerous tools (gmail_send, ...). The mode is per user and set
 # on the dashboard (/dashboard/approval); these are expiries and the page that

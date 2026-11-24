@@ -300,10 +300,14 @@ class FeedbackConfig(BaseModel):
     """Agent ``feedback`` tool configuration.
 
     Submissions are always stored in the ``agent_feedback`` table; the Slack
-    sink is enabled by setting ``FEEDBACK_SLACK_WEBHOOK_URL`` in ``.env``.
+    sink is enabled by setting ``FEEDBACK_SLACK_WEBHOOK_URL`` in ``.env``, the
+    Linear sink by setting ``LINEAR_API_KEY`` and ``LINEAR_TEAM_ID``. The
+    ``linear_*`` fields are optional extras applied to issues it creates.
     """
 
     sink_timeout_seconds: float = 3.0
+    linear_label_ids: list[str] = Field(default_factory=list)
+    linear_project_id: str | None = None
 
 
 class ApprovalsConfig(BaseModel):

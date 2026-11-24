@@ -21,6 +21,7 @@ from models.feedback import FeedbackCategory, FeedbackInput
 from services import feedback_svc
 from services.feedback_svc import (
     FeedbackRecord,
+    SlackSinkError,
     SlackWebhookSink,
     _slack_escape,
     feedback,
@@ -54,10 +55,16 @@ def _patch_db():
 
 @contextmanager
 def _isolated_sinks():
+    # Also blank the Linear secrets so a developer's real .env never makes a
+    # test call Linear; tests that want the sink patch them back in.
     saved = list(feedback_svc._sinks)
     feedback_svc._sinks.clear()
     try:
-        yield
+        with (
+            patch.object(global_config, "LINEAR_API_KEY", None),
+            patch.object(global_config, "LINEAR_TEAM_ID", None),
+        ):
+            yield
     finally:
         feedback_svc._sinks[:] = saved
 
@@ -153,9 +160,11 @@ class TestFeedbackService(TestTemplate):
         with patch("services.feedback_svc.httpx.post", fake_post):
             try:
                 SlackWebhookSink("https://hooks.slack.test/x").send(record)
-            except httpx.HTTPStatusError:
+            except SlackSinkError as exc:
+                assert "hooks.slack.test" not in str(exc)
+                assert exc.__suppress_context__
                 return
-        raise AssertionError("expected HTTPStatusError")
+        raise AssertionError("expected SlackSinkError")
 
     def test_slack_escape(self):
         assert _slack_escape("a & <b|c> <!here>") == "a &amp; &lt;b|c&gt; &lt;!here&gt;"

@@ -150,7 +150,8 @@ GROUPS: tuple[Group, ...] = (
         heading="Feedback",
         intro=(
             "For agents that get stuck. Submissions are stored, then forwarded "
-            "to the\noperator's configured sinks (Slack by default)."
+            "to the\noperator's configured sinks (Slack and Linear built in). See "
+            "[Feedback](/docs/mcp/feedback)."
         ),
         tools=("feedback",),
     ),

@@ -1,0 +1,74 @@
+---
+title: Feedback
+description: Where agent feedback goes - the database, Slack and Linear
+---
+
+Agents call the `feedback` tool when they get stuck: a tool errors in a way they
+cannot recover from, a description misled them, or a capability is missing.
+Every submission is written to the `agent_feedback` table first, then offered
+to each configured sink. A sink that is down or misconfigured is logged and
+skipped; it never fails the agent's call, and the tool result's
+`forwarded_to` lists the sinks that accepted it.
+
+```
+feedback(...) --> agent_feedback table (always)
+              --> Slack   (if FEEDBACK_SLACK_WEBHOOK_URL)
+              --> Linear  (if LINEAR_API_KEY + LINEAR_TEAM_ID)
+              --> your own registered sinks
+```
+
+## Slack
+
+Create an [incoming webhook](https://api.slack.com/messaging/webhooks) and set
+it in `.env`:
+
+```bash
+FEEDBACK_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+```
+
+## Linear
+
+Set both in `.env`; the sink is off unless both are present:
+
+```bash
+LINEAR_API_KEY=lin_api_...   # personal API key (Settings > Security & access)
+LINEAR_TEAM_ID=...           # UUID of the team that owns the issues
+```
+
+The key acts as the user who created it, so a dedicated bot user keeps the
+issues from appearing under a person's name. Optional, in
+`common/global_config.yaml`:
+
+```yaml
+feedback:
+  linear_label_ids: ["<label uuid>"]   # applied to new issues
+  linear_project_id: "<project uuid>"  # new issues go in this project
+```
+
+### One issue per problem
+
+A problem is identified by its `category` plus `tool_name`. The sink writes a
+fingerprint token (`agent-feedback-<16 hex>`) as the last line of the issue
+description. On each submission it looks in the team for an issue whose
+description contains that token and whose state is not completed, canceled or
+duplicate:
+
+- **Found:** the report is added to that issue as a comment.
+- **Not found:** a new issue titled `[agent-feedback] <category> on <tool>` is
+  created.
+
+So closing an issue means the next report of the same problem opens a fresh
+one. Retitling an issue is fine; removing the fingerprint line from its
+description stops new reports from finding it. Two reports that arrive at the
+same moment can, rarely, both create an issue.
+
+Agent-written text is untrusted: the message and context are placed in code
+blocks with backticks neutralised, so they cannot add mentions, links or
+formatting. The original text is kept unchanged in the database.
+
+## Your own sink
+
+Implement `FeedbackSink` (a `name` and a `send(record)` that raises on failure)
+and register it at import time with `register_feedback_sink()` from
+`services/feedback_svc.py`. Registering a sink named `slack` or `linear`
+replaces the built-in one.

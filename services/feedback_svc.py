@@ -6,17 +6,22 @@ record), then offered to every registered :class:`FeedbackSink` on a
 best-effort basis: a sink that is down or misconfigured is logged and skipped,
 and never fails the agent's call.
 
-One sink ships built in - Slack, via an incoming-webhook URL in
-``FEEDBACK_SLACK_WEBHOOK_URL``. To add another (Linear, Jira, email), implement
-the protocol and register it at import time::
+Two sinks ship built in, each enabled by its secrets in ``.env``:
 
-    class LinearSink:
-        name = "linear"
+- Slack, via an incoming-webhook URL in ``FEEDBACK_SLACK_WEBHOOK_URL``.
+- Linear (``services/feedback_linear.py``), via ``LINEAR_API_KEY`` and
+  ``LINEAR_TEAM_ID``: one issue per category + tool, repeats become comments.
+
+To add another (Jira, email), implement the protocol and register it at import
+time; a registered sink named ``slack`` or ``linear`` replaces the built-in::
+
+    class JiraSink:
+        name = "jira"
 
         def send(self, record: FeedbackRecord) -> None:
-            ...  # POST to Linear's API; raise on failure
+            ...  # call Jira's API; raise on failure
 
-    register_feedback_sink(LinearSink())
+    register_feedback_sink(JiraSink())
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ from models.feedback import FeedbackInput, FeedbackResult
 from services import service
 from services.events import emit
 from services.events.catalog import FEEDBACK_RECEIVED
+from services.feedback_linear import linear_sink_from_config
 
 
 @dataclass(frozen=True)
@@ -73,6 +79,10 @@ def _active_sinks() -> list[FeedbackSink]:
     url = global_config.FEEDBACK_SLACK_WEBHOOK_URL
     if url and not any(s.name == "slack" for s in sinks):
         sinks.append(SlackWebhookSink(url))
+    if not any(s.name == "linear" for s in sinks):
+        linear = linear_sink_from_config()
+        if linear is not None:
+            sinks.append(linear)
     return sinks
 
 
@@ -91,6 +101,10 @@ def _slack_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+class SlackSinkError(RuntimeError):
+    """The Slack webhook failed. Never carries the webhook URL."""
+
+
 class SlackWebhookSink:
     """Post feedback to a Slack incoming webhook."""
 
@@ -98,6 +112,9 @@ class SlackWebhookSink:
 
     def __init__(self, webhook_url: str) -> None:
         self._url = webhook_url
+
+    def __repr__(self) -> str:  # the webhook URL is the secret
+        return "SlackWebhookSink()"
 
     def send(self, record: FeedbackRecord) -> None:
         lines = [
@@ -110,12 +127,20 @@ class SlackWebhookSink:
         lines.append(
             f"user `{_slack_escape(record.user_id or 'anonymous')}` · id `{record.id}`"
         )
-        resp = httpx.post(
-            self._url,
-            json={"text": "\n".join(lines)},
-            timeout=global_config.feedback.sink_timeout_seconds,
-        )
-        resp.raise_for_status()
+        try:
+            resp = httpx.post(
+                self._url,
+                json={"text": "\n".join(lines)},
+                timeout=global_config.feedback.sink_timeout_seconds,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            # Re-raise without the chained httpx frames: loguru's diagnose mode
+            # prints their locals, and those hold the webhook URL.
+            detail = type(exc).__name__
+            if isinstance(exc, httpx.HTTPStatusError):
+                detail += f" {exc.response.status_code}"
+            raise SlackSinkError(f"Slack webhook failed: {detail}") from None
 
 
 # ---------------------------------------------------------------------------
