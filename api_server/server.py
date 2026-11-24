@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from api_server.dashboard import api_keys as dashboard_api_keys
+from api_server.dashboard import billing as dashboard_billing
 from api_server.dashboard import pages as dashboard_pages
 from api_server.dashboard import session as dashboard_session
 from api_server.middleware.error_handler import (
@@ -194,6 +195,7 @@ app.include_router(dashboard_session.router)
 app.include_router(dashboard_pages.pages)
 app.include_router(dashboard_pages.api)
 app.include_router(dashboard_api_keys.router)
+app.include_router(dashboard_billing.router)
 dashboard_session.install(app)
 
 # --- Built-in OAuth server for MCP clients (opt-in) ------------------------

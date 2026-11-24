@@ -18,6 +18,7 @@ TABS = (
     ("approvals", "/dashboard/approvals", "Approvals"),
     ("approval", "/dashboard/approval", "Approval settings"),
     ("api-keys", "/dashboard/settings/api-keys", "API keys"),
+    ("billing", "/dashboard/billing", "Billing"),
 )
 
 

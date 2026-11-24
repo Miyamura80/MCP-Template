@@ -15,7 +15,7 @@ from db.engine import get_db_session
 class AuthenticatedUser:
     user_id: str
     email: str | None = None
-    auth_method: str = "jwt"  # "jwt" | "api_key"
+    auth_method: str = "jwt"  # "jwt" | "api_key" | "dashboard"
     scopes: list[str] | None = None  # None = legacy (no restrictions)
 
 

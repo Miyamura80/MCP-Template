@@ -83,17 +83,22 @@ the same day. Inspect `error.details` for the exact reset time and tier:
 {
   "error": {
     "code": "quota_exceeded",
-    "message": "Daily request limit (10000) exceeded for free_tier tier.",
+    "message": "Daily request limit (10000) exceeded for free_tier tier. Ask the user to upgrade at https://api.example.com/dashboard/billing?plan=plus",
     "request_id": "d4e5f60718293a4b",
     "details": {
       "current_usage": 10000,
       "daily_limit": 10000,
       "tier": "free_tier",
-      "quota_reset_at": "2026-06-21T00:00:00+00:00"
+      "quota_reset_at": "2026-06-21T00:00:00+00:00",
+      "billing_url": "https://api.example.com/dashboard/billing?plan=plus"
     }
   }
 }
 ```
 
 To raise the ceiling instead of waiting, upgrade via
-[Billing](/docs/api/billing#upgrade-your-plan).
+[Billing](/docs/api/billing#upgrade-your-plan). An agent can't pay for its
+user, so `billing_url` (also at the end of `message`, which is all an MCP
+client sees) is a [dashboard link](/docs/dashboard#billing) to hand over: it
+opens the billing page with Plus picked, and the person clicks through to
+Stripe.

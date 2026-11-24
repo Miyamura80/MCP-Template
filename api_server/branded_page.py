@@ -115,6 +115,12 @@ text-transform:uppercase;color:var(--subtle);font-weight:500;padding:0 .75rem .6
 border-bottom:1px solid var(--border)}
 td{padding:.85rem .75rem .85rem 0;border-bottom:1px solid var(--s2);vertical-align:middle}
 td:last-child,th:last-child{text-align:right;padding-right:0}
+tr.pick td{background:rgba(195,255,253,.06)}
+table.plans td:first-child,table.plans th:first-child{padding-left:.75rem}
+table.plans th{white-space:nowrap}
+tr.pick td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+.meter{height:.5rem;border:1px solid var(--border);background:var(--bg);margin:0 0 .75rem}
+.meter>span{display:block;height:100%;background:var(--accent)}
 .empty{color:var(--muted);margin:0}
 pre{background:var(--bg);border:1px solid var(--border);padding:1rem;overflow-x:auto;
 font-size:.85rem;color:var(--fg);margin:0 0 1rem}

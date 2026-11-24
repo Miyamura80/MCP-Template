@@ -24,6 +24,27 @@ class LimitStatus:
     tier: str
 
 
+def billing_url(tier: str) -> str:
+    """The dashboard billing page an agent can hand its user at the quota.
+
+    Free users get the Plus deep link; the page only prefills, so the human
+    still reviews and clicks (``api_server/dashboard/billing.py``).
+    """
+    # Lazy: api_server.oauth.flow pulls in the OAuth stack, which only the
+    # error path needs.
+    from api_server.oauth.flow import issuer_url  # noqa: PLC0415
+
+    query = "?plan=plus" if tier == SubscriptionTier.FREE.value else ""
+    return f"{issuer_url()}/dashboard/billing{query}"
+
+
+def _billing_hint(tier: str) -> str:
+    """The sentence a quota error ends with, so an MCP client sees the link too."""
+    if tier == SubscriptionTier.FREE.value:
+        return f" Ask the user to upgrade at {billing_url(tier)}"
+    return f" The user can review billing at {billing_url(tier)}"
+
+
 def _get_or_create_subscription(session: Session, user_id: str) -> UserSubscription:
     """Return the user's subscription, creating a free-tier row if needed."""
     sub = session.query(UserSubscription).filter_by(user_id=user_id).first()
@@ -151,7 +172,9 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                     status_code=402,
                     detail={
                         "code": "quota_exceeded",
-                        "message": f"No daily request quota for {tier_key} tier.",
+                        "message": f"No daily request quota for {tier_key} tier."
+                        + _billing_hint(tier_key),
+                        "billing_url": billing_url(tier_key),
                         "current_usage": 0,
                         "daily_limit": 0,
                         "tier": tier_key,
@@ -223,7 +246,9 @@ def ensure_daily_limit(user_id: str) -> LimitStatus:
                 status_code=402,
                 detail={
                     "code": "quota_exceeded",
-                    "message": f"Daily request limit ({daily_limit}) exceeded for {tier_key} tier.",
+                    "message": f"Daily request limit ({daily_limit}) exceeded "
+                    f"for {tier_key} tier." + _billing_hint(tier_key),
+                    "billing_url": billing_url(tier_key),
                     "current_usage": sub.current_period_usage,
                     "daily_limit": daily_limit,
                     "tier": tier_key,

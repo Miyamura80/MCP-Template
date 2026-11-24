@@ -30,6 +30,28 @@ the `X-API-KEY` header.
 
 `/dashboard/settings/api-keys` lists your keys and revokes them.
 
+## Billing
+
+```text
+/dashboard/billing?plan=plus
+```
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `plan` | `free`, `plus` | none |
+| `checkout` | `success`, `cancel` (Stripe's return URLs set it) | none |
+
+The page shows your plan, today's usage against its daily limit, and the plans,
+with the linked one highlighted. Upgrade takes you to Stripe Checkout, where
+you confirm the payment; Open billing portal takes you to Stripe's portal to
+change card, read invoices or cancel. A link only names a plan: the price,
+trial and quantity come from the server's config, never from the URL. The
+page reads the database only, so opening it never calls Stripe.
+
+When an agent runs out of daily quota, the `402 quota_exceeded` error carries
+this link as `billing_url` and at the end of its `message`, so the agent can
+pass it on (see [Rate limits](/docs/api/rate-limits#handling-a-402-daily-quota)).
+
 ## Approvals
 
 | Link | Page |

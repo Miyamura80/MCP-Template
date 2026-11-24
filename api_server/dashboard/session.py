@@ -39,9 +39,9 @@ from loguru import logger as log
 from api_server.branded_page import render_page
 from api_server.oauth.flow import (
     WORKOS_AUTHORIZE_URL,
-    authenticate_with_workos,
     issuer_url,
     pkce_challenge,
+    workos_identity,
 )
 from common import global_config
 
@@ -56,6 +56,9 @@ _LOGIN_MAX_AGE = 600
 class DashboardSession:
     user_id: str
     csrf: str
+    # From WorkOS at sign-in; the billing page needs it to open a Stripe
+    # customer. None for dev sign-in and for sessions from before it was kept.
+    email: str | None = None
 
 
 def _secure() -> bool:
@@ -90,7 +93,12 @@ def current_session(request: Request) -> DashboardSession | None:
         return None
     if not isinstance(data, dict) or not data.get("uid") or not data.get("csrf"):
         return None
-    return DashboardSession(user_id=str(data["uid"]), csrf=str(data["csrf"]))
+    email = data.get("email")
+    return DashboardSession(
+        user_id=str(data["uid"]),
+        csrf=str(data["csrf"]),
+        email=email if isinstance(email, str) and email else None,
+    )
 
 
 def csrf_ok(session: DashboardSession, presented: str | None) -> bool:
@@ -172,10 +180,13 @@ def login_redirect(request: Request) -> RedirectResponse:
     )
 
 
-def _start_session(user_id: str, next_path: str) -> RedirectResponse:
-    token = _serializer(_SESSION_SALT).dumps(
-        {"uid": user_id, "csrf": secrets.token_urlsafe(24)}
-    )
+def _start_session(
+    user_id: str, next_path: str, email: str | None = None
+) -> RedirectResponse:
+    data = {"uid": user_id, "csrf": secrets.token_urlsafe(24)}
+    if email:
+        data["email"] = email
+    token = _serializer(_SESSION_SALT).dumps(data)
     response = RedirectResponse(safe_next(next_path), status_code=303)
     response.set_cookie(
         _cookie("session"),
@@ -287,11 +298,11 @@ def callback(
     if not code:
         return _error("Sign-in was cancelled.")
     try:
-        user_id = authenticate_with_workos(code, _pkce_verifier(nonce))
+        user_id, email = workos_identity(code, _pkce_verifier(nonce))
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
         log.warning("dashboard: WorkOS code exchange failed: {}", type(exc).__name__)
         return _error("Sign-in failed. Try again.", status_code=502)
-    response = _start_session(user_id, str(data.get("next", "")))
+    response = _start_session(user_id, str(data.get("next", "")), email)
     response.delete_cookie(_cookie("login"), path="/", secure=_secure(), httponly=True)
     return response
 
