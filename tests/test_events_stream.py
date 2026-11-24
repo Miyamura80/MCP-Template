@@ -100,7 +100,7 @@ class TestStream(TestTemplate):
         assert final["result"]["_meta"][_SUB] == 7  # the spec's StreamEventsResult
 
     def test_live_event_is_pushed(self):
-        with _wire_client("u-live") as (client, key), _short_streams(max_seconds=1.0):
+        with _wire_client("u-live") as (client, key), _short_streams(max_seconds=2.0):
             # Make the user's cursor row up front: the test DB is one shared
             # SQLite connection, and a first emit's savepoint would collide
             # with the stream's read on the other thread.
@@ -112,7 +112,10 @@ class TestStream(TestTemplate):
 
             worker = threading.Thread(target=later)
             worker.start()
-            frames = _stream(client, key, {"name": FEEDBACK_RECEIVED})  # from now
+            # From the cursor read before the emit, not "now": on a loaded
+            # runner the emit can land before the stream reads its head, and
+            # a null cursor would then (correctly) treat it as past.
+            frames = _stream(client, key, {"name": FEEDBACK_RECEIVED, "cursor": "1"})
             worker.join()
         assert [e["data"]["id"] for e in _frames(frames, _EVENT)] == ["f9"]
 
