@@ -34,6 +34,8 @@ from db.engine import use_db_session
 from db.models.feedback import AgentFeedback
 from models.feedback import FeedbackInput, FeedbackResult
 from services import service
+from services.events import emit
+from services.events.catalog import FEEDBACK_RECEIVED
 
 
 @dataclass(frozen=True)
@@ -171,6 +173,17 @@ def feedback(input: FeedbackInput) -> FeedbackResult:
                 created_at=record.created_at,
             )
         )
+        if record.user_id:  # the CLI has no principal to deliver to
+            emit(
+                record.user_id,
+                FEEDBACK_RECEIVED,
+                {
+                    "id": record.id,
+                    "category": record.category,
+                    "toolName": record.tool_name,
+                },
+                session=session,
+            )
         session.commit()
     return FeedbackResult(
         id=record.id,

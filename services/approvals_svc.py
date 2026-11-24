@@ -68,6 +68,8 @@ from services.approvals_store import (
     to_view,
     transition,
 )
+from services.events import emit
+from services.events.catalog import APPROVAL_RESOLVED
 
 # Helper tools for the flow. Hidden alongside dangerous tools when a connection
 # sets ``dangerous_tools=false``, since they only exist to run those.
@@ -247,11 +249,24 @@ def running(decision: GateDecision) -> Iterator[Callable[[BaseModel], None]]:
 # ---------------------------------------------------------------------------
 
 
+def _announce(s: Session, action: PendingAction, status: str) -> None:
+    """Tell subscribers (MCP Events) that a held call was decided, so a
+    background agent can retry it without polling ``get_approval``."""
+    emit(
+        action.user_id,
+        APPROVAL_RESOLVED,
+        {"approvalId": action.id, "tool": action.tool, "status": status},
+        session=s,
+    )
+    s.commit()
+
+
 def _approve(s: Session, user_id: str, approval_id: str) -> ApprovalView:
     action = owned(s, user_id, approval_id)
     if action is None:
         raise InvalidArgument(f"No approval {approval_id!r} for this user.")
-    transition(s, approval_id, "pending", "approved")
+    if transition(s, approval_id, "pending", "approved"):
+        _announce(s, action, "approved")
     s.refresh(action)
     return to_view(action)
 
@@ -275,7 +290,10 @@ def approve_elicitation(
             or action.args_hash != call_hash
         ):
             return False
-        return transition(s, approval_id, "pending", "approved")
+        if not transition(s, approval_id, "pending", "approved"):
+            return False
+        _announce(s, action, "approved")
+        return True
 
 
 def deny(user_id: str, approval_id: str, *, tool: str | None = None) -> ApprovalView:
@@ -283,8 +301,10 @@ def deny(user_id: str, approval_id: str, *, tool: str | None = None) -> Approval
         action = owned(s, user_id, approval_id)
         if action is None or (tool is not None and action.tool != tool):
             raise InvalidArgument(f"No approval {approval_id!r} for this user.")
-        if not transition(s, approval_id, "pending", "denied"):
-            transition(s, approval_id, "approved", "denied")
+        if transition(s, approval_id, "pending", "denied") or transition(
+            s, approval_id, "approved", "denied"
+        ):
+            _announce(s, action, "denied")
         s.refresh(action)
         return to_view(action)
 

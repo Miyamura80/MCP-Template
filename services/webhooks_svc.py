@@ -118,7 +118,7 @@ def _candidate_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Addr
     return ips
 
 
-def _validate_webhook_url(url: str) -> None:
+def validate_webhook_url(url: str) -> None:
     """Reject non-https and SSRF-prone subscriber URLs.
 
     Blocks private / link-local / reserved / multicast destinations so a tenant
@@ -168,7 +168,7 @@ def _validate_webhook_url(url: str) -> None:
 )
 def webhook_subscribe(input: WebhookSubscribeInput) -> WebhookSubscribeResult:
     """Create a subscription and return its one-time signing secret."""
-    _validate_webhook_url(input.url)
+    validate_webhook_url(input.url)
 
     secret = _new_secret()
     secret_enc, key_id = _encrypt_secret(secret)

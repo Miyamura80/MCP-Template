@@ -382,9 +382,13 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
     # subject / sender / snippet of every notified message as plaintext JSON,
     # so they must go the same way as the curation ledger. Best-effort for the
     # same reason - the disconnect itself is already committed.
+    from services.events.catalog import GMAIL_MESSAGE_RECEIVED  # noqa: PLC0415
+    from services.events.store import purge_user  # noqa: PLC0415
     from services.webhooks_svc import purge_user_events  # noqa: PLC0415
 
     try:
+        # MCP Events payloads carry the same message content.
+        purge_user(input.user_id, GMAIL_MESSAGE_RECEIVED)
         events, deliveries = purge_user_events(input.user_id)
         if events or deliveries:
             log.debug(

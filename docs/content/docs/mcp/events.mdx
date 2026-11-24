@@ -1,0 +1,65 @@
+---
+title: Events
+description: Let agents hear about approvals, feedback and new mail without polling tools
+---
+
+The server implements the MCP Events extension
+(`io.modelcontextprotocol/events`). A client can poll for events, or register a
+webhook, instead of calling tools in a loop to see whether something changed.
+
+## Event types
+
+| Name | Fires when | Arguments |
+|------|-----------|-----------|
+| `approval.resolved` | a held dangerous call is approved or denied ([Approvals](/docs/mcp/approvals)) | `tool` (optional) |
+| `feedback.received` | your `feedback` submission is stored | none |
+| `gmail.message_received` | new mail arrives (after `gmail_watch_start`) | `from` (optional, substring) |
+
+`events/list` returns each type's `inputSchema` and `payloadSchema`. Every
+event is the authenticated principal's own; there is no way to see another
+user's.
+
+A background agent that hit a browser-mode approval can subscribe to
+`approval.resolved` and retry the held call when the event says `approved`.
+
+## Poll
+
+```json
+{"method": "events/poll", "params": {"name": "feedback.received", "cursor": null}}
+```
+
+A `null` cursor starts from now. Keep the `cursor` from each result and send it
+back; `hasMore: true` means poll again at once, otherwise wait `nextPollMs`.
+Events are kept for 7 days (`events.retention_days`); a cursor older than that
+comes back with `truncated: true`, the signal that some events were missed.
+
+## Webhook
+
+```json
+{
+  "method": "events/subscribe",
+  "params": {
+    "name": "approval.resolved",
+    "delivery": {"mode": "webhook", "url": "https://you.example/hooks/mcp",
+                 "secret": "whsec_<base64 of 24-64 random bytes>"},
+    "ttlMs": 86400000
+  }
+}
+```
+
+- **You choose the secret.** The server stores it encrypted and never returns
+  it.
+- **Verification.** Before the first delivery to a URL, the server POSTs
+  `{"type": "verification", "challenge": "<nonce>"}`; answer `2xx` with
+  `{"challenge": "<nonce>"}`. A verified URL is trusted for a day.
+- **Signing.** Deliveries follow [Standard Webhooks](https://www.standardwebhooks.com/):
+  `webhook-id`, `webhook-timestamp`, and `webhook-signature: v1,<base64
+  HMAC-SHA256>` over `{id}.{timestamp}.{body}`, keyed by the bytes after
+  `whsec_`. Retries keep the same `webhook-id`, so dedup on it.
+- **Refresh.** A subscription lasts `ttlMs` (default 1 day, at most 7). Call
+  `events/subscribe` again with the same arguments before `refreshBefore`;
+  that is the same subscription, not a new one.
+- **Retries.** Non-2xx answers are retried 4 times over a few minutes. `410`
+  and `413` stop retries for that event.
+
+Push delivery (`events/stream`) is not offered.

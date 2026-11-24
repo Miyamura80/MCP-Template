@@ -36,6 +36,8 @@ from common import global_config
 from db.engine import use_db_session
 from db.models.webhooks import WebhookDelivery, WebhookEvent, WebhookSubscription
 from services._ssrf_guard import ResolverThreads, build_client, validate_and_pin
+from services.events.store import MCP_CHANNEL
+from services.events.webhooks import NON_RETRYABLE, deliverable, post_event
 from services.webhooks_svc import (
     DELIVERY_ID_HEADER,
     EVENT_ID_HEADER,
@@ -49,6 +51,8 @@ from services.webhooks_svc import (
 # Backoff schedule: delay = min(BASE * 2**(attempts-1), CAP).
 _BACKOFF_BASE_S = 30
 _BACKOFF_CAP_S = 3600
+# 30s, 60s, 120s, 240s: four attempts inside the spec's 10-15 minute window.
+_MCP_BACKOFF_CAP_S = 240
 _HTTP_TIMEOUT_S = 10.0
 # Wall-clock ceiling on one delivery POST: the per-operation timeout alone lets a
 # subscriber that trickles its response hold the runner indefinitely.
@@ -165,10 +169,19 @@ def _post(
     resp.raise_for_status()
 
 
-def _record_failure(delivery: WebhookDelivery, error: str) -> str:
-    """Mark a delivery failed (at max attempts) or reschedule with backoff."""
+def _record_failure(delivery: WebhookDelivery, error: str, *, mcp: bool = False) -> str:
+    """Mark a delivery failed (at max attempts) or reschedule with backoff.
+
+    MCP Events deliveries stop sooner (the spec asks for 3 to 5 attempts within
+    10 to 15 minutes); their backoff is capped to fit that window.
+    """
     delivery.last_error = error[:1000]
-    if delivery.attempts >= global_config.WEBHOOK_MAX_ATTEMPTS:
+    max_attempts = (
+        global_config.events.webhook_max_attempts
+        if mcp
+        else global_config.WEBHOOK_MAX_ATTEMPTS
+    )
+    if delivery.attempts >= max_attempts:
         delivery.status = "failed"
         log.warning(
             "webhook delivery {} gave up after {} attempts: {}",
@@ -179,9 +192,10 @@ def _record_failure(delivery: WebhookDelivery, error: str) -> str:
         return "failed"
     # Back to pending so the next claim re-selects it once the backoff elapses.
     delivery.status = "pending"
-    delivery.next_attempt_at = datetime.now(UTC) + timedelta(
-        seconds=_backoff_seconds(delivery.attempts)
-    )
+    delay = _backoff_seconds(delivery.attempts)
+    if mcp:
+        delay = min(delay, _MCP_BACKOFF_CAP_S)
+    delivery.next_attempt_at = datetime.now(UTC) + timedelta(seconds=delay)
     return "retry"
 
 
@@ -190,6 +204,8 @@ def _process(session: Session, delivery: WebhookDelivery) -> str:
 
     Returns 'sent' | 'retry' | 'failed' | 'dropped'.
     """
+    if delivery.channel == MCP_CHANNEL:
+        return _process_mcp_event(session, delivery)
     sub = session.get(WebhookSubscription, delivery.subscription_id)
     event = session.get(WebhookEvent, delivery.event_id)
     if sub is None or event is None or not sub.active:
@@ -214,6 +230,33 @@ def _process(session: Session, delivery: WebhookDelivery) -> str:
     delivery.status = "succeeded"
     delivery.last_error = None
     return "sent"
+
+
+def _process_mcp_event(session: Session, delivery: WebhookDelivery) -> str:
+    """The MCP Events channel: Standard Webhooks signing, spec retry rules."""
+    found = deliverable(session, delivery.subscription_id, delivery.event_id)
+    if found is None:
+        delivery.status = "failed"
+        delivery.last_error = "subscription expired or missing, or event pruned"
+        return "dropped"
+    sub, event = found
+    delivery.attempts += 1
+    try:
+        status = post_event(sub, event, delivery.id)
+    except Exception as exc:  # noqa: BLE001
+        # Same defensive per-delivery boundary as the legacy channel (_process):
+        # transport errors, SSRF rejects and undecryptable secrets are all
+        # recorded on this row and retried, never allowed to stop the runner.
+        return _record_failure(delivery, f"{type(exc).__name__}: {exc}", mcp=True)
+    if 200 <= status < 300:
+        delivery.status = "succeeded"
+        delivery.last_error = None
+        return "sent"
+    if status in NON_RETRYABLE:
+        delivery.status = "failed"
+        delivery.last_error = f"HTTP {status} (not retried)"
+        return "failed"
+    return _record_failure(delivery, f"HTTP {status}", mcp=True)
 
 
 def _process_one(delivery_id: str) -> str:
