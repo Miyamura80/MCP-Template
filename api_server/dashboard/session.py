@@ -27,10 +27,11 @@ import hmac
 import html
 import secrets
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from typing import Annotated
+from urllib.parse import urlencode, urlsplit
 
 import httpx
-from fastapi import APIRouter, Form, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from loguru import logger as log
@@ -99,10 +100,66 @@ def csrf_ok(session: DashboardSession, presented: str | None) -> bool:
 
 
 def safe_next(target: str | None) -> str:
-    """Only same-site dashboard paths; anything else is an open redirect."""
-    if target and target.startswith("/dashboard") and "//" not in target:
-        return target
+    """Only same-site dashboard paths; anything else is an open redirect.
+
+    Judged on the path alone, so a deep link's query (which may contain any
+    text, ``//`` included) survives sign-in.
+    """
+    if target:
+        parts = urlsplit(target)
+        path = parts.path
+        if (
+            not parts.scheme
+            and not parts.netloc
+            and (path == "/dashboard" or path.startswith("/dashboard/"))
+            and "//" not in path
+            and "\\" not in target
+        ):
+            return target
     return "/dashboard/approvals"
+
+
+class _SignInRequired(Exception):  # noqa: N818 - control flow, not an error report
+    def __init__(self, request: Request) -> None:
+        self.request = request
+
+
+class _CsrfRejected(Exception):  # noqa: N818 - control flow, not an error report
+    pass
+
+
+def require_session(request: Request) -> DashboardSession:
+    """Dependency: the signed-in human, or a redirect to sign in (query kept)."""
+    session = current_session(request)
+    if session is None:
+        raise _SignInRequired(request)
+    return session
+
+
+def require_csrf(
+    session: Annotated[DashboardSession, Depends(require_session)],
+    csrf: Annotated[str, Form()] = "",
+) -> DashboardSession:
+    """Dependency for form POSTs: the session, and its CSRF token in the form."""
+    if not csrf_ok(session, csrf):
+        raise _CsrfRejected
+    return session
+
+
+def install(app: FastAPI) -> None:
+    """Turn the two dependencies' refusals into a redirect and a 403 page."""
+
+    async def sign_in(_request: Request, exc: Exception) -> Response:
+        assert isinstance(exc, _SignInRequired)  # noqa: S101 - registered for it
+        return login_redirect(exc.request)
+
+    async def stale(_request: Request, _exc: Exception) -> Response:
+        return render_page(
+            "Dashboard", "<h1>Request expired</h1><p>Reload and retry.</p>", 403
+        )
+
+    app.add_exception_handler(_SignInRequired, sign_in)
+    app.add_exception_handler(_CsrfRejected, stale)
 
 
 def login_redirect(request: Request) -> RedirectResponse:
