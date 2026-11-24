@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import threading
 import time
 from unittest.mock import patch
 
@@ -20,6 +21,7 @@ import pytest
 
 import services._ssrf_guard as ssrf_guard
 from services._ssrf_guard import (
+    HostLookupRunningError,
     PinnedTarget,
     ResolverBusyError,
     ResolverThreads,
@@ -239,6 +241,52 @@ class TestAsyncPin(TestTemplate):
         with pytest.raises(ResolverBusyError):
             await self._pin(
                 "https://hook.example/p", _PUBLIC_ADDRINFO, ResolverThreads(0)
+            )
+
+
+class TestTimedResolve(TestTemplate):
+    """Sync callers (webhook delivery) bound DNS with a timed lookup."""
+
+    def test_a_hanging_lookup_times_out_and_holds_one_thread(self):
+        release = threading.Event()
+
+        def hang(*_args, **_kwargs):
+            release.wait(10)
+            return _PUBLIC_ADDRINFO
+
+        threads = ResolverThreads(4)
+        with patch.object(ssrf_guard.socket, "getaddrinfo", side_effect=hang):
+            start = time.monotonic()
+            with pytest.raises(UnresolvableHostError, match="timed out"):
+                validate_and_pin(
+                    "https://hang.example/p", resolver=threads, timeout=0.2
+                )
+            assert time.monotonic() - start < 1.0
+            with pytest.raises(HostLookupRunningError):
+                validate_and_pin(
+                    "https://HANG.example/q", resolver=threads, timeout=0.2
+                )
+            assert threads.running == 1
+            release.set()
+            deadline = time.monotonic() + 2
+            while threads.running and time.monotonic() < deadline:
+                time.sleep(0.01)  # poll for the thread to return
+        assert threads.running == 0
+
+    def test_timed_lookup_pins_like_the_plain_one(self):
+        with patch.object(
+            ssrf_guard.socket, "getaddrinfo", return_value=_PUBLIC_ADDRINFO
+        ):
+            t = validate_and_pin(
+                "https://hook.example/p", resolver=ResolverThreads(1), timeout=1.0
+            )
+        assert t.url == f"https://{_PUBLIC_IP}/p"
+
+    def test_pins_the_first_ipv4_answer(self):
+        both = _addrinfo(_PUBLIC_V6) + _PUBLIC_ADDRINFO
+        with patch.object(ssrf_guard.socket, "getaddrinfo", return_value=both):
+            assert validate_and_pin("https://hook.example/p").url == (
+                f"https://{_PUBLIC_IP}/p"
             )
 
 

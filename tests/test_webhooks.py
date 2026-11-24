@@ -12,6 +12,8 @@ import hashlib
 import hmac
 import json
 import socket
+import threading
+import time
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from unittest.mock import patch
@@ -33,6 +35,7 @@ from models.webhooks import (
     WebhookSubscribeInput,
     WebhookUnsubscribeInput,
 )
+from services._ssrf_guard import ResolverThreads
 from services.webhook_delivery_svc import _backoff_seconds, drain_due_deliveries
 from services.webhooks_svc import (
     SIGNATURE_HEADER,
@@ -360,6 +363,30 @@ class TestDelivery(TestTemplate):
             with _mock_http(handler, addrinfo=metadata):
                 counts = drain_due_deliveries()
         assert requests == []
+        assert counts["retry"] == 1
+
+    def test_hanging_subscriber_dns_cannot_hold_the_runner(self):
+        # L2: the lookup is timed, so a subscriber whose DNS never answers
+        # costs one retry, not the runner thread.
+        release = threading.Event()
+
+        def hang(*_args, **_kwargs):
+            release.wait(10)
+            return _PUBLIC_ADDRINFO
+
+        with _patch_db(), _plaintext_encryption():
+            self._seed()
+            with (
+                _mock_http(lambda _r: httpx.Response(200), addrinfo=None),
+                patch("services._ssrf_guard.socket.getaddrinfo", side_effect=hang),
+                patch("services.webhook_delivery_svc._HTTP_TIMEOUT_S", 0.2),
+                # Its own threads, so the stuck lookup cannot leak into others.
+                patch("services.webhook_delivery_svc._RESOLVER", ResolverThreads(1)),
+            ):
+                start = time.monotonic()
+                counts = drain_due_deliveries()
+                assert time.monotonic() - start < 2.0
+            release.set()
         assert counts["retry"] == 1
 
     def test_delivery_connects_to_the_pinned_address(self):
