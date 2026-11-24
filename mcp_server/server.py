@@ -13,10 +13,10 @@ console script for local dev / Claude Desktop only.
 See ``mcp_server/MCP_UI_ARCHITECTURE.md`` and ``mcp_server/MCP_UI_EDGE_CASES.md``.
 """
 
+import hashlib
+import hmac
 import sys
 from contextlib import asynccontextmanager
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -24,6 +24,7 @@ from loguru import logger as log
 from mcp.server.apps import Apps
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from mcp.server.request_state import RequestStateSecurity
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
@@ -41,7 +42,9 @@ from services import (
 )
 from services.approvals_errors import ApprovalRequiredError
 from services.approvals_svc import APPROVAL_TOOLS
+from src.utils.current_user import current_user
 from src.utils.mcp_url_flags import current_url_flags
+from src.utils.package_info import package_version
 
 _APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -65,10 +68,7 @@ _MCP_INSTRUCTIONS = (
 
 def _server_version() -> str:
     """Package version for ``serverInfo`` (per-result ``_meta`` on 2026-07-28)."""
-    try:
-        return _pkg_version("mcp-template")
-    except PackageNotFoundError:
-        return "0.0.0"
+    return package_version()
 
 
 def _transport_security() -> TransportSecuritySettings:
@@ -219,11 +219,48 @@ class _TemplateMCPServer(MCPServer):
             raise ToolError(f"Error executing tool {name}: {message}") from exc
 
 
+_REQUEST_STATE_KEY_INFO = b"mymcp/mcp-request-state/v1"
+
+
+def _request_state_principal(_ctx) -> str | None:
+    """Bind sealed ``requestState`` to the user our /mcp middleware authenticated.
+
+    The SDK's default binding reads its own auth context, which this server
+    does not use, so it would bind nothing: state minted for one user could be
+    replayed by another. ``None`` (stdio, in-process) leaves it unbound.
+    """
+    user = current_user()
+    return user.user_id if user is not None else None
+
+
+def _request_state_security() -> RequestStateSecurity:
+    """Seal multi-round-trip ``requestState`` (2026-07-28) under a shared key.
+
+    Without this the SDK seals under a key generated at process start, so a
+    retry that lands on another replica, or after a restart, is refused with
+    "Invalid or expired requestState". The key is derived from
+    ``SESSION_SECRET_KEY``, which every replica already shares and production
+    requires to be set; rotating that secret invalidates in-flight round trips
+    along with dashboard sessions. The TTL covers the longest round trip we mint
+    (an inline approval, ``approvals.elicitation_expiry_seconds``).
+    """
+    key = hmac.new(
+        global_config.SESSION_SECRET_KEY.encode("utf-8"),
+        _REQUEST_STATE_KEY_INFO,
+        hashlib.sha256,
+    ).digest()
+    ttl = max(600, global_config.approvals.elicitation_expiry_seconds)
+    return RequestStateSecurity(
+        keys=[key], ttl=float(ttl), bind_principal=_request_state_principal
+    )
+
+
 mcp: MCPServer = _TemplateMCPServer(
     "mymcp",
     version=_server_version(),
     instructions=_MCP_INSTRUCTIONS,
     extensions=[Apps(), Events(), Skills()],
+    request_state_security=_request_state_security(),
 )
 
 _populated: bool = False

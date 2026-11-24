@@ -1289,8 +1289,12 @@ def _replace_in_files(replacements: list[tuple[str, str]]) -> list[str]:
     return changed
 
 
-#: Template values that get replaced during onboarding rename
+#: Template values that get replaced during onboarding rename. The current
+#: distribution name comes first: it is ``[project].name`` in pyproject.toml and
+#: the single-line ``DIST_NAME`` constant in ``src/utils/package_info.py``.
+_TEMPLATE_DIST_NAME = "mcp-template"
 _TEMPLATE_PACKAGE_NAME = "miyamura80-cli-template"
+_TEMPLATE_NAMES = (_TEMPLATE_DIST_NAME, _TEMPLATE_PACKAGE_NAME, "python-template")
 _TEMPLATE_OWNER = "Miyamura80"
 _TEMPLATE_REPO_NAMES = ["MCP-Template", "CLI-Template"]
 
@@ -1306,6 +1310,9 @@ def _build_rename_replacements(
 
     # Package name (PyPI) - broader match first to avoid double-substitution
     pairs.append((_TEMPLATE_PACKAGE_NAME, name))
+    # str.replace never rescans its output, so a new name containing the old
+    # one is safe here; only a *later* pair could match it again.
+    pairs.append((_TEMPLATE_DIST_NAME, name))
     if "python-template" not in name:
         pairs.append(("python-template", name))
 
@@ -1364,7 +1371,7 @@ def _prompt_github_info() -> tuple[str, str]:
 def rename() -> None:
     """Step 2: Rename the project and update metadata."""
     current_name = _read_pyproject_name()
-    if current_name not in ("python-template", _TEMPLATE_PACKAGE_NAME):
+    if current_name not in _TEMPLATE_NAMES:
         rprint(
             f"[blue]ℹ Project already renamed to '{current_name}'. Skipping rename step.[/blue]"
         )

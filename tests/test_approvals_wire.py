@@ -119,6 +119,56 @@ class TestMcp(TestTemplate):
             assert second["isError"] is True and "denied" in _tool_text(second)
             assert _calls == []
 
+    def _first_round(self, client, key, user_id, text):
+        _set_mode(user_id, "elicitation")
+        params = {"name": _TOOL, "arguments": {"text": text}}
+        first = self._modern(client, key).request("tools/call", params)
+        assert first["resultType"] == "input_required"
+        return params, first["requestState"]
+
+    def _accept(self, state):
+        return {
+            "requestState": state,
+            "inputResponses": {
+                "approval": {"action": "accept", "content": {"confirm": True}}
+            },
+        }
+
+    def test_request_state_survives_another_replica(self):
+        # A fresh process derives the same sealing key from SESSION_SECRET_KEY,
+        # so a retry routed to another replica (or after a restart) still works.
+        from mcp.server.request_state import RequestStateBoundary  # noqa: PLC0415
+
+        from mcp_server import server as mcp_module  # noqa: PLC0415
+
+        with _wire_client("u-rep") as (client, key), _danger_tool():
+            params, state = self._first_round(client, key, "u-rep", "rep")
+            boundaries = [
+                m
+                for m in mcp_module.mcp._lowlevel_server.middleware
+                if isinstance(m, RequestStateBoundary)
+            ]
+            assert len(boundaries) == 1
+            fresh = mcp_module._request_state_security()
+            with patch.object(boundaries[0], "_security", fresh):
+                second = self._modern(client, key).request(
+                    "tools/call", {**params, **self._accept(state)}
+                )
+            assert second["structuredContent"] == {"text": "rep", "run": 1}
+
+    def test_request_state_is_bound_to_the_user(self):
+        with _wire_client("u-own") as (client, key), _danger_tool():
+            params, state = self._first_round(client, key, "u-own", "mine")
+            with patch(
+                "mcp_server.server.current_user",
+                return_value=type("U", (), {"user_id": "someone-else"})(),
+            ):
+                error = self._modern(client, key).request_error(
+                    "tools/call", {**params, **self._accept(state)}
+                )
+            assert error["code"] == -32602
+            assert _calls == []
+
     def test_modern_without_elicitation_escalates_to_browser(self):
         with _wire_client("u-el3") as (client, key), _danger_tool():
             _set_mode("u-el3", "elicitation")

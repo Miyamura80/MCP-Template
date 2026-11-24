@@ -1,6 +1,7 @@
 """Tests for MCP server tool registration."""
 
 import asyncio
+import inspect
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -94,6 +95,16 @@ class TestMCPServer(TestTemplate):
             assert tool.context_kwarg == "ctx"
             assert "ctx" not in tool.parameters.get("properties", {})
             assert "ctx" not in tool.parameters.get("required", [])
+
+    def test_every_tool_takes_one_keyword_only_optional_ctx(self):
+        # Headless and enhanced wrappers share one ctx convention (#255).
+        for name in ("gmail_send", "gmail_compose"):
+            tool = mcp._tool_manager._tools[name]
+            assert tool.context_kwarg == "ctx"
+            ctx = inspect.signature(tool.fn).parameters["ctx"]
+            assert ctx.kind is inspect.Parameter.KEYWORD_ONLY
+            assert ctx.default is None
+            assert "ctx" not in tool.parameters.get("properties", {})
 
     def test_default_factory_fields_resolve_to_concrete_defaults(self):
         # Regression: inspect.signature() renders a Pydantic default_factory
