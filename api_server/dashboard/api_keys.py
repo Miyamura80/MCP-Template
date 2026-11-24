@@ -51,8 +51,7 @@ from api_server.dashboard.session import (
     require_csrf,
     require_session,
 )
-from api_server.dashboard.ui import csrf_field, esc, nav
-from api_server.oauth.flow import render_page
+from api_server.dashboard.ui import box, csrf_field, dashboard_page, esc
 from db.engine import use_db_session
 from db.models.api_keys import APIKey
 from models.auth import MAX_KEY_DAYS, MAX_KEY_NAME, CreateAPIKeyRequest
@@ -103,8 +102,9 @@ def _form(
     expiration: str,
     scope: str,
     notes: list[str],
-) -> str:
-    warn = "".join(f"<p class='warn'>{esc(n)}</p>" for n in notes)
+    status_code: int = 200,
+) -> Response:
+    warn = "".join(f"<p class='note'>{esc(n)}</p>" for n in notes)
     choices = list(_EXPIRY_CHOICES)
     if expiration not in choices:
         choices.insert(1, expiration)
@@ -118,19 +118,29 @@ def _form(
         f"{esc(t)}: {esc(SCOPE_TEMPLATE_HELP[t])}</option>"
         for t in SCOPE_TEMPLATES
     )
-    return (
-        "<h1>Create an API key</h1>"
-        + nav(session)
-        + warn
+    inner = (
+        warn
         + "<form method='post' action='/dashboard/settings/api-keys/create'>"
         + csrf_field(session)
-        + f"<p><label>Name<br><input name='name' required maxlength='{MAX_KEY_NAME}' "
-        f"value='{esc(name)}' style='width:100%'></label></p>"
-        f"<p><label>Expires<br><select name='expiration'>{expiry_opts}</select>"
-        "</label></p>"
-        f"<p><label>Access<br><select name='scope'>{scope_opts}</select></label></p>"
-        "<button class='allow' type='submit'>Create key</button>"
-        "<a href='/dashboard/settings/api-keys'>Cancel</a></form>"
+        + "<label class='field'><span>Name</span><input name='name' required "
+        f"maxlength='{MAX_KEY_NAME}' value='{esc(name)}' "
+        "placeholder='e.g. ci-bot'></label>"
+        "<label class='field'><span>Expires</span>"
+        f"<select name='expiration'>{expiry_opts}</select></label>"
+        "<label class='field'><span>Access</span>"
+        f"<select name='scope'>{scope_opts}</select></label>"
+        "<div class='actions'><button class='primary' type='submit'>Create key</button>"
+        "<a class='btn' href='/dashboard/settings/api-keys'>Cancel</a></div></form>"
+    )
+    return dashboard_page(
+        session,
+        active="api-keys",
+        eyebrow="Credentials",
+        title="Create an API key",
+        lead="Check the details, then create. The key is shown once.",
+        body=box("New key", inner),
+        status_code=status_code,
+        narrow=True,
     )
 
 
@@ -149,10 +159,7 @@ def create_page(
     expiry_value, _days, expiry_note = _parse_expiration(expiration)
     scope_value, scope_note = _parse_scope(scope, _LINKABLE_SCOPES)
     notes += [n for n in (expiry_note, scope_note) if n]
-    return render_page(
-        "Create an API key",
-        _form(session, name_value, expiry_value, scope_value, notes),
-    )
+    return _form(session, name_value, expiry_value, scope_value, notes)
 
 
 @router.post("/create")
@@ -173,11 +180,12 @@ def create_submit(
     except ValidationError:
         notes.append(f"Enter a name of 1 to {MAX_KEY_NAME} characters.")
     if notes or request is None:
-        return render_page(
-            "Create an API key",
-            _form(
-                session, name.strip()[:MAX_KEY_NAME], expiry_value, scope_value, notes
-            ),
+        return _form(
+            session,
+            name.strip()[:MAX_KEY_NAME],
+            expiry_value,
+            scope_value,
+            notes,
             status_code=400,
         )
     with use_db_session() as db:
@@ -189,17 +197,26 @@ def create_submit(
             scopes=validate_scopes([scope_value]),
         )
         expires = aware_expires_at(row)
-    return render_page(
-        "API key created",
-        "<h1>API key created</h1>"
-        + nav(session)
-        + f"<p><strong>{esc(request.name)}</strong> · {esc(scope_value)} · "
-        f"expires {esc(expires.date().isoformat() if expires else 'never')}</p>"
+    inner = (
+        "<div class='meta'>"
+        f"<span class='pill on'>{esc(request.name)}</span>"
+        f"<span class='pill'>{esc(scope_value)}</span>"
+        f"<span class='pill'>expires {esc(expires.date().isoformat() if expires else 'never')}"
+        "</span></div>"
+        f"<code class='secret'>{esc(raw_key)}</code>"
         "<p class='warn'>Copy it now: it is shown only once. Don't refresh this "
         "page, which would create another key.</p>"
-        f"<p><code style='font-size:1.05rem'>{esc(raw_key)}</code></p>"
-        "<p>Send it as the <code>X-API-KEY</code> header.</p>"
-        "<p><a href='/dashboard/settings/api-keys'>Back to API keys</a></p>",
+        "<p class='empty'>Send it as the <code>X-API-KEY</code> header.</p>"
+        "<div class='actions'><a class='btn' href='/dashboard/settings/api-keys'>"
+        "Back to API keys</a></div>"
+    )
+    return dashboard_page(
+        session,
+        active="api-keys",
+        eyebrow="Credentials",
+        title="API key created",
+        body=box("Your key", inner),
+        narrow=True,
     )
 
 
@@ -215,18 +232,20 @@ def _access(row: APIKey) -> str:
 def _row(session: DashboardSession, row: APIKey, now: datetime) -> str:
     expires = aware_expires_at(row)
     if is_expired(row, now):
-        state = "expired"
+        state = "<span class='pill bad'>expired</span>"
     elif expires is not None:
-        state = f"expires {expires.date().isoformat()}"
+        state = f"<span class='pill'>{esc(expires.date().isoformat())}</span>"
     else:
-        state = "no expiry"
+        state = "<span class='pill'>never</span>"
+    access = _access(row)
+    tone = "bad" if access == "admin" else "on"
     return (
-        f"<li><strong>{esc(row.name)}</strong> <code>{esc(row.key_prefix)}…</code> · "
-        f"{esc(_access(row))} · {esc(state)}"
-        f"<form method='post' action='/dashboard/settings/api-keys/{row.id}/revoke' "
-        "style='display:inline'>"
+        f"<tr><td><strong>{esc(row.name)}</strong></td>"
+        f"<td class='mono'>{esc(row.key_prefix)}…</td>"
+        f"<td><span class='pill {tone}'>{esc(access)}</span></td><td>{state}</td>"
+        f"<td><form method='post' action='/dashboard/settings/api-keys/{row.id}/revoke'>"
         + csrf_field(session)
-        + "<button type='submit'>Revoke</button></form></li>"
+        + "<button class='danger' type='submit'>Revoke</button></form></td></tr>"
     )
 
 
@@ -234,15 +253,25 @@ def _row(session: DashboardSession, row: APIKey, now: datetime) -> str:
 def list_page(session: Session) -> Response:
     with use_db_session() as db:
         now = datetime.now(UTC)
-        items = "".join(
+        rows = "".join(
             _row(session, r, now) for r in list_active_keys(db, session.user_id)
         )
-    return render_page(
-        "API keys",
-        "<h1>API keys</h1>"
-        + nav(session)
-        + "<p><a href='/dashboard/settings/api-keys/create'>Create an API key</a></p>"
-        + (f"<ul>{items}</ul>" if items else "<p>No keys yet.</p>"),
+    table = (
+        "<table><thead><tr><th>Name</th><th>Key</th><th>Access</th><th>Expires</th>"
+        "<th></th></tr></thead><tbody>" + rows + "</tbody></table>"
+        if rows
+        else "<p class='empty'>No keys yet.</p>"
+    )
+    return dashboard_page(
+        session,
+        active="api-keys",
+        eyebrow="Credentials",
+        title="API keys",
+        lead="Keys for the CLI, REST API and MCP clients that send "
+        "<code>X-API-KEY</code>.",
+        body="<div class='actions' style='margin:0 0 1.5rem'>"
+        "<a class='btn primary' href='/dashboard/settings/api-keys/create'>"
+        "Create an API key</a></div>" + box("Active keys", table),
     )
 
 
@@ -251,5 +280,8 @@ def revoke(session: FormSession, key_id: int) -> Response:
     with use_db_session() as db:
         revoked = revoke_api_key(db, key_id=key_id, user_id=session.user_id)
     if not revoked:
-        return render_page("API keys", "<h1>Not found</h1>" + nav(session), 404)
+        return dashboard_page(
+            session, active="api-keys", eyebrow="Credentials", title="Not found",
+            body="", status_code=404,
+        )  # fmt: skip
     return RedirectResponse("/dashboard/settings/api-keys", status_code=303)
