@@ -31,6 +31,7 @@ from common import global_config
 from mcp_server._tool_errors import model_facing_message
 from mcp_server._tool_factory import make_tool
 from services import ServiceEntry, discover_services, get_registry
+from src.utils.mcp_url_flags import current_url_flags
 
 _APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -153,7 +154,21 @@ class _TemplateMCPServer(MCPServer):
     so in-process callers still see the original exception types.
     """
 
+    async def list_tools(self):
+        tools = await super().list_tools()
+        if current_url_flags().dangerous_tools:
+            return tools
+        hidden = _dangerous_tool_names()
+        return [t for t in tools if t.name not in hidden]
+
     async def call_tool(self, name, arguments, context=None):
+        if not current_url_flags().dangerous_tools and name in _dangerous_tool_names():
+            # Mirrors the hidden tools/list entry. A ToolError so the model
+            # reads why, rather than a bare "unknown tool".
+            raise ToolError(
+                f"Tool {name!r} is disabled on this connection "
+                "(dangerous_tools=false in the MCP URL)."
+            )
         try:
             return await super().call_tool(name, arguments, context)
         except UnexpectedToolError as exc:
@@ -211,6 +226,11 @@ def build_mcp_server() -> MCPServer:
 
     _populated = True
     return mcp
+
+
+def _dangerous_tool_names() -> frozenset[str]:
+    """Names of ``risk="dangerous"`` services. The registry is fixed after startup."""
+    return frozenset(e.name for e in get_registry() if e.risk == "dangerous")
 
 
 def llm_tool_surface() -> list[ServiceEntry]:

@@ -14,7 +14,11 @@ from mcp.server.auth.provider import AccessToken
 from mcp.shared.auth import OAuthToken as TokenResponse
 from sqlalchemy import delete, select, update
 
-from api_server.auth.authkit_auth import _resolve_scopes, mcp_resource_url
+from api_server.auth.authkit_auth import (
+    _resolve_scopes,
+    mcp_resource_url,
+    strip_resource_flags,
+)
 from db.engine import use_db_session
 from db.models.oauth import OAuthCode, OAuthSignOut, OAuthToken, lock_user
 
@@ -83,8 +87,8 @@ def resource_matches(resource: str | None) -> bool:
     """Whether ``resource`` names this MCP server (RFC 8707 audience)."""
     if resource is None:
         return False
-    canonical = mcp_resource_url()
-    return resource.rstrip("/") == canonical.rstrip("/")
+    # Query flags on the MCP URL are connection options, not another resource.
+    return strip_resource_flags(resource) == strip_resource_flags(mcp_resource_url())
 
 
 # ---------------------------------------------------------------------------

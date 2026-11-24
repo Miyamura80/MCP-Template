@@ -91,8 +91,10 @@ class _McpSession:
         client: TestClient,
         api_key: str,
         protocol_version: str = _PROTOCOL_VERSION,
+        path: str = "/mcp",
     ):
         self._client = client
+        self._path = path
         self._api_key = api_key
         self._session_id: str | None = None
         self._next_id = 0
@@ -120,7 +122,7 @@ class _McpSession:
         """POST a JSON-RPC request; return the `result` member of the response."""
         self._next_id += 1
         resp = self._client.post(
-            "/mcp",
+            self._path,
             headers=self._headers(),
             json={
                 "jsonrpc": "2.0",
@@ -140,7 +142,7 @@ class _McpSession:
         """POST a JSON-RPC request expected to fail; return the `error` member."""
         self._next_id += 1
         resp = self._client.post(
-            "/mcp",
+            self._path,
             headers=self._headers(),
             json={
                 "jsonrpc": "2.0",
@@ -156,7 +158,7 @@ class _McpSession:
 
     def notify(self, method: str) -> None:
         resp = self._client.post(
-            "/mcp",
+            self._path,
             headers=self._headers(),
             json={"jsonrpc": "2.0", "method": method},
         )

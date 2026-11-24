@@ -294,7 +294,7 @@ def gmail_compose(input: GmailComposeInput) -> GmailDraft:
     description="Send a previously-composed Gmail draft",
     input_model=GmailSendInput,
     output_model=GmailSendResult,
-    mutating=True,
+    risk="dangerous",
 )
 def gmail_send(input: GmailSendInput) -> GmailSendResult:
     svc = _get_gmail_client(input.user_id)
@@ -311,7 +311,7 @@ def gmail_send(input: GmailSendInput) -> GmailSendResult:
     description="Delete a Gmail draft by id",
     input_model=GmailDiscardDraftInput,
     output_model=GmailDiscardDraftResult,
-    mutating=True,
+    risk="dangerous",
 )
 def gmail_discard_draft(input: GmailDiscardDraftInput) -> GmailDiscardDraftResult:
     """Delete a draft. Gmail's ``drafts().delete`` returns no body on success."""
