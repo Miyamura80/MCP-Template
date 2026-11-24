@@ -31,6 +31,7 @@ from common import global_config
 from mcp_server import approval_gate
 from mcp_server._tool_errors import model_facing_message
 from mcp_server._tool_factory import make_tool
+from mcp_server.events_ext import Events
 from mcp_server.skills import Skills
 from services import (
     ServiceEntry,
@@ -151,6 +152,8 @@ def _transport_security() -> TransportSecuritySettings:
 # resources and ``_meta.ui`` tool metadata are still registered by hand below
 # so the same wire shapes reach handshake-era hosts that predate extensions.
 #
+# Events (``io.modelcontextprotocol/events``, SEP-3415) serves first-party
+# events by poll and webhook. See ``mcp_server/events_ext.py``.
 # Skills (``io.modelcontextprotocol/skills``, SEP-2640) serves ``skills/`` as
 # ``skill://`` resources plus ``skills/list`` / ``skills/get``. See
 # ``mcp_server/skills.py``.
@@ -220,7 +223,7 @@ mcp: MCPServer = _TemplateMCPServer(
     "mymcp",
     version=_server_version(),
     instructions=_MCP_INSTRUCTIONS,
-    extensions=[Apps(), Skills()],
+    extensions=[Apps(), Events(), Skills()],
 )
 
 _populated: bool = False

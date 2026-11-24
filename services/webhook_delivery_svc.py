@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from loguru import logger as log
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -35,27 +36,34 @@ from sqlalchemy.orm import Session
 from common import global_config
 from db.engine import use_db_session
 from db.models.webhooks import WebhookDelivery, WebhookEvent, WebhookSubscription
-from services._ssrf_guard import ResolverThreads, build_client, validate_and_pin
+from services.events.store import MCP_CHANNEL
+from services.events.webhooks import NON_RETRYABLE, deliverable, post_event
 from services.webhooks_svc import (
     DELIVERY_ID_HEADER,
     EVENT_ID_HEADER,
     EVENT_TYPE_HEADER,
+    OUTBOUND_RESOLVER,
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     decrypt_secret,
+    pinned_post,
     sign_payload,
 )
 
 # Backoff schedule: delay = min(BASE * 2**(attempts-1), CAP).
 _BACKOFF_BASE_S = 30
 _BACKOFF_CAP_S = 3600
+# MCP Events retry delays: attempts at about t = 0, 1, 4 and 11 minutes, inside
+# the spec's "3 to 5 attempts within 10 to 15 minutes". The schedule is the
+# policy (attempts = delays + 1), so it can't be configured out of the window.
+_MCP_SCHEDULE_S = (60, 180, 420)
 _HTTP_TIMEOUT_S = 10.0
 # Wall-clock ceiling on one delivery POST: the per-operation timeout alone lets a
 # subscriber that trickles its response hold the runner indefinitely.
 _DELIVERY_DEADLINE_S = 30.0
 # Delivery DNS runs on these threads; a hung lookup holds one (and only one
 # per host) until the system resolver gives up, never the runner itself.
-_RESOLVER = ResolverThreads(8)
+_RESOLVER = OUTBOUND_RESOLVER
 _DEFAULT_BATCH = 20
 # A claimed ("sending") row left behind by a crashed runner is reclaimable
 # after this many seconds so deliveries never get stranded.
@@ -108,10 +116,9 @@ def _claim_batch(session: Session, now: datetime, limit: int) -> list[str]:
     return ids
 
 
-def _post(
-    url: str, secret: str, delivery: WebhookDelivery, event: WebhookEvent
-) -> None:
-    """POST the signed payload; raises on transport/HTTP failure or SSRF reject.
+def _post(url: str, secret: str, delivery: WebhookDelivery, event: WebhookEvent) -> int:
+    """POST the signed payload; returns the status. Raises on transport failure
+    or SSRF reject.
 
     The subscriber URL was validated at subscribe time, but DNS can be flipped
     between then and now (rebinding). We therefore re-resolve here and PIN the
@@ -142,33 +149,78 @@ def _post(
         EVENT_TYPE_HEADER: event.event_type,
         DELIVERY_ID_HEADER: delivery.id,
     }
-    # Loopback subscribers exist only in dev (subscribe-time guard enforces this),
-    # so mirror that allowance here rather than resolving them to a hard reject.
-    # The deadline starts before DNS, and the lookup is timed against it: a
-    # subscriber whose DNS never answers cannot hold the runner thread.
-    deadline = time.monotonic() + _DELIVERY_DEADLINE_S
-    target = validate_and_pin(
+    # follow_redirects=False inside: a 3xx (e.g. Location: http://169.254.169.254/)
+    # comes back as a non-2xx status and is retried, never chased inward.
+    return pinned_post(
         url,
-        allow_loopback=global_config.is_dev,
-        resolver=_RESOLVER,
+        body,
+        headers,
         timeout=_HTTP_TIMEOUT_S,
-    )
-    with build_client(timeout=_HTTP_TIMEOUT_S, deadline=deadline) as client:
-        resp = client.post(
-            target.url,
-            content=body,
-            headers={**headers, **target.headers},
-            extensions=target.extensions,
-        )
-    # follow_redirects=False: a 3xx (e.g. Location: http://169.254.169.254/) is
-    # non-success, so raise_for_status refuses it instead of chasing it inward.
-    resp.raise_for_status()
+        deadline_s=_DELIVERY_DEADLINE_S,
+        resolver=_RESOLVER,
+    ).status_code
 
 
-def _record_failure(delivery: WebhookDelivery, error: str) -> str:
+@dataclass(frozen=True)
+class RetryPolicy:
+    """How a channel retries: attempts, the delay after the n-th failure, and
+    statuses that mean "stop" rather than "try again"."""
+
+    max_attempts: Callable[[], int]  # read at use, so config/test patches apply
+    delay_s: Callable[[int], int]
+    non_retryable: frozenset[int] = frozenset()
+
+
+def _mcp_delay(attempts: int) -> int:
+    return _MCP_SCHEDULE_S[min(attempts, len(_MCP_SCHEDULE_S)) - 1]
+
+
+@dataclass(frozen=True)
+class Channel:
+    """One kind of outbox row. ``load`` returns the zero-argument sender for a
+    row (raising inside it is a delivery failure), or a reason to drop it."""
+
+    load: Callable[[Session, WebhookDelivery], Callable[[], int] | str]
+    policy: RetryPolicy
+
+
+def _load_legacy(
+    session: Session, delivery: WebhookDelivery
+) -> Callable[[], int] | str:
+    sub = session.get(WebhookSubscription, delivery.subscription_id)
+    event = session.get(WebhookEvent, delivery.event_id)
+    if sub is None or event is None or not sub.active:
+        return "subscription inactive or missing"
+    return lambda: _post(sub.url, decrypt_secret(sub.secret_enc), delivery, event)
+
+
+def _load_mcp_event(
+    session: Session, delivery: WebhookDelivery
+) -> Callable[[], int] | str:
+    found = deliverable(session, delivery.subscription_id, delivery.event_id)
+    if found is None:
+        return "subscription expired or missing, or event pruned"
+    sub, event = found
+    return lambda: post_event(sub, event, delivery.id)
+
+
+_CHANNELS: dict[str, Channel] = {
+    "webhook": Channel(
+        _load_legacy,
+        RetryPolicy(lambda: global_config.WEBHOOK_MAX_ATTEMPTS, _backoff_seconds),
+    ),
+    # The spec: 3 to 5 attempts within 10 to 15 minutes; 410/413 mean stop.
+    MCP_CHANNEL: Channel(
+        _load_mcp_event,
+        RetryPolicy(lambda: len(_MCP_SCHEDULE_S) + 1, _mcp_delay, NON_RETRYABLE),
+    ),
+}
+
+
+def _record_failure(delivery: WebhookDelivery, error: str, policy: RetryPolicy) -> str:
     """Mark a delivery failed (at max attempts) or reschedule with backoff."""
     delivery.last_error = error[:1000]
-    if delivery.attempts >= global_config.WEBHOOK_MAX_ATTEMPTS:
+    if delivery.attempts >= policy.max_attempts():
         delivery.status = "failed"
         log.warning(
             "webhook delivery {} gave up after {} attempts: {}",
@@ -180,7 +232,7 @@ def _record_failure(delivery: WebhookDelivery, error: str) -> str:
     # Back to pending so the next claim re-selects it once the backoff elapses.
     delivery.status = "pending"
     delivery.next_attempt_at = datetime.now(UTC) + timedelta(
-        seconds=_backoff_seconds(delivery.attempts)
+        seconds=policy.delay_s(delivery.attempts)
     )
     return "retry"
 
@@ -190,30 +242,33 @@ def _process(session: Session, delivery: WebhookDelivery) -> str:
 
     Returns 'sent' | 'retry' | 'failed' | 'dropped'.
     """
-    sub = session.get(WebhookSubscription, delivery.subscription_id)
-    event = session.get(WebhookEvent, delivery.event_id)
-    if sub is None or event is None or not sub.active:
-        # Subscriber gone or deactivated after enqueue: stop trying.
+    channel = _CHANNELS.get(delivery.channel)
+    send = channel.load(session, delivery) if channel else "unknown channel"
+    if isinstance(send, str) or channel is None:
+        # Subscriber gone, expired or deactivated after enqueue: stop trying.
         delivery.status = "failed"
-        delivery.last_error = "subscription inactive or missing"
+        delivery.last_error = send if isinstance(send, str) else "unknown channel"
         return "dropped"
 
     delivery.attempts += 1
     try:
-        _post(sub.url, decrypt_secret(sub.secret_enc), delivery, event)
-    except httpx.HTTPError as exc:
-        return _record_failure(delivery, f"{type(exc).__name__}: {exc}")
+        status = send()
     except Exception as exc:  # noqa: BLE001
-        # Defensive per-delivery boundary: an unexpected failure (e.g. an
-        # undecryptable secret after key rotation, or a non-serializable
-        # payload) must not escape and abort the runner or roll back sibling
-        # deliveries. Record it and follow the same bounded backoff/give-up
-        # path so this row cannot wedge the outbox.
-        return _record_failure(delivery, f"{type(exc).__name__}: {exc}")
-
-    delivery.status = "succeeded"
-    delivery.last_error = None
-    return "sent"
+        # Defensive per-delivery boundary: a transport error, an SSRF reject at
+        # pin time, an undecryptable secret after key rotation or a
+        # non-serializable payload must not escape and abort the runner or roll
+        # back sibling deliveries. Record it and follow the same bounded
+        # backoff/give-up path so this row cannot wedge the outbox.
+        return _record_failure(delivery, f"{type(exc).__name__}: {exc}", channel.policy)
+    if 200 <= status < 300:
+        delivery.status = "succeeded"
+        delivery.last_error = None
+        return "sent"
+    if status in channel.policy.non_retryable:
+        delivery.status = "failed"
+        delivery.last_error = f"HTTP {status} (receiver asked us to stop)"
+        return "failed"
+    return _record_failure(delivery, f"HTTP {status}", channel.policy)
 
 
 def _process_one(delivery_id: str) -> str:

@@ -80,6 +80,12 @@ class WebhookDelivery(Base):
     # Indexed: the disconnect purge deletes a user's deliveries by matching
     # subscription, so without it that delete scans every tenant's outbox.
     subscription_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # "webhook": a legacy subscription (WebhookEvent / WebhookSubscription).
+    # "mcp_event": an MCP Events subscription (EventLog / EventSubscription).
+    # One outbox, one claim/retry/SSRF path; the channel picks the signer.
+    channel: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="webhook", server_default="webhook"
+    )
     # pending | succeeded | failed
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

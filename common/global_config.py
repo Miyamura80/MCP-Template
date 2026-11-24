@@ -23,6 +23,7 @@ from .config_models import (
     BrandingConfig,
     CliConfig,
     DefaultLlm,
+    EventsConfig,
     ExampleParent,
     FeaturesConfig,
     FeedbackConfig,
@@ -208,6 +209,7 @@ class Config(BaseSettings):
     ask: AskConfig = Field(default_factory=lambda: AskConfig())
     feedback: FeedbackConfig = Field(default_factory=lambda: FeedbackConfig())
     approvals: ApprovalsConfig = Field(default_factory=lambda: ApprovalsConfig())
+    events: EventsConfig = Field(default_factory=lambda: EventsConfig())
     web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
     gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
     pdf_forms: PdfFormsConfig = Field(default_factory=lambda: PdfFormsConfig())

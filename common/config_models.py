@@ -315,6 +315,24 @@ class ApprovalsConfig(BaseModel):
     dashboard_session_seconds: int = Field(default=28800, gt=0)
 
 
+class EventsConfig(BaseModel):
+    """MCP Events (``io.modelcontextprotocol/events``): poll and webhook delivery.
+
+    ``retention_days`` bounds how far back a poll cursor can replay; older
+    cursors come back ``truncated``. Webhook subscriptions last ``ttlMs`` as
+    requested, capped at ``max_subscription_ttl_seconds``; clients refresh by
+    subscribing again.
+    """
+
+    retention_days: int = Field(default=7, gt=0)
+    poll_interval_ms: int = Field(default=5000, ge=1000)
+    max_poll_events: int = Field(default=100, gt=0)
+    default_subscription_ttl_seconds: int = Field(default=86400, gt=0)
+    max_subscription_ttl_seconds: int = Field(default=604800, gt=0)
+    verification_cache_seconds: int = Field(default=86400, ge=0)
+    max_subscriptions_per_user: int = Field(default=50, gt=0)
+
+
 class FeaturesConfig(BaseModel):
     """Feature flags configuration."""
 

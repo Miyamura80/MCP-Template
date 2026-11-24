@@ -25,6 +25,7 @@ from contextlib import asynccontextmanager
 from loguru import logger as log
 
 from common import global_config
+from services.events.store import prune as prune_events
 from services.gmail_watch_svc import renew_due_watches
 from services.webhook_delivery_svc import cleanup_delivered, drain_due_deliveries
 
@@ -38,6 +39,7 @@ async def _tick(counter: int) -> None:
     if counter % _MAINTENANCE_EVERY_TICKS == 0:
         await asyncio.to_thread(renew_due_watches)
         await asyncio.to_thread(cleanup_delivered)
+        await asyncio.to_thread(prune_events)
 
 
 async def _run_loop() -> None:
