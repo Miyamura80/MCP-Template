@@ -2,6 +2,17 @@
 
 Provides capability detection, content emission helpers, and elicitation
 passthrough while keeping the pure service callable via `tool.call()`.
+
+Two ways to ask the user something mid-call, by protocol era:
+
+- handshake-era sessions with a back-channel: ``tool.elicit()`` sends an
+  in-band ``elicitation/create`` (``tool.can_elicit``);
+- 2026-07-28 (stateless): the enhancer returns ``tool.input_required(...)``,
+  an ``InputRequiredResult``; the host asks the user and retries the same
+  call with ``inputResponses`` and our ``requestState``, which the retry reads
+  with ``tool.input_response()`` / ``tool.request_state``
+  (``tool.can_request_input``). The SDK seals ``requestState`` and binds it to
+  the user and the call (``mcp_server.server._request_state_security``).
 """
 
 import os
@@ -14,10 +25,15 @@ from mcp.types import (
     AudioContent,
     ClientCapabilities,
     ElicitationCapability,
+    ElicitRequest,
+    ElicitRequestFormParams,
+    ElicitResult,
     ImageContent,
+    InputRequiredResult,
     Role,
     TextContent,
 )
+from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 from pydantic import BaseModel
 
 
@@ -44,6 +60,28 @@ def client_can_elicit(session) -> bool:
         return False
     return session.check_client_capability(
         ClientCapabilities(elicitation=ElicitationCapability())
+    )
+
+
+def client_can_answer_form(ctx: Context | None) -> bool:
+    """True when this 2026-07-28 request can answer a form ``InputRequiredResult``.
+
+    Requires a modern protocol version and a declared form-mode elicitation
+    capability. A bare ``elicitation: {}`` means form mode (spec back-compat
+    rule).
+    """
+    if ctx is None:
+        return False
+    try:
+        version = ctx.protocol_version
+        caps = ctx.client_capabilities
+    except (LookupError, ValueError, AttributeError):
+        return False
+    if version not in MODERN_PROTOCOL_VERSIONS or caps is None:
+        return False
+    elicitation = caps.elicitation
+    return elicitation is not None and (
+        elicitation.form is not None or elicitation.url is None
     )
 
 
@@ -117,6 +155,46 @@ class EnhancedTool[TInput: BaseModel, TOutput: BaseModel]:
         See mcp_server/MCP_UI_EDGE_CASES.md C2.
         """
         return os.environ.get("MCP_DISABLE_APPS", "") == ""
+
+    @property
+    def can_request_input(self) -> bool:
+        """True when a 2026-07-28 form round trip can ask the user (see module doc)."""
+        return client_can_answer_form(self._ctx)
+
+    @property
+    def request_state(self) -> str | None:
+        """The plaintext ``requestState`` this retry echoes, if any (SDK-verified)."""
+        try:
+            return self._ctx.request_state
+        except (LookupError, ValueError, AttributeError):
+            return None
+
+    def input_response(self, key: str) -> ElicitResult | None:
+        """The user's answer to the input request named ``key`` on this retry."""
+        try:
+            responses = self._ctx.input_responses or {}
+        except (LookupError, ValueError, AttributeError):
+            return None
+        answer = responses.get(key)
+        return answer if isinstance(answer, ElicitResult) else None
+
+    def input_required(
+        self, key: str, message: str, schema: type[BaseModel], request_state: str
+    ) -> InputRequiredResult:
+        """Ask for a form (one flat primitive-only model) and end this round.
+
+        Return it from the enhancer; the host retries the call with the answer.
+        """
+        return InputRequiredResult(
+            input_requests={
+                key: ElicitRequest(
+                    params=ElicitRequestFormParams(
+                        message=message, requested_schema=schema.model_json_schema()
+                    )
+                )
+            },
+            request_state=request_state,
+        )
 
     async def elicit(self, message: str, schema: type[BaseModel]) -> ElicitationResult:
         """Ask the user for input mid-tool. Schema must be a flat primitive-only BaseModel."""

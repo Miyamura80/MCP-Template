@@ -31,11 +31,10 @@ from mcp.types import (
     ElicitResult,
     InputRequiredResult,
 )
-from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 from pydantic import BaseModel
 
 from common import global_config
-from mcp_server.enhancers.base import client_can_elicit
+from mcp_server.enhancers.base import client_can_answer_form, client_can_elicit
 from mcp_server.url_elicitation import reraise_with_elicitation
 from services import InvalidArgument, ServiceEntry
 from services.approvals_errors import (
@@ -70,23 +69,6 @@ def _state_serializer() -> URLSafeTimedSerializer:
     )
 
 
-def _modern_form_capable(ctx: Context | None) -> bool:
-    if ctx is None:
-        return False
-    try:
-        version = ctx.protocol_version
-        caps = ctx.client_capabilities
-    except (LookupError, ValueError, AttributeError):
-        return False
-    if version not in MODERN_PROTOCOL_VERSIONS or caps is None:
-        return False
-    elicitation = caps.elicitation
-    # A bare ``elicitation: {}`` means form mode (spec back-compat rule).
-    return elicitation is not None and (
-        elicitation.form is not None or elicitation.url is None
-    )
-
-
 def _session(ctx: Context | None):
     if ctx is None:
         return None
@@ -98,7 +80,7 @@ def _session(ctx: Context | None):
 
 def can_confirm_inline(ctx: Context | None) -> bool:
     """Whether this request can put a confirmation in front of the human."""
-    return _modern_form_capable(ctx) or client_can_elicit(_session(ctx))
+    return client_can_answer_form(ctx) or client_can_elicit(_session(ctx))
 
 
 def gate(
@@ -153,7 +135,7 @@ async def confirm_inline(
     _, args = await run_sync(get_review, user.user_id, view.id)
     message = _prompt(view.tool, args)
 
-    if _modern_form_capable(ctx):
+    if client_can_answer_form(ctx):
         state = _state_serializer().dumps([view.id, held.call_hash])
         return InputRequiredResult(
             input_requests={

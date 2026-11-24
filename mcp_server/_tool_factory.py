@@ -20,7 +20,12 @@ from loguru import logger as log
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.session import ServerSession
-from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from mcp.types import (
+    CallToolResult,
+    InputRequiredResult,
+    TextContent,
+    ToolAnnotations,
+)
 from pydantic import BaseModel, ValidationError
 
 from mcp_server import approval_gate
@@ -255,7 +260,9 @@ def _make_enhanced_tool(
     input_model = entry.input_model
     output_model = entry.output_model
 
-    async def tool_fn(*, ctx: Context | None = None, **kwargs) -> CallToolResult:
+    async def tool_fn(
+        *, ctx: Context | None = None, **kwargs
+    ) -> CallToolResult | InputRequiredResult:
         if ctx is None:  # the SDK always injects one; only a direct call omits it
             raise TypeError(f"{entry.name} is an enhanced tool and needs ctx")
         _check_scopes()
@@ -276,6 +283,9 @@ def _make_enhanced_tool(
         with running(decision) as done:
             await _meter_async(entry)
             result = await _run_enhancer(tool, entry, enhancer_entry, ctx)
+            if isinstance(result, InputRequiredResult):
+                # A 2026-07-28 round trip: the host asks the user and retries.
+                return result
             done(result)
         return _build_call_tool_result(result, tool)
 
@@ -298,7 +308,7 @@ def _make_enhanced_tool(
 
 async def _run_enhancer(
     tool: EnhancedTool, entry: ServiceEntry, enhancer_entry: EnhancerEntry, ctx: Context
-) -> BaseModel:
+) -> BaseModel | InputRequiredResult:
     """Run the enhancer, falling back to headless on a crash (see below)."""
     try:
         result = await enhancer_entry.fn(tool)
