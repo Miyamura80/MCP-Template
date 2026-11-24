@@ -36,6 +36,16 @@ ask:
 feedback:
   sink_timeout_seconds: 3.0
 
+# Approval of dangerous tools (gmail_send, ...). The mode is per user and set
+# on the dashboard (/dashboard/approval); these are expiries and the page that
+# browser-mode approvals link to.
+approvals:
+  agent_expiry_seconds: 600
+  elicitation_expiry_seconds: 600
+  browser_expiry_seconds: 86400
+  approve_url_template: "{base}/dashboard/approvals/{id}"
+  dashboard_session_seconds: 28800
+
 ########################################################
 # Debugging
 ########################################################

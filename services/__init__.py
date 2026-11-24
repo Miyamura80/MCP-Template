@@ -169,6 +169,10 @@ def service(
     if price is not None:
         _validate_price(name, price)
     mutating, resolved_risk = _resolve_risk(name, mutating, risk)
+    if resolved_risk == "dangerous" and price is not None:
+        # Approval runs the stored call later, outside the request that carried
+        # the X-PAYMENT header, so a held call could not be charged correctly.
+        raise ValueError(f"@service({name!r}) cannot be both dangerous and priced")
 
     def decorator(func):
         _registry.append(
@@ -205,3 +209,8 @@ def discover_services() -> None:
 def get_registry() -> list[ServiceEntry]:
     """Return all registered services."""
     return list(_registry)
+
+
+def dangerous_tool_names() -> frozenset[str]:
+    """Names of ``risk="dangerous"`` services (the ones approval can hold)."""
+    return frozenset(e.name for e in _registry if e.risk == "dangerous")

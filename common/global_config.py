@@ -18,6 +18,7 @@ from pydantic_settings import (
 # Import configuration models
 from .config_models import (
     AgenticPaymentsConfig,
+    ApprovalsConfig,
     AskConfig,
     BrandingConfig,
     CliConfig,
@@ -206,6 +207,7 @@ class Config(BaseSettings):
     )
     ask: AskConfig = Field(default_factory=lambda: AskConfig())
     feedback: FeedbackConfig = Field(default_factory=lambda: FeedbackConfig())
+    approvals: ApprovalsConfig = Field(default_factory=lambda: ApprovalsConfig())
     web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
     gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
     pdf_forms: PdfFormsConfig = Field(default_factory=lambda: PdfFormsConfig())

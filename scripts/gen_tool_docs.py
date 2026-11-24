@@ -138,6 +138,15 @@ GROUPS: tuple[Group, ...] = (
         ),
     ),
     Group(
+        heading="Approvals",
+        intro=(
+            "Dangerous tools (sending mail, deleting drafts, disconnecting, "
+            "unsubscribing\nwebhooks) can be held for approval. See "
+            "[Approvals](/docs/mcp/approvals)."
+        ),
+        tools=("confirm_action", "get_approval"),
+    ),
+    Group(
         heading="Feedback",
         intro=(
             "For agents that get stuck. Submissions are stored, then forwarded "

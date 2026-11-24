@@ -87,7 +87,7 @@ def _workos_pkce_verifier(nonce: str) -> str:
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
 
-def _pkce_challenge(verifier: str) -> str:
+def pkce_challenge(verifier: str) -> str:
     return (
         base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
         .decode()
@@ -95,7 +95,7 @@ def _pkce_challenge(verifier: str) -> str:
     )
 
 
-def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
+def render_page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
     content = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -115,7 +115,7 @@ def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
 
 
 def _error_page(message: str) -> HTMLResponse:
-    return _page(
+    return render_page(
         "Sign-in failed",
         "<h1>Sign-in failed</h1>"
         f"<p>{html.escape(message)}</p>"
@@ -149,12 +149,12 @@ def _nonce_matches(request: Request, flow_id: object, presented: object) -> bool
 
 
 @router.get("/consent", include_in_schema=False)
-def consent_page(
+async def consent_page(
     request: Request, request_token: str = Query(alias="request")
 ) -> Response:
     try:
         pending = signing.load_pending_authorization(request_token)
-        client = cimd.resolve_client(pending["client_id"])
+        client = await cimd.resolve_client(pending["client_id"])
     except (signing.InvalidSignedValueError, cimd.ClientMetadataError, KeyError):
         return _error_page("This sign-in link is invalid or has expired.")
 
@@ -173,7 +173,7 @@ def consent_page(
     flow_id = secrets.token_hex(8)
     nonce = secrets.token_urlsafe(24)
     server_name = html.escape(global_config.branding.title)
-    response = _page(
+    response = render_page(
         f"Connect to {global_config.branding.title}",
         f"<h1>Connect to {server_name}</h1>"
         f"<p><strong>{html.escape(client_name)}</strong> "
@@ -226,14 +226,14 @@ def consent_decision(
             "redirect_uri": _callback_url(),
             "provider": "authkit",
             "state": state,
-            "code_challenge": _pkce_challenge(_workos_pkce_verifier(nonce)),
+            "code_challenge": pkce_challenge(_workos_pkce_verifier(nonce)),
             "code_challenge_method": "S256",
         }
     )
     return RedirectResponse(f"{WORKOS_AUTHORIZE_URL}?{query}", status_code=303)
 
 
-def _authenticate_with_workos(code: str, code_verifier: str) -> str:
+def authenticate_with_workos(code: str, code_verifier: str) -> str:
     """Exchange a WorkOS code for the signed-in user's id."""
     response = httpx.post(
         WORKOS_AUTHENTICATE_URL,
@@ -272,7 +272,7 @@ def workos_callback(
         return _redirect_to_client(pending, flow_id, error="access_denied")
 
     try:
-        user_id = _authenticate_with_workos(
+        user_id = authenticate_with_workos(
             code, _workos_pkce_verifier(pending["nonce"])
         )
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:

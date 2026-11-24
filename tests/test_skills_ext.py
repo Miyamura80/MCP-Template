@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,6 @@ from mcp_server.skills import (
     load_skills,
     parse_frontmatter,
 )
-from services import get_registry
 from tests.test_mcp_e2e import _wire_client
 from tests.test_mcp_protocol_eras import _ModernMcpClient
 from tests.test_template import TestTemplate
@@ -45,6 +45,8 @@ class TestLoad(TestTemplate):
         )
         skill = load_skill(d)
         assert skill.uri == "skill://demo/SKILL.md"
+        md = next(f for f in skill.files if f.uri == skill.uri)
+        assert (md.name, md.description) == ("demo", "A demo.")
         by_uri = {f.uri: f for f in skill.files}
         assert set(by_uri) == {"skill://demo/SKILL.md", "skill://demo/refs/a.md"}
         ref = by_uri["skill://demo/refs/a.md"]
@@ -65,39 +67,73 @@ class TestLoad(TestTemplate):
         with pytest.raises(SkillError):
             parse_frontmatter("# no frontmatter\n")
 
-    def test_shipped_skills_load(self):
+    def test_fence_must_be_a_whole_line(self):
+        # ``---x: 1`` is YAML content, not the closing fence.
+        assert parse_frontmatter("---\nname: a\n---x: 1\n---\n") == {
+            "name": "a",
+            "---x": 1,
+        }
+        assert parse_frontmatter("---\n---\nbody\n") == {}
+
+    @pytest.mark.parametrize("value", ["2026-01-01", "1.10", "!!set {a}"])
+    def test_frontmatter_must_survive_json_exactly(self, value):
+        # Hosts compare the listed frontmatter with the file field by field;
+        # a date or a float that YAML rewrites would never match.
+        with pytest.raises(SkillError, match="JSON-compatible"):
+            parse_frontmatter(f"---\nname: a\nv: {value}\n---\n")
+
+    def test_crlf_and_bom_are_parsed_from_the_served_text(self, tmp_path):
+        d = tmp_path / "demo"
+        d.mkdir()
+        raw = "\ufeff---\r\nname: demo\r\ndescription: x\r\n---\r\nbody\r\n"
+        (d / "SKILL.md").write_bytes(raw.encode())
+        skill = load_skill(d)
+        assert skill.files[0].text == raw  # served exactly as stored
+        assert skill.files[0].size == len(raw.encode())
+
+    def test_shipped_skills_list_every_file_once(self):
         skills = load_skills()
         assert skills, f"no skills under {SKILLS_DIR}"
-        assert all(s.files[0].uri.startswith("skill://") for s in skills)
+        for skill in skills:
+            uris = [f.uri for f in skill.files]
+            assert len(uris) == len(set(uris))
+            assert uris.count(skill.uri) == 1
+
+    def test_wheel_ships_the_skills(self):
+        pyproject = tomllib.loads(
+            (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+        )
+        include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"][
+            "force-include"
+        ]
+        assert include.get("skills") == "mcp_server/_skills"
 
 
-# Tool-shaped tokens a skill mentions: backticked snake_case names and the
-# "name" of tools/call examples.
-_BACKTICKED = re.compile(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b")
+# Tool references in a skill: backticked snake_case names and the "name" of a
+# tools/call example. Snake_case identifiers that are not tools go here.
+_BACKTICKED = re.compile(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`")
 _JSON_NAME = re.compile(r'"name"\s*:\s*"([a-z][a-z0-9_]*)"')
+_NOT_TOOLS = frozenset({"user_id"})
 
 
 class TestDrift(TestTemplate):
-    def test_skills_only_name_registered_tools(self):
+    def test_skills_only_name_exposed_tools(self):
         """A skill that tells the model to call a tool that doesn't exist (renamed,
-        removed, or never shipped) fails here, not in a user's chat."""
-        registered = {e.name for e in get_registry()}
+        removed, misspelled) fails here, not in a user's chat."""
         exposed = {e.name for e in llm_tool_surface()}
-        # Only tokens under a namespace some real tool uses count as tool
-        # names, so prose like `user_id` isn't mistaken for one.
-        namespaces = {name.split("_", 1)[0] for name in registered}
-        problems = []
-        for skill in load_skills():
-            for f in skill.files:
-                mentioned = set(_JSON_NAME.findall(f.text)) | set(
-                    _BACKTICKED.findall(f.text)
-                )
-                for token in sorted(mentioned):
-                    if token.split("_", 1)[0] in namespaces and token not in exposed:
-                        problems.append(f"{f.uri}: {token}")
+        assert exposed, "empty tool surface: the check would pass vacuously"
+        problems = [
+            f"{f.uri}: {token}"
+            for skill in load_skills()
+            for f in skill.files
+            for token in sorted(
+                set(_JSON_NAME.findall(f.text)) | set(_BACKTICKED.findall(f.text))
+            )
+            if token not in exposed and token not in _NOT_TOOLS
+        ]
         assert not problems, (
-            "Skills name tools the MCP server does not expose:\n  "
-            + "\n  ".join(problems)
+            "Skills name tools the MCP server does not expose (or add a "
+            "non-tool identifier to _NOT_TOOLS):\n  " + "\n  ".join(problems)
         )
 
 
@@ -129,7 +165,7 @@ class TestWire(TestTemplate):
                 assert len(text) == item["size"]
             md = modern.request("resources/read", {"uri": entry["uri"]})["contents"][0]
             assert md["mimeType"] == "text/markdown"
-            assert parse_frontmatter(md["text"])[0] == entry["frontmatter"]
+            assert parse_frontmatter(md["text"]) == entry["frontmatter"]
 
     def test_unknown_skill_is_invalid_params(self):
         with _wire_client("u-skills") as (client, key):

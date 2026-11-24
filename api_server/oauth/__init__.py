@@ -11,7 +11,8 @@ every grant a user has, which AuthKit-issued MCP tokens cannot do.
     provider.py   the MCP SDK provider: codes, exchange, refresh, revocation
     storage.py    hashed code/token rows, rotation, ``revoke_user_grants``
     flow.py       consent page and WorkOS sign-in (browser leg)
-    cimd.py       Client ID Metadata Document fetch and validation
+    cimd.py       Client ID Metadata Document resolver: cache tiers, fetch caps
+    cimd_document.py  the document's URL shape, fetch and validation
     signing.py    signed, short-lived values carried through the browser
 """
 

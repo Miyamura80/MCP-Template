@@ -11,9 +11,9 @@ not a security control: whoever holds the token can also edit the URL.
 
 - ``dangerous_tools`` (default ``true``): ``false`` hides ``risk="dangerous"``
   tools from ``tools/list`` and refuses calls to them.
-- ``approval``: a requested approval mode. Parsed and validated now; it takes
-  effect once approval gating lands, and can only tighten the dashboard
-  setting, never loosen it.
+- ``approval``: a requested approval mode for dangerous tools. It can only
+  tighten the user's dashboard setting, never loosen it
+  (``services/approvals_svc.py``).
 
 Unknown parameters are ignored so a client's own query parameters (or future
 flags on an older server) don't break the connection.
@@ -21,13 +21,9 @@ flags on an older server) don't break the connection.
 
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import Literal, get_args
 from urllib.parse import parse_qs
 
-# Loosest to strictest. Order matters: the effective mode is the stricter of
-# the dashboard setting and the URL flag.
-ApprovalMode = Literal["automatic", "agent", "elicitation", "browser"]
-APPROVAL_MODES: tuple[ApprovalMode, ...] = get_args(ApprovalMode)
+from models.approvals import APPROVAL_MODES, ApprovalMode
 
 _TRUE = frozenset({"true", "1", "yes", "on"})
 _FALSE = frozenset({"false", "0", "no", "off"})
