@@ -107,9 +107,9 @@ What it does (`api_server/oauth/`):
   revokes its whole grant, and a grant ends 90 days after sign-in.
 - `/revoke` follows RFC 7009 for public clients.
 - `api_server.oauth.storage.revoke_user_grants(user_id)` revokes every token a
-  user holds and refuses any sign-in already under way. Call it from your own
-  sign-out (for example a `mutating=True` service); the template does not ship
-  one.
+  user holds and refuses any sign-in already under way. The dashboard's
+  **Sign out of all apps** button (`POST /dashboard/sign-out-everywhere`) calls
+  it and ends the browser session; every connected app must sign in again.
 
 Setup:
 

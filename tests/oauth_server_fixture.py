@@ -95,7 +95,6 @@ class OAuthServerCase(TestTemplate):
 
         cimd.clear_cache()
         self._patches = [
-            patch("api_server.oauth.provider.use_db_session", _db),
             patch("api_server.oauth.storage.use_db_session", _db),
             patch.object(global_config, "MCP_AUTH_MODE", "self"),
             patch.object(global_config, "MCP_PUBLIC_URL", MCP_URL),

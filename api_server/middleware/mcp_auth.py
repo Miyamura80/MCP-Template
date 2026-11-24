@@ -20,7 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 import api_server.oauth as oauth_server
 from api_server.auth.api_key_auth import validate_api_key
 from api_server.auth.authkit_auth import (
-    _resolve_scopes,
+    resolve_token_scopes,
     resource_metadata_url,
     verify_authkit_token,
 )
@@ -129,7 +129,7 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
         access = lookup_access_token(credentials.strip())
         if access is None or not access.subject:
             return None
-        scopes = _resolve_scopes(" ".join(access.scopes))
+        scopes = resolve_token_scopes(" ".join(access.scopes))
         if scopes is None:
             return None
         return AuthenticatedUser(

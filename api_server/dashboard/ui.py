@@ -29,6 +29,18 @@ def csrf_field(session: DashboardSession) -> str:
     return f"<input type='hidden' name='csrf' value='{esc(session.csrf)}'>"
 
 
+def _sign_out(session: DashboardSession) -> str:
+    """Sign out of this browser; with the built-in OAuth server, of every app."""
+    if global_config.MCP_AUTH_MODE == "self":
+        action, label = "/dashboard/sign-out-everywhere", "Sign out of all apps"
+    else:
+        action, label = "/dashboard/logout", "Sign out"
+    return (
+        f"<form method='post' action='{action}'>{csrf_field(session)}"
+        f"<button class='danger' type='submit'>{label}</button></form>"
+    )
+
+
 def _topbar(session: DashboardSession, active: str) -> str:
     brand = esc(global_config.branding.title)
     tabs = "".join(
@@ -39,7 +51,8 @@ def _topbar(session: DashboardSession, active: str) -> str:
         "<header class='topbar'><div class='topbar-in'>"
         f"<a class='brand' href='/dashboard'><span class='mark'>{brand[:1]}</span>"
         f"{brand}</a><nav class='tabs' aria-label='Dashboard'>{tabs}</nav>"
-        f"<span class='who'>{esc(session.user_id)}</span></div></header>"
+        f"<span class='who'>{esc(session.user_id)}</span>"
+        f"{_sign_out(session)}</div></header>"
     )
 
 

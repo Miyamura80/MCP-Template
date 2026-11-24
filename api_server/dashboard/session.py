@@ -305,3 +305,24 @@ def logout(request: Request, csrf: str = Form(default="")) -> Response:
             _cookie("session"), path="/", secure=_secure(), httponly=True
         )
     return response
+
+
+@router.post("/sign-out-everywhere")
+def sign_out_everywhere(
+    session: Annotated[DashboardSession, Depends(require_csrf)],
+) -> Response:
+    """End this browser's session and, with the built-in OAuth server, every
+    MCP app's grant (``revoke_user_grants``): their next /mcp request gets a 401
+    and their refresh fails, so each must sign in again.
+    """
+    if global_config.MCP_AUTH_MODE == "self":
+        # Imported here so the default authkit mode never loads OAuth storage.
+        from api_server.oauth.storage import revoke_user_grants  # noqa: PLC0415
+
+        revoked = revoke_user_grants(session.user_id)
+        log.info("dashboard: signed out everywhere, revoked {} tokens", revoked)
+    response = RedirectResponse("/dashboard/login", status_code=303)
+    response.delete_cookie(
+        _cookie("session"), path="/", secure=_secure(), httponly=True
+    )
+    return response

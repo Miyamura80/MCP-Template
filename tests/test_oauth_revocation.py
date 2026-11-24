@@ -3,12 +3,17 @@
 from unittest.mock import ANY, MagicMock, patch
 from urllib.parse import parse_qs, urlsplit
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from api_server.dashboard import session as dashboard_session
+from api_server.dashboard.ui import dashboard_page
 from api_server.middleware.mcp_auth import _authenticate
 from api_server.oauth.storage import revoke_user_grants
 from db.models.oauth import OAuthCode, lock_user
 from tests.oauth_server_fixture import (
+    ISSUER,
     USER_ID,
     OAuthServerCase,
     bearer_scope,
@@ -64,12 +69,51 @@ class TestRevokeUserGrants(OAuthServerCase):
         code, verifier = self._sign_in()
         first = self._exchange(code, verifier)
         self._token(grant_type="refresh_token", refresh_token=first["refresh_token"])
-        with patch("api_server.oauth.provider.lock_user") as locked:
+        with patch("api_server.oauth.storage.lock_user") as locked:
             reuse = self._token(
                 grant_type="refresh_token", refresh_token=first["refresh_token"]
             )
         assert reuse["status"] == 400
         locked.assert_any_call(ANY, USER_ID)
+
+
+class TestSignOutEverywhere(OAuthServerCase):
+    """The dashboard's "Sign out of all apps" is the entry point for sign-out."""
+
+    def _dashboard(self) -> tuple[TestClient, str]:
+        app = FastAPI()
+        app.include_router(dashboard_session.router)
+        dashboard_session.install(app)
+        client = TestClient(app, base_url=ISSUER, follow_redirects=False)
+        csrf = "csrf-token"
+        cookie = dashboard_session._serializer(dashboard_session._SESSION_SALT).dumps(
+            {"uid": USER_ID, "csrf": csrf}
+        )
+        client.cookies.set(dashboard_session._cookie("session"), cookie)
+        return client, csrf
+
+    def test_revokes_every_grant_and_ends_the_session(self):
+        code, verifier = self._sign_in()
+        pair = self._exchange(code, verifier)
+        client, csrf = self._dashboard()
+        response = client.post("/dashboard/sign-out-everywhere", data={"csrf": csrf})
+        assert response.status_code == 303
+        assert response.headers["location"] == "/dashboard/login"
+        assert "max-age=0" in response.headers["set-cookie"].lower()
+        assert _authenticate(bearer_scope(pair["access_token"])) is None
+
+    def test_requires_the_csrf_token(self):
+        code, verifier = self._sign_in()
+        pair = self._exchange(code, verifier)
+        client, _ = self._dashboard()
+        response = client.post("/dashboard/sign-out-everywhere", data={"csrf": "x"})
+        assert response.status_code == 403
+        assert _authenticate(bearer_scope(pair["access_token"])) is not None
+
+    def test_dashboard_offers_it_in_self_mode(self):
+        session = dashboard_session.DashboardSession(user_id=USER_ID, csrf="c")
+        page = dashboard_page(session, active="", title="t", eyebrow="e", body="")
+        assert "/dashboard/sign-out-everywhere" in bytes(page.body).decode()
 
 
 class TestUserLock(TestTemplate):
