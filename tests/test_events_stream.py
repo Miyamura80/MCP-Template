@@ -166,8 +166,15 @@ class TestStream(TestTemplate):
         assert _frames(frames, "notifications/events/active")[0]["truncated"] is True
         assert _frames(frames, _EVENT) == []
 
-    def test_revoked_key_terminates_the_stream(self):
-        with _wire_client("u-rev") as (client, key), _short_streams(max_seconds=2.0):
+    def test_revoked_key_terminates_the_stream(self, tmp_path):
+        # A file DB: the revoke runs on its own thread while the stream polls,
+        # and the shared in-memory connection would let the stream's session
+        # roll the revoke back before it commits.
+        db_file = str(tmp_path / "rev.db")
+        with (
+            _wire_client("u-rev", db_file) as (client, key),
+            _short_streams(max_seconds=2.0),
+        ):
 
             def revoke():
                 time.sleep(0.3)

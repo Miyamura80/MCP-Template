@@ -48,15 +48,26 @@ _PROTOCOL_VERSION = "2025-03-26"
 
 
 @contextmanager
-def _patch_db():
-    """Wire an in-memory SQLite into db.engine for the duration of the block."""
+def _patch_db(db_file: str | None = None):
+    """Wire a throwaway SQLite into db.engine for the duration of the block.
+
+    The default in-memory database shares ONE connection (StaticPool) across
+    every session and thread, so a session closing on one thread rolls back
+    another thread's uncommitted write. Tests that write from a second thread
+    while the app is serving pass ``db_file`` to get a connection per thread.
+    """
     orig_engine = db_engine._engine
     orig_session = db_engine._SessionLocal
-    eng = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if db_file is None:
+        eng = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        eng = create_engine(
+            f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
+        )
     Base.metadata.create_all(eng)
     session_factory = sessionmaker(bind=eng, autoflush=False, expire_on_commit=False)
     db_engine._engine = eng
@@ -66,6 +77,7 @@ def _patch_db():
     finally:
         db_engine._engine = orig_engine
         db_engine._SessionLocal = orig_session
+        eng.dispose()
 
 
 def _read_sse_first_message(response) -> dict:
@@ -180,12 +192,12 @@ class _McpSession:
 
 
 @contextmanager
-def _wire_client(user_id: str):
+def _wire_client(user_id: str, db_file: str | None = None):
     """Yield ``(TestClient, api_key)`` backed by a fresh DB and API key."""
     with patch("api_server.middleware.mcp_auth.global_config") as mock_config:
         mock_config.WORKOS_CLIENT_ID = None
         mock_config.WORKOS_AUTHKIT_DOMAIN = None
-        with _patch_db() as session_factory:
+        with _patch_db(db_file) as session_factory:
             with session_factory() as s:
                 raw_key, _ = create_api_key(s, user_id=user_id, scopes=["*"])
 
