@@ -26,10 +26,16 @@ log "API key: ${API_KEY:0:12}..."
 # hitting Google, so the gmail_thread_render scenario can render the reader iframe
 # with no linked account / OAuth / network. Hard-refused under DEV_ENV=prod; here
 # DEV_ENV=dev so it's active. No Gmail tool ever reaches Google in this stack.
+# A dedicated Fernet key for the e2e DB, so a developer's .env (possibly unset or
+# malformed) never decides whether webhook secrets / tokens can be encrypted.
+E2E_ENC_KEY_FILE="$E2E_HOME/enc_key.txt"
+[ -s "$E2E_ENC_KEY_FILE" ] || (cd "$REPO" && uv run python -c \
+  "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") > "$E2E_ENC_KEY_FILE"
+E2E_ENC_KEY="$(cat "$E2E_ENC_KEY_FILE")"
 if ! is_up_http "$SRV_URL/health"; then
   log "template server down -> starting mymcp-serve"
   start_detached mcp-server \
-    "cd $REPO && exec env DEV_ENV=dev BACKEND_DB_URI=$BACKEND_DB_URI SENTRY_DSN= GMAIL_PUBSUB_TOPIC=projects/mcp-e2e/topics/gmail-e2e GMAIL_FAKE_BACKEND=1 uv run mymcp-serve"
+    "cd $REPO && exec env DEV_ENV=dev BACKEND_DB_URI=$BACKEND_DB_URI GOOGLE_TOKEN_ENC_KEY=$E2E_ENC_KEY SENTRY_DSN= GMAIL_PUBSUB_TOPIC=projects/mcp-e2e/topics/gmail-e2e GMAIL_FAKE_BACKEND=1 uv run mymcp-serve"
   wait_http "$SRV_URL/health" 90 1 && log "server healthy" || { log "FATAL server"; tail -12 "$E2E_HOME/mcp-server.log"; exit 1; }
 fi
 

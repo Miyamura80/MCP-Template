@@ -19,14 +19,25 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
 GOOSE_REPO_URL="${GOOSE_REPO_URL:-https://github.com/block/goose.git}"
+GOOSE_REF="${GOOSE_REF:-v1.60.2}"  # last release verified with this harness
 ELECTRON_BASE_URL="${ELECTRON_BASE_URL:-https://github.com/electron/electron/releases/download}"
 export ELECTRON_MIRROR="${ELECTRON_BASE_URL%/}/"
 
 log "E2E_HOME=$E2E_HOME  GOOSE_SRC=$GOOSE_SRC"
 
+# ---- 0. pin goose to a known-good release (GOOSE_REF) ----
+# Goose main moves fast (engines bumps, bundle renames, MCP-App bridge changes);
+# building an unpinned HEAD made this harness break without any change here.
+# Switching GOOSE_REF re-checks-out the tree and invalidates every build product.
+if [ -d "$GOOSE_SRC/.git" ] && [ "$(cat "$E2E_HOME/goose_ref" 2>/dev/null)" != "$GOOSE_REF" ]; then
+  log "goose ref changed -> $GOOSE_REF; re-checking out and invalidating build outputs"
+  ( cd "$GOOSE_SRC" && git fetch -q --depth 1 origin tag "$GOOSE_REF" && git checkout -q -f "$GOOSE_REF" )
+  rm -rf "$GOOSE_BINARY" "$DESK/.vite" "$GOOSE_SRC/ui/node_modules"
+fi
+
 # ---- 1. clone + build the goose CLI (the backend Goose desktop spawns as 'goose serve') ----
 if [ ! -x "$GOOSE_BINARY" ]; then
-  [ -d "$GOOSE_SRC/.git" ] || { log "cloning goose"; git clone --depth 1 "$GOOSE_REPO_URL" "$GOOSE_SRC"; }
+  [ -d "$GOOSE_SRC/.git" ] || { log "cloning goose $GOOSE_REF"; git clone --depth 1 --branch "$GOOSE_REF" "$GOOSE_REPO_URL" "$GOOSE_SRC"; }
   log "building goose CLI (portable-default: no local-inference/keyring) - ~5 min"
   ( cd "$GOOSE_SRC" && cargo build -p goose-cli --bin goose --no-default-features --features portable-default )
   log "goose CLI built: $($GOOSE_BINARY --version)"
@@ -131,17 +142,20 @@ if [ ! -x "$ELECTRON_BIN" ]; then
 fi
 log "Electron: $($ELECTRON_BIN --no-sandbox --version 2>/dev/null | tail -1)"
 
-# ---- 5. build the dev main-process bundle (.vite/build/main.js) that Playwright launches ----
-if [ ! -f "$DESK/.vite/build/main.js" ]; then
+# ---- 5. build the dev main-process bundle (.vite/build/main.{js,cjs}) that Playwright launches ----
+# Goose >= 1.61 emits main.cjs; older builds emit main.js. Accept either.
+main_bundle() { ls "$DESK"/.vite/build/main.cjs "$DESK"/.vite/build/main.js 2>/dev/null | head -1; }
+if [ -z "$(main_bundle)" ]; then
   log "building desktop bundles via electron-forge start (dev), then stopping"
   ( cd "$DESK" && node scripts/i18n-compile.js >/dev/null 2>&1 || true )
   xvfb-run -a bash -c "cd '$DESK' && ELECTRON_DISABLE_SANDBOX=1 timeout 180 ../node_modules/.bin/electron-forge start -- --no-sandbox --disable-gpu >'$E2E_HOME/forge_build.log' 2>&1" &
   FPID=$!
   # wait (bounded) for the bundle to appear, then stop forge
-  for _ in $(seq 1 90); do [ -f "$DESK/.vite/build/main.js" ] && break; sleep 2; done
+  for _ in $(seq 1 90); do [ -n "$(main_bundle)" ] && break; sleep 2; done
   pkill -9 -P "$FPID" 2>/dev/null || true; pkill -9 -f 'electron-forge' 2>/dev/null || true; pkill -9 -f 'dist/electron' 2>/dev/null || true
-  [ -f "$DESK/.vite/build/main.js" ] || { echo "FATAL: main.js not built (see $E2E_HOME/forge_build.log)"; exit 1; }
+  [ -n "$(main_bundle)" ] || { echo "FATAL: main bundle not built (see $E2E_HOME/forge_build.log)"; exit 1; }
 fi
-log "desktop main bundle ready: $DESK/.vite/build/main.js"
+log "desktop main bundle ready: $(main_bundle)"
 
+echo "$GOOSE_REF" > "$E2E_HOME/goose_ref"
 log "SETUP COMPLETE - now: bash up.sh && bash run_test.sh settings_render"

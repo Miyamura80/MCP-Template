@@ -13,7 +13,7 @@
 // Writes $E2E_HOME/pw_result_<name>.json for the oracle (mcp_probe.py) and a
 // screenshot. Exits non-zero on any drive/render failure so run_test.sh aborts
 // before grading (a no-op run must FAIL, never fall through to a stale verdict).
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const PW = process.env.PLAYWRIGHT || "playwright";
@@ -33,6 +33,10 @@ writeFileSync(CURRENT, JSON.stringify(sc)); // hand the scenario to the running 
 
 const expect = sc.expect || {};
 const want = expect.dom_contains || [];
+// Text that must NOT appear in the app iframe. Default catches the host failing an
+// app -> server call (ext-apps renders it as "MCP error <code>: ..."), which a
+// dom_contains-only check silently passes. A scenario can override with [].
+const absent = expect.dom_absent ?? ["MCP error"];
 const log = (...a) => console.log("[scenario]", ...a);
 
 const MOCK_PORT = process.env.MOCK_PORT || "8410";
@@ -84,18 +88,19 @@ async function findAppFrame(app) {
   return null;
 }
 
+// Goose >= 1.61 builds main.cjs; older builds main.js.
+const mainBundle = ["main.cjs", "main.js"]
+  .map((f) => `${GOOSE_SRC}/ui/desktop/.vite/build/${f}`)
+  .find((f) => existsSync(f));
+if (!mainBundle) { console.log("DRIVE: ERROR goose main bundle not built (run setup.sh)"); process.exit(1); }
 const app = await electron.launch({
   executablePath: `${GOOSE_SRC}/ui/node_modules/electron/dist/electron`,
-  args: [`${GOOSE_SRC}/ui/desktop/.vite/build/main.js`, "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+  args: [mainBundle, "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
   env, timeout: 90000,
-  // Opt-in screen recording of every Goose window (run_test.sh sets this when
-  // E2E_VIDEO=1 and converts the result to mp4). Written when the app closes.
-  ...(process.env.E2E_VIDEO_DIR
-    ? { recordVideo: { dir: process.env.E2E_VIDEO_DIR, size: { width: 1280, height: 800 } } }
-    : {}),
 });
-// When recording, hold on each milestone so the video is watchable.
-const linger = (w) => (process.env.E2E_VIDEO_DIR ? w.waitForTimeout(2500).catch(() => {}) : Promise.resolve());
+// When run_test.sh is recording the display (E2E_VIDEO=1), hold on each
+// milestone so the video is watchable.
+const linger = (w) => (process.env.E2E_VIDEO === "1" ? w.waitForTimeout(2500).catch(() => {}) : Promise.resolve());
 let ok = false;
 try {
   let win = await app.firstWindow();
@@ -132,8 +137,14 @@ try {
     const body = await frame.locator("body").innerText({ timeout: 4000 }).catch(() => "");
     result.matched = want.filter((t) => body.includes(t));
     result.missing = want.filter((t) => !body.includes(t));
-    result.rendered = result.matched.length === want.length && want.length > 0;
-    log(`app iframe found; matched [${result.matched}] missing [${result.missing}]`);
+    // Give mount-time server calls (e.g. settings.get) a moment to settle, so a
+    // host-side rejection has rendered before we check for it.
+    await win.waitForTimeout(1500);
+    const settled = await frame.locator("body").innerText({ timeout: 4000 }).catch(() => body);
+    result.forbidden = absent.filter((t) => settled.includes(t));
+    result.rendered = result.matched.length === want.length && want.length > 0 && !result.forbidden.length;
+    log(`app iframe found; matched [${result.matched}] missing [${result.missing}]` +
+      (result.forbidden.length ? ` FORBIDDEN present [${result.forbidden}]` : ""));
     // Screenshot the app iframe's owning window so the shot shows the rendered app.
     const ownWin = app.windows().find((w) => w.frames().includes(frame)) || win;
     if (shot) { await ownWin.screenshot({ path: shot }); log("screenshot ->", shot); }
@@ -182,7 +193,9 @@ try {
           if (!result.interact_missing.length && !result.interact_sel_missing.length) break;
           await win.waitForTimeout(700);
         }
+        result.forbidden = absent.filter((t) => ibody.includes(t));
         result.interacted =
+          !result.forbidden.length &&
           (wantI.length > 0 || wantSel.length > 0) &&
           result.interact_missing.length === 0 &&
           result.interact_sel_missing.length === 0;
@@ -209,7 +222,7 @@ try {
   writeResult();
   ok = result.rendered && (!interact || result.interacted);
   const why = !result.rendered
-    ? "app not rendered / DOM mismatch"
+    ? (result.forbidden && result.forbidden.length ? `app shows forbidden text [${result.forbidden}]` : "app not rendered / DOM mismatch")
     : interact && !result.interacted
       ? "interaction did not re-render"
       : interact ? "app rendered + interaction re-rendered" : "app rendered";
