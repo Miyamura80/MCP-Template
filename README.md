@@ -1,7 +1,7 @@
 # mcp-template
 
 <p align="center">
-  <img src="media/banner.png" alt="2" width="400">
+  <img src="media/banner.png" alt="mcp-template" width="400">
 </p>
 
 <p align="center">
@@ -9,14 +9,12 @@
 </p>
 
 <p align="center">
-  <a href="#key-features">Key Features</a> •
-  <a href="#architecture">Architecture</a> •
+  <a href="#how-it-works">How it works</a> •
   <a href="#quick-start">Quick Start</a> •
-  <a href="#cli-usage">CLI Usage</a> •
-  <a href="#adding-commands">Adding Commands</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="manual_docs/deploy.md">Deploy</a> •
-  <a href="#credits">Credits</a>
+  <a href="#add-a-feature">Add a feature</a> •
+  <a href="#mcp-apps">MCP Apps</a> •
+  <a href="#stack">Stack</a> •
+  <a href="manual_docs/deploy.md">Deploy</a>
 </p>
 
 <p align="center">
@@ -36,199 +34,72 @@
 
 ---
 
-## Agent Prompt
+## How it works
 
-> Copy and paste this into your AI coding agent (Claude Code, Cursor, Copilot, etc.) to install:
+<p align="center">
+  <img src="media/architecture.svg" alt="One @service ships as a CLI command, an MCP tool and an HTTP route" width="880">
+</p>
 
-```text
-Install the CLI and download the gmail-mcp skill:
-
-pip install mcp-template
-
-curl -fsSL https://raw.githubusercontent.com/Miyamura80/MCP-Template/main/scripts/install-skills.sh -o install-skills.sh
-bash install-skills.sh && rm install-skills.sh
-```
-
-The official **gmail-mcp** agent skill is self-published on
-[skills.sh](https://skills.sh/Miyamura80/MCP-Template). Install it directly with:
-
-```bash
-npx skills add Miyamura80/MCP-Template
-```
-
-The skill's source of truth lives in [`skills/gmail-mcp/SKILL.md`](skills/gmail-mcp/SKILL.md);
-`make sync-skills` mirrors it to the landing page's
-`/.well-known/agent-skills/` discovery tree (digest-pinned in `index.json`).
-
-## App Distribution
-
-- MCP server with OAuth
-- Claude connectors and ChatGPT apps
-- APIs and SDKs
-- Chat interfaces like iMessage and WhatsApp
-- A dashboard that uses the same MCP layer
-- Open source
-
-## Key Features
-
-| Feature | Stack |
-|---|---|
-| CLI (auto-discovery commands, global flags, shell completions, self-update) | Typer |
-| MCP server (streamable HTTP at `/mcp`, services auto-registered as tools; stdio supported for local dev) | MCP Python SDK 2.x (`MCPServer`) |
-| HTTP API server (also hosts `/mcp`) | FastAPI + Uvicorn |
-| Auth | WorkOS + API keys |
-| Payments | Stripe subscriptions + x402 sell-side paywall (price a tool with `@service(price=...)`; agents pay per call in stablecoins, Cloudflare Wallets / x402 ecosystem) |
-| Database + migrations | SQLAlchemy + Alembic |
-| Config (YAML + `.env`) | Pydantic-settings |
-| LLM inference + observability | DSPY + LiteLLM + LangFuse |
-| Testing | pytest + `TestTemplate` |
-| Lint / type / dead-code | Ruff + Vulture + ty + import-linter |
-| Pre-commit (folder size, ai-writing, agent-config sync) | prek |
-| Telemetry | Anonymous, opt-out |
-
-## Architecture
-
-One codebase, three interfaces. Write business logic once in `services/` and it ships as a CLI subcommand, an MCP tool, and an HTTP route - same Pydantic input/output contract everywhere.
-
-```
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│ src/cli/app  │  │ mcp_server/  │  │ api_server/  │   transport / interface
-│  (Typer)     │  │ (MCPServer)  │  │ (FastAPI)    │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                 │                 │
-       └─────────────────┼─────────────────┘
-                         ▼
-                 ┌───────────────┐
-                 │  services/    │   pure @service functions
-                 │  @service     │   (transport-agnostic)
-                 └───────┬───────┘
-                         ▼
-                 ┌───────────────┐
-                 │  models/      │   Pydantic I/O contracts
-                 └───────┬───────┘
-                         ▼
-        ┌────────────┬───────┬────────────┬─────────────┐
-        │ common/    │ db/   │ utils/llm/ │ src/utils/  │   shared infra
-        │ (config)   │ (ORM) │ (DSPY)     │ (logs/theme)│
-        └────────────┴───────┴────────────┴─────────────┘
-```
-
-### MCP UI (optional)
-
-Need elicitation, image output, or an iframe dashboard for an MCP tool? Add an opt-in **enhancer** in `mcp_server/enhancers/`. Enhancers wrap a service for the MCP transport only - the pure service stays untouched and CLI/API consumers are unaffected.
-
-See [`mcp_server/MCP_UI_ARCHITECTURE.md`](mcp_server/MCP_UI_ARCHITECTURE.md) for the full design.
+Write business logic once as a `@service` in `services/`. It is auto-registered as a CLI subcommand, an MCP tool (streamable HTTP at `/mcp`), and an authenticated `POST /api/v1/services/<name>` route, all sharing one Pydantic contract.
 
 ## Quick Start
 
 ```bash
-make onboard              # interactive setup (rename, deps, env, hooks)
-uv sync                   # install deps
-uv run mymcp --help       # see all CLI commands
-uv run mymcp greet Alice  # run a command
-uv run mymcp init my_command  # scaffold a new command
-
-uv run mymcp-serve        # start the server (HTTP API + MCP at /mcp on one port)
-uv run mymcp-mcp          # legacy: stdio MCP only, for local Claude Desktop / dev
+make onboard              # interactive setup: rename, deps, env, hooks
+uv run mymcp greet Alice  # CLI
+uv run mymcp-serve        # HTTP API + MCP at /mcp, one port
 ```
 
-## Deploy
+Deploy in one click to [Railway](https://railway.com/deploy/gmailmcp) or [Render](https://render.com/deploy?repo=https://github.com/Miyamura80/MCP-Template) (backend + Postgres, migrations run automatically): [deploy docs](manual_docs/deploy.md).
 
-One-click deploy to Railway or Render (backend + managed Postgres, migrations run automatically). See **[deployment docs](manual_docs/deploy.md)** for the per-platform setup, the Railway template variable map, and OAuth/secret wiring.
+**Agent install** (paste into Claude Code, Cursor, Copilot...):
 
-## CLI Usage
-
-Global flags go **before** the subcommand:
-
-| Flag | Short | Description |
-|---|---|---|
-| `--verbose` | `-v` | Increase output verbosity |
-| `--quiet` | `-q` | Suppress non-essential output |
-| `--debug` | | Show full tracebacks on error |
-| `--format` | `-f` | Output format: `table`, `json`, `plain` |
-| `--dry-run` | | Preview actions without executing |
-| `--version` | `-V` | Print version and exit |
-
-```bash
-uv run mymcp --format json config show     # JSON output
-uv run mymcp --dry-run greet Bob           # preview without executing
-uv run mymcp --verbose greet Alice         # detailed output
+```text
+pip install mcp-template
+npx skills add Miyamura80/MCP-Template   # gmail-mcp skill, published on skills.sh
 ```
 
-## Adding Commands
+## Add a feature
 
-Drop a Python file in `src/cli/commands/` and it is auto-discovered.
-
-**Single command** - export a `main()` function:
+<p align="center">
+  <img src="media/add-feature.svg" alt="Define models, write a @service, and the CLI, MCP and API pick it up" width="880">
+</p>
 
 ```python
-# src/cli/commands/hello.py
-from typing import Annotated
-import typer
-
-
-def main(name: Annotated[str, typer.Argument(help="Who to greet.")]) -> None:
-    """Say hello."""
-    typer.echo(f"Hello, {name}!")
+# services/greet.py
+@service(
+    name="greet",
+    description="Greet a user by name",
+    input_model=GreetInput,
+    output_model=GreetResult,
+)
+def greet(input: GreetInput) -> GreetResult:
+    return GreetResult(message=f"Hello, {input.name}!")
 ```
 
-```bash
-uv run mymcp hello World   # Hello, World!
-```
+Pass `mutating=True` for side effects (REST then requires an `Idempotency-Key`), or `price="0.01"` to charge per call over x402. Standalone CLI commands drop into `src/cli/commands/` and are auto-discovered (`uv run mymcp init my_command` scaffolds one).
 
-**Subcommand group** - export `app = typer.Typer()`:
+## MCP Apps
 
-```python
-# src/cli/commands/db.py
-import typer
+<p align="center">
+  <img src="media/mcp-apps.svg" alt="An enhancer adds elicitation, images or an iframe app on MCP only" width="880">
+</p>
 
-app = typer.Typer()
+An opt-in **enhancer** (`mcp_server/enhancers/`) gives one tool MCP-only extras: elicitation, image output, or an interactive [MCP App](https://github.com/modelcontextprotocol/ext-apps) rendered in the chat. The service, CLI and API stay unchanged. Design: [`MCP_UI_ARCHITECTURE.md`](mcp_server/MCP_UI_ARCHITECTURE.md).
 
+## Stack
 
-@app.command()
-def migrate() -> None:
-    """Run migrations."""
-    ...
-```
+| | |
+|---|---|
+| Interfaces | Typer CLI · MCP Python SDK 2.x · FastAPI |
+| Auth & billing | WorkOS + API keys · Stripe · x402 pay-per-call |
+| Data & config | SQLAlchemy + Alembic · pydantic-settings (YAML + `.env`) |
+| LLM | DSPY + LiteLLM + LangFuse |
+| Quality | pytest · Ruff · ty · Vulture · import-linter · prek |
 
-```bash
-uv run mymcp db migrate
-```
+CLI global flags go before the subcommand: `-v`, `-q`, `--debug`, `-f table|json|plain`, `--dry-run`, `-V`. Config: `global_config.<key>` in code, `uv run mymcp config show|get|set` from the shell ([docs](manual_docs/configuration.md)). Telemetry is anonymous and opt-out.
 
-Or scaffold with: `uv run mymcp init my_command --desc "Does something"`.
-
-## Configuration
-
-```python
-from common import global_config
-
-# Access config values from common/global_config.yaml
-global_config.example_parent.example_child
-
-# Access secrets from .env
-global_config.OPENAI_API_KEY
-```
-
-CLI config inspection:
-
-```bash
-uv run mymcp config show                           # full config
-uv run mymcp config get llm_config.cache_enabled   # single value
-uv run mymcp config set logging.verbose false      # write override
-```
-
-[Full configuration docs](manual_docs/configuration.md)
-
-## Credits
-
-This software uses the following tools:
-- [Cursor: The AI Code Editor](https://cursor.com)
-- [uv](https://docs.astral.sh/uv/)
-- [Typer: CLI framework](https://typer.tiangolo.com/)
-- [Rich: Terminal formatting](https://rich.readthedocs.io/)
-- [prek: Rust-based pre-commit framework](https://github.com/j178/prek)
-- [DSPY: Pytorch for LLM Inference](https://dspy.ai/)
-- [LangFuse: LLM Observability Tool](https://langfuse.com/)
+Built with [uv](https://docs.astral.sh/uv/), [Typer](https://typer.tiangolo.com/), [Rich](https://rich.readthedocs.io/), [prek](https://github.com/j178/prek), [DSPY](https://dspy.ai/), [LangFuse](https://langfuse.com/) and [Cursor](https://cursor.com). Diagrams are generated by [`scripts/gen_readme_diagrams.py`](scripts/gen_readme_diagrams.py).
 
 ## About the Core Contributors
 
