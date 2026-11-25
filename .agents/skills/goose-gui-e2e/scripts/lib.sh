@@ -38,6 +38,11 @@ mkdir -p "$E2E_HOME"
 : "${E2E_USER_ID:=e2e-user}"
 : "${API_KEY_FILE:=$E2E_HOME/api_key.txt}"
 
+# Node/pnpm that setup.sh provisions when the system ones don't satisfy goose's
+# `engines`. Prepended so every script (pnpm, electron-forge, vite) agrees.
+: "${E2E_NODE:=$E2E_HOME/node}"
+[ -d "$E2E_NODE/bin" ] && case ":$PATH:" in *":$E2E_NODE/bin:"*) ;; *) PATH="$E2E_NODE/bin:$PATH" ;; esac
+
 # ports / hosts. NB: these leak into `uv run` for the template server + seed, and
 # pydantic-settings is case-insensitive - so an env var named SERVER/HOST/PORT/GMAIL
 # would be misread as a config field and crash boot. Keep the SRV_ prefix.

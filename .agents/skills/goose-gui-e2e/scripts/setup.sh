@@ -34,6 +34,40 @@ else
   log "goose CLI present: $($GOOSE_BINARY --version)"
 fi
 
+# ---- 1b. Node + pnpm matching goose's `engines` (official nodejs.org build) ----
+# Goose pins engines.node / engines.pnpm and pnpm refuses to install below them.
+# Rather than bypass the check, provision the official Node release it asks for
+# (checksum-verified, under $E2E_HOME/node; lib.sh puts it first on PATH).
+read -r NEED_NODE_MAJOR NEED_PNPM < <(python3 - "$DESK/package.json" <<'PY'
+import json, re, sys
+e = json.load(open(sys.argv[1])).get("engines", {})
+m = re.search(r"(\d+)", e.get("node", ""))
+p = re.search(r"(\d+\.\d+\.\d+)", e.get("pnpm", ""))
+print(m.group(1) if m else "0", p.group(1) if p else "")
+PY
+)
+HAVE_NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if [ "$NEED_NODE_MAJOR" != "0" ] && [ "$HAVE_NODE_MAJOR" != "$NEED_NODE_MAJOR" ]; then
+  NV="$(curl -fsSL --max-time 20 https://nodejs.org/dist/index.json | python3 -c "import json,sys;print(next(r['version'] for r in json.load(sys.stdin) if r['version'].startswith('v$NEED_NODE_MAJOR.')))")"
+  log "goose wants Node $NEED_NODE_MAJOR (have $HAVE_NODE_MAJOR); installing official $NV into $E2E_NODE"
+  NDL="$E2E_HOME/node-dl"; mkdir -p "$NDL"
+  NTAR="node-${NV}-linux-x64.tar.xz"
+  curl -fsSL -o "$NDL/$NTAR" "https://nodejs.org/dist/$NV/$NTAR"
+  curl -fsSL -o "$NDL/SHASUMS256.txt" "https://nodejs.org/dist/$NV/SHASUMS256.txt"
+  ( cd "$NDL" && grep -E "  ${NTAR//./\\.}\$" SHASUMS256.txt | sha256sum -c - ) || { echo "FATAL: Node checksum mismatch"; exit 1; }
+  rm -rf "$E2E_NODE"; mkdir -p "$E2E_NODE"
+  tar -xJf "$NDL/$NTAR" -C "$E2E_NODE" --strip-components=1
+  export PATH="$E2E_NODE/bin:$PATH"
+fi
+HAVE_PNPM="$(pnpm -v 2>/dev/null || echo 0)"
+if [ -n "$NEED_PNPM" ] && [ "$(printf '%s\n%s\n' "$NEED_PNPM" "$HAVE_PNPM" | sort -V | head -1)" != "$NEED_PNPM" ]; then
+  log "goose wants pnpm >= $NEED_PNPM (have $HAVE_PNPM); installing pnpm@$NEED_PNPM into $E2E_NODE"
+  mkdir -p "$E2E_NODE"
+  npm install -g --prefix "$E2E_NODE" "pnpm@$NEED_PNPM" >/dev/null
+  export PATH="$E2E_NODE/bin:$PATH"
+fi
+log "toolchain: node $(node -v), pnpm $(pnpm -v)"
+
 # ---- 2. Electron binary (official release by default), checksum-verified ----
 EV="$(grep -m1 '"electron":' "$DESK/package.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 log "pinned Electron version: $EV"
