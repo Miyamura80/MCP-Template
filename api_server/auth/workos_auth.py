@@ -5,9 +5,12 @@ Supports a test-mode bypass for local development.
 """
 
 import json
+from urllib.parse import quote
 
+import httpx
 import jwt
 from jwt import PyJWKClient
+from loguru import logger as log
 
 from common import global_config
 
@@ -26,6 +29,33 @@ def _get_jwks_client() -> PyJWKClient:
     return _jwks_client
 
 
+_USERS_URL = "https://api.workos.com/user_management/users/"
+_LOOKUP_TIMEOUT_SECONDS = 5.0
+
+
+def fetch_workos_email(user_id: str) -> str | None:
+    """The email WorkOS holds for *user_id*, or None when it can't be had.
+
+    None when WorkOS isn't configured (dev sign-in) or the lookup fails; the
+    caller decides what a missing email means.
+    """
+    api_key = global_config.WORKOS_API_KEY
+    if not api_key:
+        return None
+    try:
+        response = httpx.get(
+            _USERS_URL + quote(user_id, safe=""),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=_LOOKUP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        email = response.json().get("email")
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        log.warning("WorkOS user lookup failed: {}", type(exc).__name__)
+        return None
+    return email if isinstance(email, str) and email else None
+
+
 class WorkOSUser:
     """Minimal representation of a verified WorkOS user."""
 
@@ -40,8 +70,18 @@ def verify_workos_token(token: str) -> WorkOSUser | None:
     if not client_id:
         return None
 
-    # Test-mode bypass: only allowed in non-production environments
-    if token.startswith("{") and global_config.DEV_ENV in ("local", "dev"):
+    # Test-mode bypass: an unsigned ``{"sub": ...}`` token authenticates as any
+    # user with no signature. It requires an EXPLICIT opt-in (ALLOW_TEST_TOKENS,
+    # default False) AND a dev environment. Gating on the environment alone was
+    # fail-open: DEV_ENV defaults to "dev", so any deployment that forgot to set
+    # DEV_ENV=prod accepted forged identities. The two conditions are
+    # independent: ALLOW_TEST_TOKENS keeps it off by default even in dev, and
+    # the DEV_ENV check keeps it off in prod even if the flag is mis-set.
+    if (
+        token.startswith("{")
+        and global_config.ALLOW_TEST_TOKENS
+        and global_config.is_dev
+    ):
         try:
             payload = json.loads(token)
             return WorkOSUser(

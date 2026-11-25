@@ -9,8 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from api_server.ask.core import answer_question
-from api_server.ask.retriever import DocsRetriever
 from models.ask import AskInput, AskResult
+from services.docs_retriever import DocsRetriever
 from tests.test_template import TestTemplate
 
 _BASE_URL = "https://docs.example.com"

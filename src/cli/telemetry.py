@@ -13,6 +13,7 @@ import typer
 from rich.console import Console
 
 from src.cli.state_store import _CONFIG_DIR, load_state, save_state
+from src.utils.package_info import DIST_NAME
 
 app = typer.Typer(no_args_is_help=True)
 console = Console(stderr=True)
@@ -58,7 +59,7 @@ def record_event(command: str, duration: float, success: bool) -> None:
         "command": command,
         "duration_s": round(duration, 3),
         "success": success,
-        "cli_version": importlib.metadata.version("mcp-template"),
+        "cli_version": importlib.metadata.version(DIST_NAME),
         "python_version": platform.python_version(),
         "os": platform.system(),
         "machine_id": _machine_id(),

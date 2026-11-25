@@ -9,8 +9,9 @@ from rich.panel import Panel
 from rich.table import Table
 
 from src.cli.state_store import load_state, save_state
+from src.utils.package_info import DIST_NAME
 
-_PACKAGE_NAME = "mcp-template"
+_PACKAGE_NAME = DIST_NAME
 _TIMEOUT = 5
 _VALID_PACKAGE_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$")
 

@@ -29,6 +29,7 @@ from src.cli.telemetry import (
 )
 from src.cli.update import update_command
 from src.utils.errors import install_error_handler
+from src.utils.package_info import DIST_NAME
 from src.utils.theme import get_cli_emoji, get_primary_color
 
 
@@ -59,7 +60,7 @@ def _load_cli_branding() -> tuple[str, str]:
 
 def _version_callback(value: bool) -> None:
     if value:
-        version = importlib.metadata.version("mcp-template")
+        version = importlib.metadata.version(DIST_NAME)
         emoji, _ = _load_cli_branding()
         prefix = f"{emoji} " if emoji else ""
         typer.echo(f"{prefix}mymcp {version}")
@@ -182,7 +183,7 @@ def main_cli() -> None:
     _register_builtin_commands()
     _register_user_commands()
 
-    version = importlib.metadata.version("mcp-template")
+    version = importlib.metadata.version(DIST_NAME)
     emoji, primary = _load_cli_branding()
     prefix = f"{emoji} " if emoji else ""
     app.info.help = (

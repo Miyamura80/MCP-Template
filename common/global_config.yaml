@@ -21,14 +21,54 @@ llm_config:
     min_wait_seconds: 1
     max_wait_seconds: 5
 
-# NLWeb /ask natural-language Q&A endpoint over the docs corpus.
-# Ships inert: when disabled, /ask returns 404 and the CLI prints a notice.
+# Docs corpus, shared by the `search_docs` tool (always on, no LLM) and the
+# NLWeb /ask natural-language Q&A endpoint. `enabled` gates /ask only: when
+# false, /ask returns 404 and the CLI prints a notice.
 ask:
   enabled: false
   corpus_path: docs/content/docs
   docs_base_url: https://docs.gmailmcp.com
   top_k: 5
   rate_limit_per_minute: 20
+
+# Agent-facing `feedback` tool. Always stored in the agent_feedback table;
+# set FEEDBACK_SLACK_WEBHOOK_URL in .env to also post to Slack. To also file
+# Linear issues (one per category + tool; repeats become comments), set
+# FEEDBACK_LINEAR_API_KEY in .env and linear.team_id here.
+# sink_timeout_seconds is each sink's total time budget per submission.
+feedback:
+  sink_timeout_seconds: 3.0
+  linear:
+    team_id: null
+    label_ids: []
+    project_id: null
+
+# Approval of dangerous tools (gmail_send, ...). The mode is per user and set
+# on the dashboard (/dashboard/approval); these are expiries and the page that
+# browser-mode approvals link to.
+approvals:
+  agent_expiry_seconds: 600
+  elicitation_expiry_seconds: 600
+  browser_expiry_seconds: 86400
+  approve_url_template: "{base}/dashboard/approvals/{id}"
+  dashboard_session_seconds: 28800
+
+# MCP Events (io.modelcontextprotocol/events): poll and webhook delivery of
+# approval.resolved, feedback.received and gmail.message_received.
+events:
+  retention_days: 7
+  poll_interval_ms: 5000
+  max_poll_events: 100
+  default_subscription_ttl_seconds: 86400
+  max_subscription_ttl_seconds: 604800
+  verification_cache_seconds: 86400
+  max_subscriptions_per_user: 50
+  stream_check_ms: 1000
+  stream_heartbeat_ms: 30000
+  stream_heartbeat_min_ms: 1000
+  stream_heartbeat_max_ms: 55000
+  stream_max_seconds: 300
+  max_streams_per_user: 5
 
 ########################################################
 # Debugging
@@ -83,6 +123,13 @@ logging:
 ########################################################
 # Rate Limiting
 ########################################################
+oauth:
+  # CIMD client ids (https URLs) that are known from startup and never evicted,
+  # so a flood of attacker client ids right after a restart cannot delay these
+  # clients' sign-ins. Other ids become known as users sign in with them.
+  cimd_known_clients:
+    - "https://claude.ai/oauth/mcp-oauth-client-metadata"
+
 rate_limit:
   enabled: true
   trust_proxy_headers: false

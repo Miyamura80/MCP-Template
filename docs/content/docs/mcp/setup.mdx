@@ -25,6 +25,28 @@ for zero-provisioning connections from Claude and other clients), a Bearer JWT
 (WorkOS), or an API key via `X-API-KEY`, same as the REST API. See
 [Deployment](/docs/deployment) for hosting.
 
+### Connection flags
+
+Options can ride on the URL as query parameters. They apply to every request
+on that connection and can only narrow what it can do.
+
+| Flag | Values | Effect |
+|------|--------|--------|
+| `dangerous_tools` | `true` (default), `false` | `false` hides tools marked dangerous (sending mail, deleting drafts, disconnecting, unsubscribing webhooks) and refuses calls to them. |
+| `approval` | `automatic`, `agent`, `elicitation`, `browser` | Requests a human-in-the-loop mode for dangerous tools. It can tighten the account's setting, never loosen it. |
+
+```text
+https://YOUR-DEPLOYMENT/mcp?dangerous_tools=false
+```
+
+Tokens stay valid when you add or change flags: the server compares the
+OAuth audience without the query. An unrecognised value returns `400`.
+Flags are a convenience, not a security boundary, since an agent holding the
+token can also edit its URL.
+
+Each tool also carries MCP annotations from its risk tier: read-only tools set
+`readOnlyHint`, dangerous ones set `destructiveHint`.
+
 ## Local (stdio, legacy)
 
 The stdio transport is supported for local Claude Desktop / dev use only.
