@@ -133,16 +133,25 @@ zero-width spaces are always rejected, so a stamped name cannot display
 differently from what was typed. A typed name wider than the stamp shrinks
 to fit (down to 8pt); a name still too long at that size is refused.
 
-The bundle is ~2.8 MB rather than the ~16 MB a full CJK face costs, so its
-coverage is deliberate: Latin (incl. Vietnamese), Greek, Cyrillic, Arabic,
-kana, JIS X 0208 level-1 kanji, GB2312 level-1 hanzi and the 2,350 common
-Hangul syllables. Text with characters outside it (Hebrew, Indic scripts,
-rarer ideographs, emoji) or with control characters is rejected with a clear
-error instead of stamping empty boxes. To cover more, list extra TTF/OTF
-files in `pdf_forms.fonts.extra_font_paths`; they are tried after the
-bundled fonts, and an unreadable path is skipped with a warning in the log
-at server startup. `scripts/build_pdf_fonts.py` downloads the pinned,
-sha256-verified sources and regenerates the bundled subsets reproducibly.
+The committed bundle is ~2 MB rather than the ~16 MB a full CJK face costs,
+so its coverage is deliberate: Latin (incl. Vietnamese), Greek, Cyrillic,
+Arabic, kana and JIS X 0208 level-1 kanji (plus the GB2312 level-1 hanzi the
+Japanese face shares). Text with characters outside it (Hangul, simplified-only
+hanzi, Hebrew, Indic scripts, rarer ideographs, emoji) or with control
+characters is rejected with a clear error instead of stamping empty boxes.
+
+**Chinese and Korean (opt-in).** Run `make pdf_fonts_cjk` to download the
+hash-pinned Noto Sans SC and KR sources and build subsets (~0.75 MB: the rest
+of GB2312 level 1 and the 2,350 common Hangul syllables) into
+`services/pdf_fonts/optional/`. That directory is gitignored and checked
+automatically: no config needed, and a file whose sha256 does not match the
+pinned build is ignored with a warning. Restart the server afterwards.
+
+**Other scripts.** List extra TTF/OTF files in
+`pdf_forms.fonts.extra_font_paths`; they are tried after the bundled and
+opt-in fonts, and an unreadable path is skipped with a warning in the log at
+server startup. `scripts/build_pdf_fonts.py` downloads the pinned,
+sha256-verified sources and regenerates the subsets reproducibly.
 
 ### The sealing certificate
 

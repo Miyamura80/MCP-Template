@@ -7,13 +7,19 @@
 The PDF stamp/overlay path embeds a per-document subset of these files, so
 what is vendored only bounds which characters *can* render. Full Noto CJK is
 ~16 MB per face; these subsets keep the whole bundle near 3 MB while covering
-the scripts signer names are realistically written in:
+the scripts signer names are realistically written in.
+
+Bundled (committed, ~2 MB):
 
 - ``NotoSans``: Latin (incl. Vietnamese), Greek, Cyrillic, punctuation.
 - ``NotoSansArabic``: Arabic + presentation forms (shaped by HarfBuzz).
 - ``NotoSansJP``: kana + JIS X 0208 level-1 kanji + the GB2312 level-1
   hanzi this face has (Japanese glyph shapes take priority).
-- ``NotoSansSC``: the remaining GB2312 level-1 hanzi (simplified forms).
+
+Opt-in (``--cjk``, run by ``make pdf_fonts_cjk``; written to the gitignored
+``services/pdf_fonts/optional/`` and loaded automatically when present):
+
+- ``NotoSansSC``: the GB2312 level-1 hanzi the JP subset lacks (simplified).
 - ``NotoSansKR``: the 2,350 KS X 1001 Hangul syllables + compatibility jamo.
 
 Anything else (Hebrew, Indic, Thai, rarer CJK) is refused with a clear error
@@ -29,12 +35,14 @@ Font Name (the CJK faces reserve only "Source").
 
 The output is reproducible (pinned fontTools, no timestamp recalculation).
 After a deliberate change, update the sha256 values this script prints in
-``BUNDLED_FONTS`` (``services/pdf_fonts/__init__.py``);
-``tests/test_pdf_unicode_fonts.py`` checks the vendored files against them.
+``BUNDLED_FONTS`` / ``OPTIONAL_FONTS`` (``services/pdf_fonts/__init__.py``);
+``tests/test_pdf_unicode_fonts.py`` checks the vendored files against them,
+and the font chain ignores an optional file whose hash does not match.
 
 Usage::
 
-    uv run scripts/build_pdf_fonts.py
+    uv run scripts/build_pdf_fonts.py         # regenerate the bundled fonts
+    uv run scripts/build_pdf_fonts.py --cjk   # build the opt-in SC/KR fonts
 """
 
 from __future__ import annotations
@@ -51,6 +59,7 @@ from fontTools import subset
 from fontTools.ttLib import TTFont
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "services" / "pdf_fonts"
+OPTIONAL_OUT_DIR = OUT_DIR / "optional"
 
 _NPM = "https://registry.npmjs.org/@expo-google-fonts"
 
@@ -167,28 +176,43 @@ def _fetch(family: str, dest: Path) -> Path:
     return path
 
 
-def main() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        sources = {family: _fetch(family, Path(tmp)) for family in SOURCES}
-        _build(sources.__getitem__)
-
-
-def _build(src) -> None:
-
-    _subset(src("NotoSans"), LATIN, OUT_DIR / "NotoSans-Regular.subset.ttf")
+def _build_bundled(tmp: Path) -> None:
+    _subset(_fetch("NotoSans", tmp), LATIN, OUT_DIR / "NotoSans-Regular.subset.ttf")
     _subset(
-        src("NotoSansArabic"), ARABIC, OUT_DIR / "NotoSansArabic-Regular.subset.ttf"
+        _fetch("NotoSansArabic", tmp),
+        ARABIC,
+        OUT_DIR / "NotoSansArabic-Regular.subset.ttf",
     )
-    jp_cmap = _cmap(src("NotoSansJP"))
-    japanese = JAPANESE | (GB2312_LEVEL1 & jp_cmap)
-    _subset(src("NotoSansJP"), japanese, OUT_DIR / "NotoSansJP-Regular.subset.ttf")
+    jp = _fetch("NotoSansJP", tmp)
+    japanese = JAPANESE | (GB2312_LEVEL1 & _cmap(jp))
+    _subset(jp, japanese, OUT_DIR / "NotoSansJP-Regular.subset.ttf")
+
+
+def _build_cjk(tmp: Path) -> None:
+    OPTIONAL_OUT_DIR.mkdir(exist_ok=True)
+    # Only the hanzi the bundled JP subset cannot draw (JP shapes win).
+    jp_cmap = _cmap(_fetch("NotoSansJP", tmp))
     _subset(
-        src("NotoSansSC"),
+        _fetch("NotoSansSC", tmp),
         GB2312_LEVEL1 - jp_cmap,
-        OUT_DIR / "NotoSansSC-Regular.subset.ttf",
+        OPTIONAL_OUT_DIR / "NotoSansSC-Regular.subset.ttf",
     )
-    _subset(src("NotoSansKR"), KOREAN, OUT_DIR / "NotoSansKR-Regular.subset.ttf")
+    _subset(
+        _fetch("NotoSansKR", tmp),
+        KOREAN,
+        OPTIONAL_OUT_DIR / "NotoSansKR-Regular.subset.ttf",
+    )
+
+
+def main(argv: list[str]) -> None:
+    if argv not in ([], ["--cjk"]):
+        sys.exit(__doc__)
+    with tempfile.TemporaryDirectory() as tmp:
+        if argv:
+            _build_cjk(Path(tmp))
+        else:
+            _build_bundled(Path(tmp))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

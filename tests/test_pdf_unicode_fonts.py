@@ -33,7 +33,49 @@ from tests.pdf_fixtures import make_flat_pdf
 from tests.pdf_harness import PdfSigningTestBase
 from tests.test_template import TestTemplate
 
-NAMES = ["山田太郎", "宮村英人", "王小明", "Ελένη", "Иван", "김민준", "Nguyễn Văn An"]
+NAMES = ["山田太郎", "宮村英人", "王小明", "Ελένη", "Иван", "Nguyễn Văn An"]
+# Opt-in only: Hangul, and a simplified-only hanzi the bundled JP subset lacks.
+KO_ZH = "김们"
+KR_FONT = "NotoSansKR-Regular.subset.ttf"
+
+
+@pytest.fixture(autouse=True)
+def _no_optional_fonts(tmp_path):
+    """Default chain = committed fonts only, even if `make pdf_fonts_cjk` ran."""
+    empty = tmp_path / "no-optional-fonts"
+    empty.mkdir()
+    with patch.object(pdf_fonts, "OPTIONAL_DIR", empty):
+        yield
+
+
+def _tiny_font(path, chars: str) -> str:
+    """Write a minimal TrueType font with a box glyph per char; return sha256."""
+    from fontTools.fontBuilder import FontBuilder  # noqa: PLC0415 - test-only
+    from fontTools.pens.ttGlyphPen import TTGlyphPen  # noqa: PLC0415
+
+    names = [".notdef", *(f"g{i}" for i in range(len(chars)))]
+    pen = TTGlyphPen(None)
+    pen.moveTo((50, 0))
+    pen.lineTo((50, 700))
+    pen.lineTo((550, 700))
+    pen.lineTo((550, 0))
+    pen.closePath()
+    box = pen.glyph()
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder(names)
+    builder.setupCharacterMap({ord(c): f"g{i}" for i, c in enumerate(chars)})
+    builder.setupGlyf(dict.fromkeys(names, box))
+    builder.setupHorizontalMetrics(dict.fromkeys(names, (600, 50)))
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable(
+        {"familyName": "TinyTest", "styleName": "Regular", "psName": "TinyTest"}
+    )
+    builder.setupOS2()
+    builder.setupPost()
+    builder.save(str(path))
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 ARABIC_NAME = "محمد علي"
 VOCALIZED = "مُحَمَّد"
 RLO_SPOOF = "John\u202eeod"  # displays as "John doe" in bidi-aware viewers
@@ -138,7 +180,7 @@ class TestFontChain(TestTemplate):
         uncovered = unrenderable_reason("שרה") or ""
         assert "don't cover" in uncovered
         assert "transliterate" in uncovered
-        assert pdf_fonts.COVERAGE_SUMMARY in uncovered
+        assert pdf_fonts.coverage_summary() in uncovered
         assert "control" not in uncovered
         # The operator remedy is for logs/docs, not the model.
         assert "extra_font_paths" not in uncovered
@@ -167,24 +209,58 @@ class TestFontChain(TestTemplate):
         rtl = [r.text for r in runs if r.rtl and r.text.strip()]
         assert rtl == ["علي", "محمد"]
 
-    def test_extra_font_paths_extend_coverage(self):
-        without_kr = {
-            n: h
-            for n, h in pdf_fonts.BUNDLED_FONTS.items()
-            if not n.startswith("NotoSansKR")
-        }
-        kr_path = str(pdf_fonts.FONT_DIR / "NotoSansKR-Regular.subset.ttf")
+    def test_extra_font_paths_extend_coverage(self, tmp_path):
+        font = tmp_path / "tiny.ttf"
+        _tiny_font(font, KO_ZH)
+        assert unrenderable_pdf_text(KO_ZH) == KO_ZH
         fonts_cfg = global_config.pdf_forms.fonts
-        with patch.object(pdf_fonts, "BUNDLED_FONTS", without_kr):
-            assert unrenderable_pdf_text("김민준") == "김민준"
-            with patch.object(fonts_cfg, "extra_font_paths", [kr_path]):
-                assert unrenderable_pdf_text("김민준") == ""
+        with patch.object(fonts_cfg, "extra_font_paths", [str(font)]):
+            assert unrenderable_pdf_text(KO_ZH) == ""
 
     def test_unreadable_extra_font_is_skipped(self):
         fonts_cfg = global_config.pdf_forms.fonts
         with patch.object(fonts_cfg, "extra_font_paths", ["/nonexistent/font.ttf"]):
             assert len(pdf_fonts.font_chain()) == len(pdf_fonts.BUNDLED_FONTS)
             assert unrenderable_pdf_text("שרה") == "שרה"
+
+
+class TestOptionalCjkFonts(TestTemplate):
+    """Chinese/Korean are opt-in (`make pdf_fonts_cjk`), not bundled."""
+
+    def test_refused_by_default(self):
+        assert unrenderable_pdf_text("김민준") == "김민준"
+        assert unrenderable_pdf_text("们") == "们"
+        assert "Korean" not in pdf_fonts.coverage_summary()
+
+    def test_optional_dir_font_is_picked_up(self, tmp_path):
+        sha = _tiny_font(tmp_path / KR_FONT, KO_ZH)
+        pinned = {KR_FONT: (sha, "common Korean Hangul")}
+        with (
+            patch.object(pdf_fonts, "OPTIONAL_DIR", tmp_path),
+            patch.object(pdf_fonts, "OPTIONAL_FONTS", pinned),
+        ):
+            assert unrenderable_pdf_text(KO_ZH) == ""
+            assert "Korean" in pdf_fonts.coverage_summary()
+            data = _overlay_pdf([OverlayText(50.0, 700.0, 14.0, KO_ZH)])
+            assert KO_ZH in PdfReader(io.BytesIO(data)).pages[0].extract_text()
+
+    def test_optional_font_with_wrong_hash_is_ignored(self, tmp_path):
+        _tiny_font(tmp_path / KR_FONT, KO_ZH)
+        pinned = {KR_FONT: ("0" * 64, "common Korean Hangul")}
+        with (
+            patch.object(pdf_fonts, "OPTIONAL_DIR", tmp_path),
+            patch.object(pdf_fonts, "OPTIONAL_FONTS", pinned),
+        ):
+            assert unrenderable_pdf_text(KO_ZH) == KO_ZH
+
+    def test_real_opt_in_fonts_when_built(self):
+        real_dir = pdf_fonts.FONT_DIR / "optional"
+        if not all((real_dir / name).is_file() for name in pdf_fonts.OPTIONAL_FONTS):
+            pytest.skip("opt-in CJK fonts not built (run `make pdf_fonts_cjk`)")
+        with patch.object(pdf_fonts, "OPTIONAL_DIR", real_dir):
+            assert unrenderable_pdf_text("김민준 们") == ""
+            data = _overlay_pdf([OverlayText(50.0, 700.0, 14.0, "김민준 们")])
+            assert "김민준 们" in PdfReader(io.BytesIO(data)).pages[0].extract_text()
 
 
 class TestOverlayRendering(TestTemplate):
@@ -200,7 +276,6 @@ class TestOverlayRendering(TestTemplate):
         fonts = _fonts_on_page(data)
         embedded = [name for name in fonts if "+NotoSans" in name]
         assert any("NotoSansJP" in n for n in embedded)
-        assert any("NotoSansKR" in n for n in embedded)
         for name in embedded:
             font = fonts[name]
             assert font["/Subtype"] == "/Type0"

@@ -8,8 +8,8 @@ Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-gree
 NotoSansArabic-Regular.subset.ttf:
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
 
-NotoSansJP-Regular.subset.ttf, NotoSansSC-Regular.subset.ttf,
-NotoSansKR-Regular.subset.ttf:
+NotoSansJP-Regular.subset.ttf, and the opt-in optional/NotoSansSC-Regular.subset.ttf
+and optional/NotoSansKR-Regular.subset.ttf built by `make pdf_fonts_cjk`:
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

@@ -12,14 +12,18 @@ runs of one face and one bidi level (:mod:`services.pdf_fonts.bidi`) so
 HarfBuzz can shape each run (Arabic joining, right-to-left glyph order).
 
 The bundled subsets are a size trade-off: full Noto CJK is ~16 MB per face,
-these total ~2.8 MB (:data:`COVERAGE_SUMMARY`). Rarer ideographs and
-unbundled scripts are reported by :func:`uncovered_chars` so callers refuse
-them up front instead of stamping a ``.notdef`` box.
+these total ~2 MB and cover Latin, Greek, Cyrillic, Arabic and Japanese.
+Chinese and Korean subsets are opt-in: ``make pdf_fonts_cjk`` downloads and
+builds them into :data:`OPTIONAL_DIR` (gitignored), and the chain picks them
+up automatically when their sha256 matches :data:`OPTIONAL_FONTS`. Rarer
+ideographs and uncovered scripts are reported by :func:`uncovered_chars` so
+callers refuse them up front instead of stamping a ``.notdef`` box.
 """
 
 from __future__ import annotations
 
 import functools
+import hashlib
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,7 +41,7 @@ FONT_DIR = Path(__file__).resolve().parent
 # scripts/build_pdf_fonts.py; tests check the files against these). Chain
 # order matters: the first face covering a character wins. Latin goes first
 # so mixed lines ("Signed by ... on <date>") keep one Latin face; JP precedes
-# SC so shared ideographs get Japanese glyph shapes.
+# the optional SC face so shared ideographs get Japanese glyph shapes.
 BUNDLED_FONTS: dict[str, str] = {
     "NotoSans-Regular.subset.ttf": (
         "261f2fe0e4352afca566e692b80e4be188f7cda6da2a0fb97ddae688e341df58"
@@ -48,19 +52,28 @@ BUNDLED_FONTS: dict[str, str] = {
     "NotoSansJP-Regular.subset.ttf": (
         "1fd9e1356a1374e8718c98f9dc13d045fafbf1da6618a6595724869089fc1b67"
     ),
+}
+
+# Opt-in CJK subsets built by `make pdf_fonts_cjk` (scripts/build_pdf_fonts.py
+# --cjk) into a gitignored directory: file name -> (sha256, what it adds to
+# the coverage summary). Loaded after the bundled faces when present and
+# matching; the build is reproducible, so the hashes are stable.
+OPTIONAL_DIR = FONT_DIR / "optional"
+OPTIONAL_FONTS: dict[str, tuple[str, str]] = {
     "NotoSansSC-Regular.subset.ttf": (
-        "aa1decd3d6904ff05f654af09e6eb515e4f5ad3c1e8d569f67104f68f55355ec"
+        "aa1decd3d6904ff05f654af09e6eb515e4f5ad3c1e8d569f67104f68f55355ec",
+        "common simplified Chinese hanzi",
     ),
     "NotoSansKR-Regular.subset.ttf": (
-        "9ea969fb35753c6d01a722fa1a0fb2b5f5627d72de6191621ac06401e03424e6"
+        "9ea969fb35753c6d01a722fa1a0fb2b5f5627d72de6191621ac06401e03424e6",
+        "common Korean Hangul",
     ),
 }
 
-# What the bundled fonts cover, for user-facing errors. Keep in step with
-# scripts/build_pdf_fonts.py.
-COVERAGE_SUMMARY = (
-    "Latin (incl. Vietnamese), Greek, Cyrillic, Arabic, Japanese kana with "
-    "common kanji, common Chinese hanzi and common Korean Hangul"
+# What the bundled fonts cover, for user-facing errors; see coverage_summary().
+# Keep in step with scripts/build_pdf_fonts.py.
+_BUNDLED_COVERAGE = (
+    "Latin (incl. Vietnamese), Greek, Cyrillic, Arabic, Japanese kana and common kanji"
 )
 
 # Characters that ride along with the previous character's face when it has
@@ -99,9 +112,31 @@ def _load_face(path: Path) -> FontFace:
     return FontFace(path=path, data=data, cmap=frozenset(cmap))
 
 
+def _load_optional(directory: Path, name: str, sha256: str) -> FontFace | None:
+    path = directory / name
+    if not path.is_file():
+        return None
+    try:
+        face = _load_face(path)
+    except (OSError, TTLibError) as exc:
+        log.warning("Optional PDF font {} failed to load: {}", path, exc)
+        return None
+    if hashlib.sha256(face.data).hexdigest() != sha256:
+        log.warning(
+            "Optional PDF font {} does not match its pinned sha256; skipping "
+            "it. Re-run `make pdf_fonts_cjk`.",
+            path,
+        )
+        return None
+    return face
+
+
 @functools.cache
 def _load_chain(
-    bundled: tuple[str, ...], extra_paths: tuple[str, ...]
+    bundled: tuple[str, ...],
+    optional_dir: Path,
+    optional: tuple[tuple[str, str], ...],
+    extra_paths: tuple[str, ...],
 ) -> tuple[FontFace, ...]:
     faces: list[FontFace] = []
     for name in bundled:
@@ -111,6 +146,9 @@ def _load_chain(
             # A broken install (fonts stripped from the wheel) must be loud:
             # every non-Latin-1 name would be refused without an obvious cause.
             log.error("Bundled PDF font {} failed to load: {}", name, exc)
+    for name, sha256 in optional:
+        if (face := _load_optional(optional_dir, name, sha256)) is not None:
+            faces.append(face)
     for raw in extra_paths:
         path = Path(raw)
         if not path.is_absolute():
@@ -128,14 +166,25 @@ def _load_chain(
 
 
 def font_chain() -> tuple[FontFace, ...]:
-    """The active face chain: bundled subsets, then configured extras.
+    """The active face chain: bundled, opt-in CJK, then configured extras.
 
     Cached per configuration; also called at server startup so a broken
     install or bad ``extra_font_paths`` entry is logged at boot.
     """
     return _load_chain(
-        tuple(BUNDLED_FONTS), tuple(global_config.pdf_forms.fonts.extra_font_paths)
+        tuple(BUNDLED_FONTS),
+        OPTIONAL_DIR,
+        tuple((name, sha) for name, (sha, _) in OPTIONAL_FONTS.items()),
+        tuple(global_config.pdf_forms.fonts.extra_font_paths),
     )
+
+
+def coverage_summary() -> str:
+    """Human-readable list of what the active chain covers, for errors."""
+    loaded = {face.path.name for face in font_chain()}
+    parts = [_BUNDLED_COVERAGE]
+    parts += [label for name, (_, label) in OPTIONAL_FONTS.items() if name in loaded]
+    return ", ".join(parts)
 
 
 def _face_for(char: str, chain: tuple[FontFace, ...]) -> FontFace | None:

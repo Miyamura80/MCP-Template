@@ -186,6 +186,12 @@ gen_tool_surface: check_uv ## Snapshot the @service registry to the landing-page
 	@uv run python scripts/export_tool_surface.py
 	@echo "$(GREEN)✅ Tool surface exported.$(RESET)"
 
+.PHONY: pdf_fonts_cjk
+pdf_fonts_cjk: check_uv ## Download + build the opt-in Chinese/Korean PDF stamp fonts (gitignored)
+	@echo "$(YELLOW)🔤 Building opt-in CJK PDF fonts...$(RESET)"
+	@uv run scripts/build_pdf_fonts.py --cjk
+	@echo "$(GREEN)✅ Fonts written to services/pdf_fonts/optional/ (picked up automatically).$(RESET)"
+
 .PHONY: gen_tool_docs
 gen_tool_docs: check_uv ## Render the docs site's tool reference from the @service registry
 	@echo "$(YELLOW)🛠  Generating tool reference docs...$(RESET)"

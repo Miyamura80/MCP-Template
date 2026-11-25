@@ -36,8 +36,8 @@ from pyhanko.pdf_utils.writer import PdfFileWriter
 from pypdf import PdfReader
 
 from services.pdf_fonts import (
-    COVERAGE_SUMMARY,
     FontFace,
+    coverage_summary,
     split_runs,
     uncovered_chars,
 )
@@ -116,7 +116,7 @@ def unrenderable_reason(text: str) -> str | None:
         )
         reasons.append(
             f"contains characters the server's fonts don't cover: "
-            f"{uncovered!r} (supported: {COVERAGE_SUMMARY}); transliterate "
+            f"{uncovered!r} (supported: {coverage_summary()}); transliterate "
             "or remove them"
         )
     return "; ".join(reasons)

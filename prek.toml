@@ -5,9 +5,9 @@ hooks = [
     # MCP App bundles (dist/mcp-app.html) are deliberately committed so the
     # template works without Node (see CLAUDE.md); they inline pdf.js/React
     # and exceed the default 500 KB cap. The subsetted Noto fonts under
-    # services/pdf_fonts/ (scripts/build_pdf_fonts.py) are vendored for the
-    # same reason: CJK coverage cannot fit under the cap.
-    { id = "check-added-large-files", exclude = "^(mcp_server/apps/[^/]+/dist/mcp-app\\.html|services/pdf_fonts/[^/]+\\.subset\\.ttf)$" },
+    # The bundled Japanese font subset (scripts/build_pdf_fonts.py) is the
+    # only vendored font over the cap; Chinese/Korean are opt-in, not committed.
+    { id = "check-added-large-files", exclude = "^(mcp_server/apps/[^/]+/dist/mcp-app\\.html|services/pdf_fonts/NotoSansJP-Regular\\.subset\\.ttf)$" },
 ]
 
 [[repos]]
