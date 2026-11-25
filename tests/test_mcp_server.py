@@ -182,6 +182,8 @@ class TestMCPServerIntegration(TestTemplate):
         # only assert that whatever ui:// resources are registered serve HTML.
         ui_uris = [u for u in uris if u.startswith("ui://mymcp/")]
         assert ui_uris, "expected at least one ui://mymcp/ resource registered"
+        # apps/_shared/ is source the apps import, not an app.
+        assert "ui://mymcp/_shared" not in uris
         for uri in ui_uris:
             read = asyncio.run(mcp.read_resource(uri))
             assert not isinstance(read, InputRequiredResult)

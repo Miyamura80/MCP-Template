@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App as McpApp } from "@modelcontextprotocol/ext-apps";
 import { Inbox } from "./Inbox";
-import { bufferToolResults } from "./helpers";
+import { bufferToolResults } from "../../_shared/mcpApp";
 
 const mcpApp = new McpApp({ name: "gmail-inbox", version: "0.1.0" });
 

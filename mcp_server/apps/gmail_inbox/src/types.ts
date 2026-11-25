@@ -1,3 +1,5 @@
+import type { McpAppLike as SharedMcpAppLike } from "../../_shared/mcpApp";
+
 export type LabelChip = {
   name: string;
   bg_color: string;
@@ -80,18 +82,7 @@ export type CurationRecord = {
 
 export type GetCurationResult = { records: CurationRecord[]; coverage?: Coverage };
 
-export type McpAppLike = {
-  ontoolresult?: (result: unknown) => void;
-  callServerTool: (args: {
-    name: string;
-    arguments: Record<string, unknown>;
-  }) => Promise<unknown>;
-  openLink: (params: { url: string }) => Promise<unknown>;
-  sendMessage?: (params: {
-    role: string;
-    content: { type: string; text: string }[];
-  }) => Promise<unknown>;
-};
+export type McpAppLike = SharedMcpAppLike<"callServerTool" | "openLink", "sendMessage">;
 
 export type ComposerDraft = {
   draft_id: string;

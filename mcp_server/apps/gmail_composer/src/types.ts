@@ -1,3 +1,5 @@
+import type { McpAppLike as SharedMcpAppLike } from "../../_shared/mcpApp";
+
 export type DraftAttachment = {
   attachment_id: string;
   filename: string;
@@ -33,13 +35,7 @@ export type Thread = {
   messages: ThreadMessage[];
 };
 
-export type McpAppLike = {
-  ontoolresult?: (result: any) => void;  // eslint-disable-line @typescript-eslint/no-explicit-any
-  callServerTool: (args: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
-  updateModelContext: (args: {
-    content: Array<{ type: "text"; text: string }>;
-  }) => Promise<unknown>;
-};
+export type McpAppLike = SharedMcpAppLike<"callServerTool" | "updateModelContext">;
 
 export type SaveStatus =
   | { kind: "idle" }

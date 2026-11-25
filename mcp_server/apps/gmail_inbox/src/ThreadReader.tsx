@@ -6,7 +6,8 @@ import {
   Sparkle,
 } from "@phosphor-icons/react";
 import type { Draft, McpAppLike, Thread, ThreadMessage } from "./types";
-import { base64ToBlobUrl, extractStructuredContent, isPreviewable } from "./helpers";
+import { extractStructuredContent } from "../../_shared/toolResult";
+import { base64ToBlobUrl, isPreviewable } from "./helpers";
 import {
   CollapsibleMessage,
   DraftCard,

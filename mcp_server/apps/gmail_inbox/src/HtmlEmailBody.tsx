@@ -17,7 +17,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { extractStructuredContent, splitHtmlAtQuote } from "./helpers";
+import { extractStructuredContent } from "../../_shared/toolResult";
+import { splitHtmlAtQuote } from "./helpers";
 import { sanitizeEmailHtml } from "./remoteImages";
 
 /** Minimal slice of the ext-apps App surface this component needs. */

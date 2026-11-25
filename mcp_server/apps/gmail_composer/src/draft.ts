@@ -1,35 +1,5 @@
+import { extractStructuredContent } from "../../_shared/toolResult";
 import type { Draft, DraftAttachment, Thread } from "./types";
-
-// Unwrap an MCP CallToolResult to its structured payload: prefer
-// `structuredContent`, else parse a JSON `TextContent` item. Returns null when
-// neither is present - never the raw envelope - so a malformed result can't
-// masquerade as a draft/thread and content-only JSON results aren't dropped.
-//
-// Keep in sync with gmail_inbox/src/helpers.ts:extractStructuredContent - the
-// apps are isolated bun packages and can't share this; #170 tracks folding the
-// per-app boilerplate into a shared source once that's designed.
-export function extractStructuredContent<T>(raw: unknown): T | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  if (obj.structuredContent && typeof obj.structuredContent === "object") {
-    return obj.structuredContent as T;
-  }
-  if (Array.isArray(obj.content)) {
-    for (const item of obj.content) {
-      if (!item || typeof item !== "object") continue;
-      // Only a real MCP TextContent block qualifies: a `type: "text"`
-      // discriminator with a string `text`. Without this an image/resource/other
-      // block that happens to carry a `text` field could smuggle JSON through.
-      const candidate = item as { type?: unknown; text?: unknown };
-      if (candidate.type !== "text" || typeof candidate.text !== "string") continue;
-      try {
-        const parsed = JSON.parse(candidate.text);
-        if (parsed && typeof parsed === "object") return parsed as T;
-      } catch { /* not JSON text content */ }
-    }
-  }
-  return null;
-}
 
 // Pull the draft's existing attachments (each with a stable attachment_id) off a
 // GmailDraft payload. Only files with an id are usable: the id is what a save
