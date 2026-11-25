@@ -18,7 +18,8 @@ Signing steps (US-007):
 3. PAdES B-B seal with the server-held certificate via pyHanko. In dev, a
    self-signed certificate is generated once and cached under
    ``pdf_forms.signing.dev_cert_dir``; production should configure
-   ``cert_path``/``key_path`` with a real key pair.
+   ``cert_path``/``key_path`` with a real key pair. Outside dev, falling back
+   to the dev cert logs a loud warning (:func:`warn_if_untrusted_seal`).
 
 The stamp uses the standard-14 Helvetica-Oblique face rather than a bundled
 script font: zero licensing surface and it renders identically everywhere
@@ -35,6 +36,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from loguru import logger as log
 from pypdf import PdfReader, PdfWriter
 
 from common import global_config
@@ -209,6 +211,41 @@ def _generate_dev_cert(cert_path: Path, key_path: Path) -> None:
     cert_tmp.replace(cert_path)
 
 
+_UNTRUSTED_SEAL_WARNING = (
+    "PDF SIGNING: pdf_forms.signing.cert_path/key_path are unset outside "
+    "development (DEV_ENV={dev_env}). Documents will be sealed with the "
+    "auto-generated SELF-SIGNED dev certificate under {cert_dir}, and every "
+    "real validator will report those seals as UNTRUSTED. Configure a real "
+    "PEM key pair in pdf_forms.signing before signing production documents."
+)
+_untrusted_seal_warned = False
+
+
+def warn_if_untrusted_seal() -> bool:
+    """Log a loud warning (once per process) if prod would seal with the dev cert.
+
+    Called at server startup and again on the dev-cert fallback in
+    :func:`sealing_cert_paths`, so stdio-only processes that never run the
+    HTTP lifespan still surface it. Gated on ``global_config.is_dev``, which
+    fails secure: ``prod``, ``staging``, unset or a typo all count as
+    production. Returns True when the misconfiguration is present, whether
+    or not this call was the one that logged it.
+    """
+    global _untrusted_seal_warned  # noqa: PLW0603 - process-wide once flag
+    cfg = global_config.pdf_forms.signing
+    if global_config.is_dev or (cfg.cert_path and cfg.key_path):
+        return False
+    if not _untrusted_seal_warned:
+        _untrusted_seal_warned = True
+        log.warning(
+            _UNTRUSTED_SEAL_WARNING.format(
+                dev_env=global_config.DEV_ENV or "<unset>",
+                cert_dir=_dev_cert_paths()[0].parent,
+            )
+        )
+    return True
+
+
 def sealing_cert_paths() -> tuple[Path, Path]:
     """Resolve (cert, key) PEM paths, generating the dev pair if needed.
 
@@ -221,6 +258,7 @@ def sealing_cert_paths() -> tuple[Path, Path]:
     cfg = global_config.pdf_forms.signing
     if cfg.cert_path and cfg.key_path:
         return Path(cfg.cert_path), Path(cfg.key_path)
+    warn_if_untrusted_seal()
     cert_path, key_path = _dev_cert_paths()
     if cert_path.exists() and key_path.exists():
         return cert_path, key_path

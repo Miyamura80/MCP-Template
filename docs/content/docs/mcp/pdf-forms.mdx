@@ -135,6 +135,13 @@ git-ignored). The seal is a platform seal (like DocuSign's), not a per-user
 identity: attribution of *who* signed comes from the audit trail, integrity
 of *what* was signed comes from the seal.
 
+Seals made with the dev certificate validate as **untrusted** in any real
+validator. Outside development (any `DEV_ENV` other than `local` / `dev`,
+including `prod`), the server checks for this at startup and on the first
+seal: if `cert_path` / `key_path` are unset it logs a prominent warning that
+documents are being sealed with the untrusted self-signed certificate.
+Startup is not blocked; treat the warning as a deployment error.
+
 ## Extractable by design
 
 The PDF domain never imports Gmail. `pdf_open` sources and `pdf_export`
