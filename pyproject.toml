@@ -22,7 +22,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "python-dotenv>=1.2.1",
     "human-id>=0.2.0",
-    "import-linter>=2.1.1",
+    "import-linter>=2.13",
     "pytest>=9.0.3",
     "pytest-xdist>=3.6.1",
     "termcolor>=2.5.0",
@@ -54,7 +54,7 @@ dependencies = [
     "mcp[cli]>=2.3,<3",
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
-    "anyio>=4.14.1",
+    "anyio>=4.14.2",
     "uvicorn[standard]>=0.51.0",
     "sqlalchemy>=2.0.51",
     "alembic>=1.15.0",
@@ -172,6 +172,7 @@ exclude = [
     "tests/test_logging_security.py",
     "tests/test_logging_thread_safety.py",
     "tests/test_template.py",
+    "tests/test_pdf_signing_cert_warning.py",
     "tests/test_api_key_auth.py",
     "tests/test_api_server.py",
     "tests/test_deprecation.py",
@@ -287,7 +288,7 @@ exclude-newer-package = { certifi = false }
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.6.0",
+    "pre-commit>=4.6.1",
     # NOTE: pytest-check-links is deliberately NOT a project dependency. It still
     # declares the pytest `path` collect hook removed in pytest 9.1, so having it
     # in this venv would make pytest 9.1+ abort at plugin load. The link checker

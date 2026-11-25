@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager
 
 from loguru import logger as log
 
+from api_server.auth.authorization_server import authorization_server
 from common import global_config
 from services.events.store import prune as prune_events
 from services.gmail_watch_svc import renew_due_watches
@@ -66,7 +67,8 @@ def runner_enabled() -> bool:
 
 
 def oauth_purge_enabled() -> bool:
-    return global_config.MCP_AUTH_MODE == "self"
+    # Only a server that issues and stores tokens has expired ones to purge.
+    return authorization_server().issues_tokens
 
 
 async def _oauth_purge_loop() -> None:

@@ -20,7 +20,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-import api_server.oauth as oauth_server
+from api_server.auth.authorization_server import BuiltinAuthorizationServer
 from api_server.oauth import cimd, flow
 from api_server.oauth.cimd_document import FetchedDocument
 from api_server.routes import well_known
@@ -117,9 +117,8 @@ class OAuthServerCase(TestTemplate):
         self.document = client_document()
 
         app = FastAPI()
-        app.include_router(flow.router)
+        BuiltinAuthorizationServer().mount(app)
         app.include_router(well_known.router)
-        app.router.routes.extend(oauth_server.create_sdk_routes())
         self.http = TestClient(app, base_url=ISSUER, follow_redirects=False)
 
     def teardown_method(self):

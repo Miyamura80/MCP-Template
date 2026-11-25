@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from api_server.auth.authorization_server import authorization_server
 from api_server.dashboard import api_keys as dashboard_api_keys
 from api_server.dashboard import billing as dashboard_billing
 from api_server.dashboard import pages as dashboard_pages
@@ -42,6 +43,7 @@ from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
 from services import InvalidArgument
 from services.gmail_svc import GmailAttachmentTooLargeError
+from services.pdf_signing import warn_if_untrusted_seal
 from src.utils.package_info import package_version
 
 _APP_VERSION = package_version("0.1.0")
@@ -100,6 +102,8 @@ def session_cookie_policy() -> SessionCookiePolicy:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Compose MCP sessions, the periodic runners and the CIMD fetch tasks."""
+    # Surface a non-dev deployment sealing with the untrusted dev cert.
+    warn_if_untrusted_seal()
     async with mcp_lifespan(app), runner_lifespan(app), cimd_lifespan():
         yield
 
@@ -195,14 +199,10 @@ app.include_router(dashboard_billing.router)
 dashboard_session.install(app)
 
 # --- Built-in OAuth server for MCP clients (opt-in) ------------------------
-# Only with MCP_AUTH_MODE=self (api_server/oauth/). Registered before the MCP
-# mount below, which sits at "/" and would otherwise answer /authorize and /token.
-if global_config.MCP_AUTH_MODE == "self":
-    import api_server.oauth as oauth_server  # noqa: PLC0415
-    from api_server.oauth import flow as oauth_flow  # noqa: PLC0415
-
-    app.include_router(oauth_flow.router)
-    app.router.routes.extend(oauth_server.create_sdk_routes())
+# Only with MCP_AUTH_MODE=self (api_server/oauth/); a no-op for AuthKit.
+# Registered before the MCP mount below, which sits at "/" and would otherwise
+# answer /authorize and /token.
+authorization_server().mount(app)
 
 # --- MCP server (streamable HTTP) -----------------------------------------
 # Mounts MCPServer at /mcp so CLI/API/MCP share one process, port, and middleware.
