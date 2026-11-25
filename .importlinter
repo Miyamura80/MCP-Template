@@ -108,6 +108,7 @@ source_modules =
     services.pdf_overlay
     services.pdf_fonts
     services.pdf_signing
+    services.pdf_stamp
     services.pdf_documents_repo
     services.pdf_ports
     models.pdf_forms

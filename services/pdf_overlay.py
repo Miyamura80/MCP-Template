@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import io
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -41,7 +42,6 @@ from services.pdf_fonts import (
     split_runs,
     uncovered_chars,
 )
-from services.pdf_fonts.bidi import BIDI_CONTROLS
 
 # GDEF GlyphClassDef value for combining marks.
 _GDEF_MARK_CLASS = 3
@@ -62,14 +62,25 @@ class OverlayText:
     oblique: bool = False
 
 
-def _is_control(code: int) -> bool:
-    # C0/C1 controls, plus bidi overrides and invisible zero-width characters
-    # that could make a stamped name display differently from what was typed.
-    return code < 0x20 or 0x7F <= code <= 0x9F or code in BIDI_CONTROLS
+# Controls (Cc), format characters (Cf: bidi overrides, zero-width space,
+# word joiner, BOM, soft hyphen) and line/paragraph separators could make a
+# stamped name display differently from what was typed, so all are refused.
+_CONTROL_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+# ZWNJ/ZWJ are Cf but Arabic and Indic spelling needs them.
+_ALLOWED_FORMAT = frozenset({"\u200c", "\u200d"})
+# Invisible characters outside those categories: Hangul fillers, the
+# combining grapheme joiner, and soft hyphen (listed for clarity; also Cf).
+_INVISIBLE = frozenset({"\u00ad", "\u034f", "\u115f", "\u1160", "\u3164", "\uffa0"})
+
+
+def _is_control(char: str) -> bool:
+    if char in _ALLOWED_FORMAT:
+        return False
+    return unicodedata.category(char) in _CONTROL_CATEGORIES or char in _INVISIBLE
 
 
 def _is_latin1_printable(text: str) -> bool:
-    return all(not _is_control(ord(c)) and ord(c) <= 0xFF for c in text)
+    return all(ord(c) <= 0xFF and not _is_control(c) for c in text)
 
 
 def unrenderable_pdf_text(text: str) -> str:
@@ -77,14 +88,15 @@ def unrenderable_pdf_text(text: str) -> str:
 
     Callers MUST reject text containing these up front: letting them through
     would stamp an empty ``.notdef`` box - unacceptable for a signature stamp
-    on a legal document, and bad even for a plain form overlay. Control
-    characters (C0/C1, bidi controls, zero-width space/BOM) are always
-    rejected; anything else is fine as long as some face in the font chain
-    covers it. Returns "" when fully renderable.
+    on a legal document, and bad even for a plain form overlay. Invisible
+    and control characters (categories Cc/Cf/Zl/Zp except ZWNJ/ZWJ, plus
+    Hangul fillers and the combining grapheme joiner) are always rejected;
+    anything else is fine as long as some face in the font chain covers it.
+    Returns "" when fully renderable.
     """
     if _is_latin1_printable(text):
         return ""
-    seen: dict[str, None] = {c: None for c in text if _is_control(ord(c))}
+    seen: dict[str, None] = {c: None for c in text if _is_control(c)}
     for char in uncovered_chars(text):
         seen.setdefault(char)
     return "".join(seen)
@@ -100,8 +112,8 @@ def unrenderable_reason(text: str) -> str | None:
     bad = unrenderable_pdf_text(text)
     if not bad:
         return None
-    controls = "".join(c for c in bad if _is_control(ord(c)))
-    uncovered = "".join(c for c in bad if not _is_control(ord(c)))
+    controls = "".join(c for c in bad if _is_control(c))
+    uncovered = "".join(c for c in bad if not _is_control(c))
     reasons = []
     if controls:
         reasons.append(
@@ -134,6 +146,12 @@ class _Accumulator(GlyphAccumulator):
     (``_get_cid_and_width``, ``_cid_to_unicode``, ``hb_font``), hence the
     ``<0.36`` pin in pyproject.toml; drop this class once pyHanko maps RTL
     clusters itself (tests/test_pdf_unicode_fonts.py pins the behaviour).
+
+    Limitation: a ToUnicode CMap is single-valued per glyph, so a glyph
+    reused in different contexts (or a ligature spanning words) keeps one
+    mapping, and extraction order for RTL text is visual. pyHanko also wraps
+    every shaped run in a ``/Span`` with ``/ActualText`` holding the logical
+    string, which is what copy/search use in viewers that honour it.
     """
 
     @functools.cached_property

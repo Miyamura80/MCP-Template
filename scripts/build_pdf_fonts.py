@@ -35,7 +35,7 @@ Font Name (the CJK faces reserve only "Source").
 
 The output is reproducible (pinned fontTools, no timestamp recalculation).
 After a deliberate change, update the sha256 values this script prints in
-``BUNDLED_FONTS`` / ``OPTIONAL_FONTS`` (``services/pdf_fonts/__init__.py``);
+``FONT_SPECS`` (``services/pdf_fonts/__init__.py``);
 ``tests/test_pdf_unicode_fonts.py`` checks the vendored files against them,
 and the font chain ignores an optional file whose hash does not match.
 

@@ -33,6 +33,17 @@ class TestResolveLevels(TestTemplate):
         # number (not a European one), so per W5/N2 it falls back to base L.
         assert resolve_levels("اب 12.5%") == [1, 1, 1, 2, 2, 2, 2, 0]
 
+    def test_brackets_around_rtl_after_rtl_stay_rtl(self):
+        # N0: the pair holds only Arabic and follows Arabic, so it is R.
+        assert resolve_levels("محمد (علي)") == [1] * 10
+
+    def test_brackets_with_ltr_content_are_ltr(self):
+        assert resolve_levels("محمد (Ali)") == [1, 1, 1, 1, 0, 0, 0, 0, 0, 0]
+
+    def test_rtl_brackets_after_ltr_take_base_direction(self):
+        # N0 c.2: opposite-direction content but left-to-right context.
+        assert resolve_levels("by (علي)") == [0, 0, 0, 0, 1, 1, 1, 0]
+
     def test_combining_mark_follows_its_letter(self):
         assert resolve_levels("مُ") == [1, 1]
 
@@ -61,6 +72,13 @@ class TestSplitRunsBidi(TestTemplate):
 
     def test_european_number_stays_inside_rtl_span(self):
         assert _drawn("شارع 12 الملك") == ["الملك", " ", "12", " ", "شارع"]
+
+    def test_parenthesized_rtl_drawn_as_one_span(self):
+        # Whole line is RTL: drawing order is the reverse of logical order,
+        # and HarfBuzz mirrors the parentheses inside the RTL runs.
+        runs = pdf_fonts.split_runs("محمد (علي)")
+        assert [r.text for r in runs] == [")", "علي", " (", "محمد"]
+        assert all(r.rtl for r in runs)
 
     def test_rtl_name_inside_latin_line(self):
         assert _drawn("by محمد علي on") == ["by ", "علي", " ", "محمد", " on"]

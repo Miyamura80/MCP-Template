@@ -128,9 +128,11 @@ with HarfBuzz and drawn with an embedded, per-document subset of the Noto
 fonts bundled in `services/pdf_fonts/` (SIL OFL 1.1), with a ToUnicode map so
 the text stays searchable and copyable. Arabic is joined and laid out
 right-to-left inside a left-to-right line, with numbers kept left-to-right.
-Bidi control characters (e.g. U+202E RIGHT-TO-LEFT OVERRIDE) and invisible
-zero-width spaces are always rejected, so a stamped name cannot display
-differently from what was typed. A typed name wider than the stamp shrinks
+Control and invisible characters (Unicode categories Cc, Cf, Zl and Zp,
+which include bidi overrides such as U+202E, zero-width spaces, the word
+joiner and soft hyphens, plus Hangul fillers) are always rejected, so a
+stamped name cannot display differently from what was typed; ZWNJ/ZWJ stay
+allowed for Arabic and Indic spelling. A typed name wider than the stamp shrinks
 to fit (down to 8pt); a name still too long at that size is refused.
 
 The committed bundle is ~2 MB rather than the ~16 MB a full CJK face costs,
@@ -146,6 +148,10 @@ of GB2312 level 1 and the 2,350 common Hangul syllables) into
 `services/pdf_fonts/optional/`. That directory is gitignored and checked
 automatically: no config needed, and a file whose sha256 does not match the
 pinned build is ignored with a warning. Restart the server afterwards.
+The target writes into the source checkout, so it only helps a server run
+from that checkout; for an installed wheel, build the fonts anywhere with
+`uv run scripts/build_pdf_fonts.py --cjk` from a checkout and list the two
+resulting files in `pdf_forms.fonts.extra_font_paths` instead.
 
 **Other scripts.** List extra TTF/OTF files in
 `pdf_forms.fonts.extra_font_paths`; they are tried after the bundled and

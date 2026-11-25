@@ -5,6 +5,7 @@ embedded font, stay extractable (ToUnicode), and leave Latin-1 output on the
 standard-14 path. Characters no font covers are still refused up front.
 """
 
+import dataclasses
 import hashlib
 import io
 import re
@@ -39,13 +40,12 @@ KO_ZH = "김们"
 KR_FONT = "NotoSansKR-Regular.subset.ttf"
 
 
-@pytest.fixture(autouse=True)
-def _no_optional_fonts(tmp_path):
-    """Default chain = committed fonts only, even if `make pdf_fonts_cjk` ran."""
-    empty = tmp_path / "no-optional-fonts"
-    empty.mkdir()
-    with patch.object(pdf_fonts, "OPTIONAL_DIR", empty):
-        yield
+def _with_kr_sha(sha256: str) -> tuple[pdf_fonts.FontSpec, ...]:
+    """FONT_SPECS with the optional Korean entry pinned to ``sha256``."""
+    return tuple(
+        dataclasses.replace(spec, sha256=sha256) if spec.name == KR_FONT else spec
+        for spec in pdf_fonts.FONT_SPECS
+    )
 
 
 def _tiny_font(path, chars: str) -> str:
@@ -163,7 +163,8 @@ class TestFontChain(TestTemplate):
 
     @pytest.mark.parametrize(
         "char",
-        ["\u061c", "\u200b", "\u200e", "\u200f", "\u202a", "\u202e"]
+        ["\u2060", "\u2028", "\u2029", "\u00ad", "\u3164", "\u115f", "\u034f"]
+        + ["\u061c", "\u200b", "\u200e", "\u200f", "\u202a", "\u202e"]
         + ["\u2066", "\u2069", "\ufeff"],
     )
     def test_bidi_and_invisible_controls_rejected(self, char):
@@ -187,9 +188,11 @@ class TestFontChain(TestTemplate):
         assert unrenderable_reason("山田太郎") is None
 
     def test_vendored_fonts_match_recorded_hashes(self):
-        for name, expected in pdf_fonts.BUNDLED_FONTS.items():
-            data = (pdf_fonts.FONT_DIR / name).read_bytes()
-            assert hashlib.sha256(data).hexdigest() == expected, name
+        bundled = [spec for spec in pdf_fonts.FONT_SPECS if not spec.optional]
+        assert len(bundled) == 3
+        for spec in bundled:
+            data = (pdf_fonts.FONT_DIR / spec.name).read_bytes()
+            assert hashlib.sha256(data).hexdigest() == spec.sha256, spec.name
 
     def test_runs_pick_first_covering_face(self):
         runs = pdf_fonts.split_runs("Signed by 山田 on 2026")
@@ -220,7 +223,8 @@ class TestFontChain(TestTemplate):
     def test_unreadable_extra_font_is_skipped(self):
         fonts_cfg = global_config.pdf_forms.fonts
         with patch.object(fonts_cfg, "extra_font_paths", ["/nonexistent/font.ttf"]):
-            assert len(pdf_fonts.font_chain()) == len(pdf_fonts.BUNDLED_FONTS)
+            bundled = [s for s in pdf_fonts.FONT_SPECS if not s.optional]
+            assert len(pdf_fonts.font_chain()) == len(bundled)
             assert unrenderable_pdf_text("שרה") == "שרה"
 
 
@@ -230,14 +234,16 @@ class TestOptionalCjkFonts(TestTemplate):
     def test_refused_by_default(self):
         assert unrenderable_pdf_text("김민준") == "김민준"
         assert unrenderable_pdf_text("们") == "们"
-        assert "Korean" not in pdf_fonts.coverage_summary()
+        summary = pdf_fonts.coverage_summary()
+        assert "Japanese" in summary
+        assert "Korean" not in summary
+        assert "Chinese" not in summary
 
     def test_optional_dir_font_is_picked_up(self, tmp_path):
         sha = _tiny_font(tmp_path / KR_FONT, KO_ZH)
-        pinned = {KR_FONT: (sha, "common Korean Hangul")}
         with (
             patch.object(pdf_fonts, "OPTIONAL_DIR", tmp_path),
-            patch.object(pdf_fonts, "OPTIONAL_FONTS", pinned),
+            patch.object(pdf_fonts, "FONT_SPECS", _with_kr_sha(sha)),
         ):
             assert unrenderable_pdf_text(KO_ZH) == ""
             assert "Korean" in pdf_fonts.coverage_summary()
@@ -246,16 +252,16 @@ class TestOptionalCjkFonts(TestTemplate):
 
     def test_optional_font_with_wrong_hash_is_ignored(self, tmp_path):
         _tiny_font(tmp_path / KR_FONT, KO_ZH)
-        pinned = {KR_FONT: ("0" * 64, "common Korean Hangul")}
         with (
             patch.object(pdf_fonts, "OPTIONAL_DIR", tmp_path),
-            patch.object(pdf_fonts, "OPTIONAL_FONTS", pinned),
+            patch.object(pdf_fonts, "FONT_SPECS", _with_kr_sha("0" * 64)),
         ):
             assert unrenderable_pdf_text(KO_ZH) == KO_ZH
 
     def test_real_opt_in_fonts_when_built(self):
         real_dir = pdf_fonts.FONT_DIR / "optional"
-        if not all((real_dir / name).is_file() for name in pdf_fonts.OPTIONAL_FONTS):
+        optional = [s.name for s in pdf_fonts.FONT_SPECS if s.optional]
+        if not all((real_dir / name).is_file() for name in optional):
             pytest.skip("opt-in CJK fonts not built (run `make pdf_fonts_cjk`)")
         with patch.object(pdf_fonts, "OPTIONAL_DIR", real_dir):
             assert unrenderable_pdf_text("김민준 们") == ""
@@ -285,9 +291,11 @@ class TestOverlayRendering(TestTemplate):
         # Glyphs actually paint: the first name's line is not blank.
         assert _ink_ratio(data, (50, 696, 110, 712)) > 0.05
 
-    def test_arabic_to_unicode_cmap_is_exact(self):
-        # One entry per joined letter form, each mapping to its own letter
-        # (no empty entries from pyHanko's RTL cluster bug).
+    def test_arabic_to_unicode_has_one_entry_per_letter_form(self):
+        # Scope: the CMap of this one-line overlay has exactly one entry per
+        # joined letter form, each mapping to its own letter (no empty entries
+        # from pyHanko's RTL cluster bug). Cross-context reuse of a glyph is
+        # out of scope: ToUnicode is single-valued (ActualText covers it).
         data = _overlay_pdf([OverlayText(50.0, 700.0, 14.0, ARABIC_NAME)])
         cmap = _to_unicode(_arabic_font(data))
         assert sorted(cmap.values()) == sorted(ARABIC_NAME.replace(" ", ""))

@@ -32,6 +32,22 @@ def _no_real_feedback_sinks() -> Iterator[None]:
         yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_optional_pdf_fonts(tmp_path_factory) -> Iterator[None]:
+    """Default PDF font chain = committed fonts only, for every test.
+
+    ``make pdf_fonts_cjk`` writes opt-in Chinese/Korean fonts into the
+    checkout; without this, local runs would cover Hangul while CI refuses
+    it. Tests that exercise the opt-in path patch ``OPTIONAL_DIR`` back.
+    """
+    from services import pdf_fonts  # noqa: PLC0415 - keep conftest import-light
+
+    empty = tmp_path_factory.mktemp("no-optional-pdf-fonts")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(pdf_fonts, "OPTIONAL_DIR", empty)
+        yield
+
+
 @pytest.fixture
 def feedback_db() -> Iterator[sessionmaker]:
     """Point ``db.engine`` at a fresh in-memory SQLite; yield the factory."""

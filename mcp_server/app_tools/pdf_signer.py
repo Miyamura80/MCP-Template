@@ -43,9 +43,9 @@ from services.pdf_documents_repo import load_document
 from services.pdf_signing import (
     abort_signing,
     perform_signing,
-    resolve_stamp_rect,
     validate_ceremony,
 )
+from services.pdf_stamp import resolve_stamp_rect
 
 _APP_META = {"ui": {"visibility": ["app"]}}
 
