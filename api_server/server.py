@@ -42,6 +42,7 @@ from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
 from services import InvalidArgument
 from services.gmail_svc import GmailAttachmentTooLargeError
+from services.pdf_signing import warn_if_untrusted_seal
 from src.utils.package_info import package_version
 
 _APP_VERSION = package_version("0.1.0")
@@ -100,6 +101,8 @@ def session_cookie_policy() -> SessionCookiePolicy:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Compose MCP sessions, the periodic runners and the CIMD fetch tasks."""
+    # Surface a non-dev deployment sealing with the untrusted dev cert.
+    warn_if_untrusted_seal()
     async with mcp_lifespan(app), runner_lifespan(app), cimd_lifespan():
         yield
 
