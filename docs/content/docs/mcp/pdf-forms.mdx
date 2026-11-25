@@ -136,11 +136,16 @@ identity: attribution of *who* signed comes from the audit trail, integrity
 of *what* was signed comes from the seal.
 
 Seals made with the dev certificate validate as **untrusted** in any real
-validator. Outside development (any `DEV_ENV` other than `local` / `dev`,
-including `prod`), the server checks for this at startup and on the first
-seal: if `cert_path` / `key_path` are unset it logs a prominent warning that
-documents are being sealed with the untrusted self-signed certificate.
-Startup is not blocked; treat the warning as a deployment error.
+validator. Outside development, if both `cert_path` and `key_path` are unset,
+the server logs an error saying documents are being sealed with the
+untrusted self-signed certificate. It logs once per process: at startup, or,
+for stdio processes that skip the HTTP startup, on the first seal. Startup is
+not blocked; treat the error as a deployment bug. "Development" means
+`DEV_ENV` is `local` or `dev`, compared case-insensitively; any other value,
+including `prod`, a typo, or unset, counts as non-dev.
+
+Setting only one of `cert_path` / `key_path` is a configuration error: config
+loading and sealing both raise rather than fall back to the dev certificate.
 
 ## Extractable by design
 

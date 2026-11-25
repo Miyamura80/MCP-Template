@@ -19,7 +19,7 @@ Signing steps (US-007):
    self-signed certificate is generated once and cached under
    ``pdf_forms.signing.dev_cert_dir``; production should configure
    ``cert_path``/``key_path`` with a real key pair. Outside dev, falling back
-   to the dev cert logs a loud warning (:func:`warn_if_untrusted_seal`).
+   to the dev cert logs a loud error (:func:`warn_if_untrusted_seal`).
 
 The stamp uses the standard-14 Helvetica-Oblique face rather than a bundled
 script font: zero licensing surface and it renders identically everywhere
@@ -212,38 +212,56 @@ def _generate_dev_cert(cert_path: Path, key_path: Path) -> None:
 
 
 _UNTRUSTED_SEAL_WARNING = (
-    "PDF SIGNING: pdf_forms.signing.cert_path/key_path are unset outside "
-    "development (DEV_ENV={dev_env}). Documents will be sealed with the "
-    "auto-generated SELF-SIGNED dev certificate under {cert_dir}, and every "
-    "real validator will report those seals as UNTRUSTED. Configure a real "
-    "PEM key pair in pdf_forms.signing before signing production documents."
+    "PDF SIGNING: pdf_forms.signing.cert_path and key_path are both unset "
+    "outside development (DEV_ENV={dev_env}). Documents will be sealed with "
+    "the auto-generated SELF-SIGNED dev certificate under {cert_dir}, and "
+    "every real validator will report those seals as UNTRUSTED. Configure a "
+    "real PEM key pair in pdf_forms.signing before signing production documents."
 )
 _untrusted_seal_warned = False
 
 
-def warn_if_untrusted_seal() -> bool:
-    """Log a loud warning (once per process) if prod would seal with the dev cert.
+def _configured_seal_pair() -> tuple[Path, Path] | None:
+    """The configured (cert, key) pair, or None when both are unset.
+
+    A half-configured pair raises instead of returning None: falling back to
+    the untrusted dev cert would hide the misconfiguration until a signed
+    document fails validation. (The config model rejects this at load; this
+    guards values changed after load.)
+    """
+    cfg = global_config.pdf_forms.signing
+    if bool(cfg.cert_path) != bool(cfg.key_path):
+        raise ValueError(
+            "pdf_forms.signing: cert_path and key_path must be set together "
+            "(or both left null for the dev self-signed cert); only "
+            f"{'cert_path' if cfg.cert_path else 'key_path'} is set."
+        )
+    if cfg.cert_path and cfg.key_path:
+        return Path(cfg.cert_path), Path(cfg.key_path)
+    return None
+
+
+def warn_if_untrusted_seal() -> None:
+    """Log a loud error (once per process) if non-dev would seal with the dev cert.
 
     Called at server startup and again on the dev-cert fallback in
     :func:`sealing_cert_paths`, so stdio-only processes that never run the
     HTTP lifespan still surface it. Gated on ``global_config.is_dev``, which
     fails secure: ``prod``, ``staging``, unset or a typo all count as
-    production. Returns True when the misconfiguration is present, whether
-    or not this call was the one that logged it.
+    production. Raises ``ValueError`` on a half-configured pair.
     """
     global _untrusted_seal_warned  # noqa: PLW0603 - process-wide once flag
-    cfg = global_config.pdf_forms.signing
-    if global_config.is_dev or (cfg.cert_path and cfg.key_path):
-        return False
-    if not _untrusted_seal_warned:
-        _untrusted_seal_warned = True
-        log.warning(
-            _UNTRUSTED_SEAL_WARNING.format(
-                dev_env=global_config.DEV_ENV or "<unset>",
-                cert_dir=_dev_cert_paths()[0].parent,
-            )
+    if _configured_seal_pair() is not None or global_config.is_dev:
+        return
+    if _untrusted_seal_warned:
+        return
+    _untrusted_seal_warned = True
+    log.error(
+        _UNTRUSTED_SEAL_WARNING.format(
+            dev_env=global_config.DEV_ENV or "<unset>",
+            cert_dir=_dev_cert_paths()[0].parent,
         )
-    return True
+    )
 
 
 def sealing_cert_paths() -> tuple[Path, Path]:
@@ -254,10 +272,11 @@ def sealing_cert_paths() -> tuple[Path, Path]:
     processes generating concurrently could otherwise each replace one half
     of the pair, leaving a mismatched key/cert on disk. The winner generates;
     losers block on the lock, then see the finished pair on the recheck.
+    Raises ``ValueError`` if only one of cert_path/key_path is set.
     """
-    cfg = global_config.pdf_forms.signing
-    if cfg.cert_path and cfg.key_path:
-        return Path(cfg.cert_path), Path(cfg.key_path)
+    configured = _configured_seal_pair()
+    if configured is not None:
+        return configured
     warn_if_untrusted_seal()
     cert_path, key_path = _dev_cert_paths()
     if cert_path.exists() and key_path.exists():

@@ -168,6 +168,7 @@ exclude = [
     "tests/test_logging_security.py",
     "tests/test_logging_thread_safety.py",
     "tests/test_template.py",
+    "tests/test_pdf_signing_cert_warning.py",
     "tests/test_api_key_auth.py",
     "tests/test_api_server.py",
     "tests/test_deprecation.py",

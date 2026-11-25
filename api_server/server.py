@@ -101,8 +101,7 @@ def session_cookie_policy() -> SessionCookiePolicy:
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Compose MCP sessions, the periodic runners and the CIMD fetch tasks."""
-    # Startup check: a prod deployment without a sealing key pair would
-    # otherwise seal every document with the untrusted dev cert, silently.
+    # Surface a non-dev deployment sealing with the untrusted dev cert.
     warn_if_untrusted_seal()
     async with mcp_lifespan(app), runner_lifespan(app), cimd_lifespan():
         yield
