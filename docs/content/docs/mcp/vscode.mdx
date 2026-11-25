@@ -1,0 +1,75 @@
+---
+title: VS Code
+description: Add your server to VS Code (GitHub Copilot agent mode) with an mcp.json entry
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+VS Code uses MCP tools in **GitHub Copilot agent mode**. It connects to your
+server's **streamable-HTTP** endpoint at `/mcp` and renders
+[MCP Apps](https://github.com/modelcontextprotocol/ext-apps) in chat.
+
+## Add the server
+
+Run **MCP: Open User Configuration** from the Command Palette (or create
+`.vscode/mcp.json` for one workspace) and add:
+
+<Tabs items={['OAuth', 'API key']} groupId="mcp-auth">
+<Tab value="OAuth">
+
+```json
+{
+  "servers": {
+    "mymcp": {
+      "type": "http",
+      "url": "https://YOUR-DEPLOYMENT/mcp"
+    }
+  }
+}
+```
+
+On the first `401`, VS Code opens the browser to sign in and refreshes tokens
+itself. Needs [OAuth 2.1](/docs/mcp/oauth) configured on the deployment.
+
+</Tab>
+<Tab value="API key">
+
+```json
+{
+  "inputs": [
+    { "type": "promptString", "id": "mymcp-key", "description": "mymcp API key", "password": true }
+  ],
+  "servers": {
+    "mymcp": {
+      "type": "http",
+      "url": "https://YOUR-DEPLOYMENT/mcp",
+      "headers": { "X-API-KEY": "${input:mymcp-key}" }
+    }
+  }
+}
+```
+
+VS Code prompts for the key once and stores it securely.
+
+</Tab>
+</Tabs>
+
+<Callout type="info">
+VS Code's file uses a top-level `servers` key, not `mcpServers`.
+</Callout>
+
+## Verify
+
+Run **MCP: List Servers** and check `mymcp` is running. In Copilot Chat, switch
+to **Agent** mode and enable `mymcp` in the tools picker.
+
+## Troubleshooting
+
+- **No tools in chat**: Copilot Chat isn't in **Agent** mode, or `mymcp` is off
+  in the tools picker.
+- **Server stopped**: **MCP: List Servers** > `mymcp` > **Restart**.
+
+## Related
+
+- [VS Code: MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)
+- [Setup](/docs/mcp/setup) - stdio (`mymcp-mcp`) for local dev

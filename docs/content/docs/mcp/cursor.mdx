@@ -1,0 +1,69 @@
+---
+title: Cursor
+description: Add your server to Cursor with an mcp.json entry
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Cursor connects to your server's **streamable-HTTP** endpoint at `/mcp` and
+renders [MCP Apps](https://github.com/modelcontextprotocol/ext-apps) inline.
+
+## Add the server
+
+Add to `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
+
+<Tabs items={['OAuth', 'API key']} groupId="mcp-auth">
+<Tab value="OAuth">
+
+```json
+{
+  "mcpServers": {
+    "mymcp": {
+      "url": "https://YOUR-DEPLOYMENT/mcp"
+    }
+  }
+}
+```
+
+Cursor discovers the authorization server from protected resource metadata,
+registers itself, and prompts you to sign in on first connect. Needs
+[OAuth 2.1](/docs/mcp/oauth) configured on the deployment.
+
+</Tab>
+<Tab value="API key">
+
+```json
+{
+  "mcpServers": {
+    "mymcp": {
+      "url": "https://YOUR-DEPLOYMENT/mcp",
+      "headers": { "X-API-KEY": "${env:MYMCP_API_KEY}" }
+    }
+  }
+}
+```
+
+</Tab>
+</Tabs>
+
+<Callout type="info">
+`${env:VAR}` interpolation keeps the key out of the file. Don't commit a
+literal key in a project `.cursor/mcp.json`.
+</Callout>
+
+## Verify
+
+Open **Cursor Settings > MCP** and check `mymcp` is enabled with its tools
+listed. Then ask the agent to call one.
+
+## Troubleshooting
+
+- **Auth errors after a while (OAuth)**: toggle `mymcp` off and on in
+  **Cursor Settings > MCP** to re-run sign-in.
+- **401 (API key)**: `MYMCP_API_KEY` is unset in Cursor's environment or the key
+  was revoked.
+
+## Related
+
+- [Cursor: MCP](https://cursor.com/docs/mcp)
+- [Setup](/docs/mcp/setup) - stdio (`mymcp-mcp`) for local dev

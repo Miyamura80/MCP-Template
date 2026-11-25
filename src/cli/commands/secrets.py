@@ -15,6 +15,7 @@ from rich.console import Console
 from src.cli.state import is_dry_run, is_quiet
 from src.utils.cli_help import examples_epilog
 from src.utils.output import render
+from src.utils.package_info import DIST_NAME
 from src.utils.stdin import resolve_value
 
 app = typer.Typer(no_args_is_help=True)
@@ -25,7 +26,7 @@ def _get_cli_name() -> str:
     """Derive CLI name from package console_scripts entry point."""
     eps = importlib.metadata.entry_points(group="console_scripts")
     for ep in eps:
-        if ep.dist and ep.dist.name == "mcp-template":
+        if ep.dist and ep.dist.name == DIST_NAME:
             return ep.name
     return "mymcp"
 

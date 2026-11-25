@@ -1,9 +1,11 @@
 """Tests for MCP server tool registration."""
 
 import asyncio
+import inspect
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.types import InputRequiredResult
 from pydantic import BaseModel
 
 from mcp_server.server import _register_app_resource, mcp
@@ -46,7 +48,7 @@ class TestMCPServer(TestTemplate):
             assert tool.output_schema is not None, f"{tool_name} missing outputSchema"
 
     def test_enhanced_output_schema_matches_output_model(self):
-        # _patch_output_schema writes into FastMCP's private registry; assert
+        # _patch_output_schema writes into the SDK's private registry; assert
         # the published schema is byte-for-byte the service output model's
         # schema, not just non-None, so an SDK upgrade that breaks the patch
         # path fails loudly here.
@@ -94,9 +96,19 @@ class TestMCPServer(TestTemplate):
             assert "ctx" not in tool.parameters.get("properties", {})
             assert "ctx" not in tool.parameters.get("required", [])
 
+    def test_every_tool_takes_one_keyword_only_optional_ctx(self):
+        # Headless and enhanced wrappers share one ctx convention (#255).
+        for name in ("gmail_send", "gmail_compose"):
+            tool = mcp._tool_manager._tools[name]
+            assert tool.context_kwarg == "ctx"
+            ctx = inspect.signature(tool.fn).parameters["ctx"]
+            assert ctx.kind is inspect.Parameter.KEYWORD_ONLY
+            assert ctx.default is None
+            assert "ctx" not in tool.parameters.get("properties", {})
+
     def test_default_factory_fields_resolve_to_concrete_defaults(self):
         # Regression: inspect.signature() renders a Pydantic default_factory
-        # field with the private <factory> sentinel. FastMCP copies each
+        # field with the private <factory> sentinel. MCPServer copies each
         # parameter default verbatim into the tool's argument model, so an
         # unresolved sentinel is handed back as the value when the caller omits
         # the field, failing validation ("Input should be a valid list ...
@@ -161,7 +173,7 @@ class TestMCPServer(TestTemplate):
 
 
 class TestMCPServerIntegration(TestTemplate):
-    """End-to-end integration tests calling tools through the registered FastMCP wrapper."""
+    """End-to-end integration tests calling tools through the registered MCPServer wrapper."""
 
     def test_app_resources_registered_and_serve_html(self):
         resources = asyncio.run(mcp.list_resources())
@@ -171,7 +183,9 @@ class TestMCPServerIntegration(TestTemplate):
         ui_uris = [u for u in uris if u.startswith("ui://mymcp/")]
         assert ui_uris, "expected at least one ui://mymcp/ resource registered"
         for uri in ui_uris:
-            contents = list(asyncio.run(mcp.read_resource(uri)))
+            read = asyncio.run(mcp.read_resource(uri))
+            assert not isinstance(read, InputRequiredResult)
+            contents = list(read)
             assert len(contents) == 1
             text = str(contents[0].content)
             assert text.lstrip().lower().startswith("<!doctype html>")
@@ -179,13 +193,15 @@ class TestMCPServerIntegration(TestTemplate):
     def test_missing_app_build_serves_stub_comment(self):
         # Edge case A1 (mcp_server/MCP_UI_EDGE_CASES.md): an app dir without a
         # built dist/mcp-app.html must serve an HTML comment stub, not crash.
-        test_mcp = FastMCP("test_stub")
+        test_mcp = MCPServer("test_stub")
         missing = Path("/nonexistent/test_app/dist/mcp-app.html")
         _register_app_resource(
             test_mcp, "ui://mymcp/test_stub_app", missing, "test_stub_app"
         )
 
-        contents = list(asyncio.run(test_mcp.read_resource("ui://mymcp/test_stub_app")))
+        read = asyncio.run(test_mcp.read_resource("ui://mymcp/test_stub_app"))
+        assert not isinstance(read, InputRequiredResult)
+        contents = list(read)
         assert len(contents) == 1
         text = str(contents[0].content)
         assert text.startswith("<!--")

@@ -1,0 +1,90 @@
+---
+title: Muse (Meta)
+description: Connect your server to Muse Code, and what is known about Meta's consumer Muse agent
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Meta ships two products under the Muse name. Only one has documented MCP
+support.
+
+| Product | MCP support | How |
+| --- | --- | --- |
+| **Muse Code** (terminal agent) | Documented | `mcp_servers` block in its settings file |
+| **Muse** (consumer agent: app, web, WhatsApp) | Not clearly documented | See [below](#muse-consumer-agent) |
+
+## Muse Code
+
+Add your server as a `streamable_http` entry in the `mcp_servers` block of
+Muse Code's settings file (`~/.config/muse/settings.json`):
+
+<Tabs items={['OAuth', 'API key']} groupId="mcp-auth">
+<Tab value="OAuth">
+
+```json
+{
+  "mcp_servers": {
+    "mymcp": {
+      "type": "streamable_http",
+      "url": "https://YOUR-DEPLOYMENT/mcp"
+    }
+  }
+}
+```
+
+```bash
+muse mcp login mymcp
+```
+
+Needs [OAuth 2.1](/docs/mcp/oauth) configured on the deployment.
+
+</Tab>
+<Tab value="API key">
+
+```json
+{
+  "mcp_servers": {
+    "mymcp": {
+      "type": "streamable_http",
+      "url": "https://YOUR-DEPLOYMENT/mcp",
+      "headers": { "X-API-KEY": "sk_..." }
+    }
+  }
+}
+```
+
+</Tab>
+</Tabs>
+
+In a session, run `/mcp` to see the tools.
+
+<Callout type="warn">
+Muse Code is new and its MCP config has changed between builds (some
+references show `mcpServers`, and `muse mcp login` only exists in recent
+builds). Check [Meta's Muse Code docs](https://dev.meta.ai/docs/muse-code/extending)
+for the exact keys in your version.
+</Callout>
+
+## Muse (consumer agent)
+
+Meta has **not** clearly documented how to add a remote MCP server to the
+consumer Muse agent. There is no "add MCP server" field in its settings, and
+third-party guides disagree: some describe asking Muse in chat to build a
+Custom Connector against a URL, others say custom connectors wrap plain APIs
+rather than MCP.
+
+What is known:
+
+- Muse runs in Meta's cloud, so any connection needs your **public**
+  `https://YOUR-DEPLOYMENT/mcp`, never `localhost`.
+- Meta opened **connector directory submissions** on September 18, 2026. Listing
+  your server there (with its hosted URL and auth method) goes through Meta's
+  review.
+
+Until Meta publishes setup steps, treat consumer Muse support as unverified and
+test it yourself before relying on it.
+
+## Related
+
+- [Meta Help Center: Muse connectors](https://www.meta.com/help/artificial-intelligence/1687253048996149/)
+- [Grok](/docs/mcp/grok) - another cloud agent

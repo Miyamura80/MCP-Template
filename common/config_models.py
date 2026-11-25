@@ -188,6 +188,13 @@ class WebBotAuthConfig(BaseModel):
     key_lifetime_days: int = Field(default=365, ge=1)
 
 
+class OAuthConfig(BaseModel):
+    """Settings for this server's own OAuth server (``api_server/oauth/``)."""
+
+    # CIMD client ids treated as known from startup (see api_server/oauth/cimd).
+    cimd_known_clients: list[str] = Field(default_factory=list)
+
+
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration."""
 
@@ -287,6 +294,78 @@ class AskConfig(BaseModel):
     docs_base_url: str = "https://docs.gmailmcp.com"
     top_k: int = 5
     rate_limit_per_minute: int = 20
+
+
+class LinearFeedbackConfig(BaseModel):
+    """Linear feedback sink settings (the API key is a secret, in ``.env``).
+
+    The sink is on when ``FEEDBACK_LINEAR_API_KEY`` and ``team_id`` are both
+    set. ``label_ids`` and ``project_id`` are applied to issues it creates.
+    """
+
+    team_id: str | None = None
+    label_ids: list[str] = Field(default_factory=list)
+    project_id: str | None = None
+
+
+class FeedbackConfig(BaseModel):
+    """Agent ``feedback`` tool configuration.
+
+    Submissions are always stored in the ``agent_feedback`` table. The Slack
+    sink is enabled by ``FEEDBACK_SLACK_WEBHOOK_URL`` in ``.env``; the Linear
+    sink by ``FEEDBACK_LINEAR_API_KEY`` plus ``linear.team_id``.
+    ``sink_timeout_seconds`` is each sink's total budget per submission.
+    """
+
+    sink_timeout_seconds: float = Field(default=3.0, gt=0)
+    linear: LinearFeedbackConfig = Field(default_factory=LinearFeedbackConfig)
+
+
+class ApprovalsConfig(BaseModel):
+    """Human-in-the-loop approval of ``risk="dangerous"`` tools.
+
+    The mode itself is per user, set on the dashboard; this is deployment-wide
+    plumbing. ``approve_url_template`` points browser-mode approvals at a page:
+    ``{base}`` is this server's public origin and ``{id}`` the approval id.
+    Point it at your own dashboard to replace the built-in pages.
+    """
+
+    agent_expiry_seconds: int = Field(default=600, gt=0)
+    elicitation_expiry_seconds: int = Field(default=600, gt=0)
+    browser_expiry_seconds: int = Field(default=86400, gt=0)
+    approve_url_template: str = "{base}/dashboard/approvals/{id}"
+    dashboard_session_seconds: int = Field(default=28800, gt=0)
+
+
+class EventsConfig(BaseModel):
+    """MCP Events (``io.modelcontextprotocol/events``): poll and webhook delivery.
+
+    ``retention_days`` bounds how far back a poll cursor can replay; older
+    cursors come back ``truncated``. Webhook subscriptions last ``ttlMs`` as
+    requested, capped at ``max_subscription_ttl_seconds``; clients refresh by
+    subscribing again.
+    """
+
+    retention_days: int = Field(default=7, gt=0)
+    poll_interval_ms: int = Field(default=5000, ge=1000)
+    max_poll_events: int = Field(default=100, gt=0)
+    default_subscription_ttl_seconds: int = Field(default=86400, gt=0)
+    max_subscription_ttl_seconds: int = Field(default=604800, gt=0)
+    verification_cache_seconds: int = Field(default=86400, ge=0)
+    max_subscriptions_per_user: int = Field(default=50, gt=0)
+    # events/stream (push): how often an open stream checks for new events,
+    # the heartbeat when the client asks for none, and how long one stream may
+    # stay open before the server ends it (the client reconnects with its
+    # cursor, so a long-lived request never pins one replica forever).
+    stream_check_ms: int = Field(default=1000, ge=10)
+    stream_heartbeat_ms: int = Field(default=30000, gt=0)
+    # A client's heartbeatMs is clamped into these bounds (spec: the server
+    # honors it within its own bounds). The max stays under common load
+    # balancer idle timeouts (60s and up), so an idle stream isn't cut.
+    stream_heartbeat_min_ms: int = Field(default=1000, gt=0)
+    stream_heartbeat_max_ms: int = Field(default=55000, gt=0)
+    stream_max_seconds: float = Field(default=300, gt=0)
+    max_streams_per_user: int = Field(default=5, gt=0)
 
 
 class FeaturesConfig(BaseModel):

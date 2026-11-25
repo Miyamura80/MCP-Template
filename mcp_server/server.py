@@ -1,4 +1,4 @@
-"""FastMCP server that registers services as MCP tools and exposes app HTML resources.
+"""MCPServer (python-sdk 2.x) that registers services as MCP tools and exposes app HTML resources.
 
 Two registration paths (see `_tool_factory.py` for details):
 
@@ -13,18 +13,38 @@ console script for local dev / Claude Desktop only.
 See ``mcp_server/MCP_UI_ARCHITECTURE.md`` and ``mcp_server/MCP_UI_EDGE_CASES.md``.
 """
 
+import hashlib
+import hmac
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from loguru import logger as log
-from mcp.server.fastmcp import FastMCP
+from mcp.server.apps import Apps
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from mcp.server.request_state import RequestStateSecurity
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
 
 from common import global_config
+from mcp_server import approval_gate
+from mcp_server._tool_errors import model_facing_message
 from mcp_server._tool_factory import make_tool
-from services import ServiceEntry, discover_services, get_registry
+from mcp_server.events_ext import Events
+from mcp_server.skills import Skills
+from services import (
+    ServiceEntry,
+    dangerous_tool_names,
+    discover_services,
+    get_registry,
+)
+from services.approvals_errors import ApprovalRequiredError
+from services.approvals_svc import APPROVAL_TOOLS
+from src.utils.current_user import current_user
+from src.utils.mcp_url_flags import current_url_flags
+from src.utils.package_info import package_version
 
 _APPS_DIR = Path(__file__).parent / "apps"
 _APP_MIME_TYPE = "text/html;profile=mcp-app"
@@ -46,10 +66,15 @@ _MCP_INSTRUCTIONS = (
 )
 
 
+def _server_version() -> str:
+    """Package version for ``serverInfo`` (per-result ``_meta`` on 2026-07-28)."""
+    return package_version()
+
+
 def _transport_security() -> TransportSecuritySettings:
     """DNS-rebinding allowlist for the streamable-HTTP transport.
 
-    FastMCP enables DNS-rebinding protection and, when constructed with the
+    The SDK enables DNS-rebinding protection and, when constructed with the
     default loopback host, only whitelists localhost - so any real deployment
     behind a custom domain gets ``421 Misdirected Request`` on ``/mcp``. We keep
     the protection on but additionally allow the public host derived from
@@ -92,43 +117,150 @@ def _transport_security() -> TransportSecuritySettings:
     )
 
 
-# ``stateless_http=True`` (the config default) makes every /mcp request
-# self-contained: the server does not persist per-session state keyed by
-# ``Mcp-Session-Id`` in memory. Stateful mode (the FastMCP default) breaks in
-# exactly the deployments this template targets - Render free-tier spins down
-# when idle, redeploys restart the process, and horizontal scaling routes
-# requests across replicas - each of which wipes/splits the in-memory session
-# store, so a client's next POST fails with "MCP session has been terminated or
-# no longer exists on the server" (mcp_session_terminated). Some clients
-# (OpenAI, and connectors that DELETE the session after each call) trigger the
-# same error even single-replica. Stateless mode sidesteps all of it.
+# Protocol eras (python-sdk 2.x, spec 2026-07-28). One ``streamable_http_app``
+# serves every revision; the session manager routes by the
+# ``MCP-Protocol-Version`` header:
 #
-# The trade-off: EVERY server-initiated request hangs stateless - sampling
-# (python-sdk issue 678) AND in-band elicitation. The elicitation/create
-# request does reach the client on the tool call's SSE stream, but the
-# client's response arrives as a new POST that lands on a fresh transient
-# session and is dropped, so ``ctx.elicit()`` never resolves (verified
-# empirically against this SDK). Rendering Apps and attaching content are
-# unaffected. That is why every elicitation call site gates on the client
-# having DECLARED the capability: under stateless HTTP ``client_params`` is
-# never populated, the check correctly returns False, and the enhancers take
-# their non-elicitation fallbacks. Deployments that want host-native
-# elicitation (e.g. the PDF signing confirmation dialog) must run a single
-# replica and set ``server.mcp_stateless_http: false``.
+# - **2026-07-28 (stateless core).** No ``initialize`` handshake, no
+#   ``Mcp-Session-Id``: every request is a self-contained POST carrying the
+#   protocol version, client info and client capabilities in its ``_meta``
+#   (``io.modelcontextprotocol/*`` keys), so any replica can serve any request.
+#   Server-initiated requests (push elicitation, sampling, roots) do not exist
+#   on this wire - ``ctx.elicit()`` raises ``NoBackChannelError``; input is
+#   gathered with multi-round-trip requests (MRTR, ``InputRequiredResult``)
+#   instead. ``server/discover`` replaces the handshake for capability lookup.
+# - **2025-11-25 and earlier (handshake era).** Clients still ``initialize``
+#   and the legacy transport below handles them. ``stateless_http`` only
+#   affects this path (2026-07-28 traffic never reads it).
 #
-# Stateless is also where the spec is going: the MCP core is dropping session
-# state at the protocol layer (SEP-2567 removes Mcp-Session-Id, SEP-2575
-# removes the initialize handshake; 2026-07-28 RC), so "any request can land on
-# any instance." stateless_http=True is the SDK option the transport roadmap
-# points implementers to today. It still runs the initialize handshake (the SDK
-# keeps that until it implements those SEPs) but stops persisting/validating
-# per-session state, which is what actually fixes the error - and it's
-# forward-compatible with the RC.
-mcp: FastMCP = FastMCP(
+# ``stateless_http=True`` (the config default) keeps legacy clients working in
+# the deployments this template targets - Render free-tier spin-down,
+# redeploys and multi-replica routing each wipe/split an in-memory session
+# store, so a stateful client's next POST would fail with
+# ``mcp_session_terminated``. The legacy trade-off is unchanged: in-band
+# elicitation cannot complete stateless (the client's response POST lands on
+# a fresh transport), so every elicitation call site gates on the client
+# having DECLARED the capability AND the request having a back-channel (see
+# ``EnhancedTool.can_elicit``); enhancers take their non-elicitation
+# fallbacks otherwise. Legacy deployments that want host-native elicitation
+# (e.g. the PDF signing confirmation dialog) must run a single replica and set
+# ``server.mcp_stateless_http: false``.
+#
+# MCP Apps is an extension in 2026-07-28 (SEP-2133 framework, identifier
+# ``io.modelcontextprotocol/ui``). An empty ``Apps()`` only advertises it under
+# ``capabilities.extensions`` (server/discover + initialize); our ui://
+# resources and ``_meta.ui`` tool metadata are still registered by hand below
+# so the same wire shapes reach handshake-era hosts that predate extensions.
+#
+# Events (``io.modelcontextprotocol/events``, SEP-3415) serves first-party
+# events by poll and webhook. See ``mcp_server/events_ext.py``.
+# Skills (``io.modelcontextprotocol/skills``, SEP-2640) serves ``skills/`` as
+# ``skill://`` resources plus ``skills/list`` / ``skills/get``. See
+# ``mcp_server/skills.py``.
+class _TemplateMCPServer(MCPServer):
+    """MCPServer that lets first-party failure text reach the model.
+
+    SDK 2.x reports any non-``ToolError`` tool exception as a bare
+    ``Error executing tool <name>``. Our services fail with model-facing
+    messages (recovery scripts, rejected arguments, quota refusals), so a crash
+    caused by a ``services.ModelFacingError`` is re-labelled as a ``ToolError``
+    keeping its text. Everything else stays sanitized and is logged with its
+    traceback. See
+    ``mcp_server/_tool_errors.py``. Tool functions themselves are untouched,
+    so in-process callers still see the original exception types.
+    """
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        if current_url_flags().dangerous_tools:
+            return tools
+        hidden = dangerous_tool_names() | APPROVAL_TOOLS
+        return [t for t in tools if t.name not in hidden]
+
+    async def call_tool(self, name, arguments, context=None):
+        if not current_url_flags().dangerous_tools and (
+            name in dangerous_tool_names() or name in APPROVAL_TOOLS
+        ):
+            # Mirrors the hidden tools/list entry. A ToolError so the model
+            # reads why, rather than a bare "unknown tool".
+            raise ToolError(
+                f"Tool {name!r} is disabled on this connection "
+                "(dangerous_tools=false in the MCP URL)."
+            )
+        # A 2026-07-28 retry carrying the human's answer to our confirmation.
+        await approval_gate.resume_inline(name, context)
+        return await self._dispatch(name, arguments, context, may_confirm=True)
+
+    async def _dispatch(self, name, arguments, context, *, may_confirm: bool):
+        try:
+            return await super().call_tool(name, arguments, context)
+        except UnexpectedToolError as exc:
+            held = exc.__cause__
+            if (
+                may_confirm
+                and isinstance(held, ApprovalRequiredError)
+                and held.view.mode == "elicitation"
+                and context is not None
+                and approval_gate.can_confirm_inline(context)
+            ):
+                # The gate held the call for the human; ask them in the host.
+                # The rerun may not ask again, so a stale answer can't loop.
+                return await approval_gate.confirm_inline(
+                    held,
+                    context,
+                    lambda: self._dispatch(name, arguments, context, may_confirm=False),
+                )
+            message = model_facing_message(held)
+            if message is None:
+                # A real crash: keep its stack in our logs before the SDK
+                # replaces it with a generic message for the client.
+                log.opt(exception=exc.__cause__ or exc).error("Tool {!r} crashed", name)
+                raise
+            raise ToolError(f"Error executing tool {name}: {message}") from exc
+
+
+_REQUEST_STATE_KEY_INFO = b"mymcp/mcp-request-state/v1"
+
+
+def _request_state_principal(_ctx) -> str | None:
+    """Bind sealed ``requestState`` to the user our /mcp middleware authenticated.
+
+    The SDK's default binding reads its own auth context, which this server
+    does not use, so it would bind nothing: state minted for one user could be
+    replayed by another. ``None`` (stdio, in-process) leaves it unbound.
+    """
+    user = current_user()
+    return user.user_id if user is not None else None
+
+
+def _request_state_security() -> RequestStateSecurity:
+    """Seal multi-round-trip ``requestState`` (2026-07-28) under a shared key.
+
+    Without this the SDK seals under a key generated at process start, so a
+    retry that lands on another replica, or after a restart, is refused with
+    "Invalid or expired requestState". The key is derived from
+    ``SESSION_SECRET_KEY``, which every replica already shares and production
+    requires to be set; rotating that secret invalidates in-flight round trips
+    along with dashboard sessions. The TTL covers the longest round trip we mint
+    (an inline approval, ``approvals.elicitation_expiry_seconds``).
+    """
+    key = hmac.new(
+        global_config.SESSION_SECRET_KEY.encode("utf-8"),
+        _REQUEST_STATE_KEY_INFO,
+        hashlib.sha256,
+    ).digest()
+    ttl = max(600, global_config.approvals.elicitation_expiry_seconds)
+    return RequestStateSecurity(
+        keys=[key], ttl=float(ttl), bind_principal=_request_state_principal
+    )
+
+
+mcp: MCPServer = _TemplateMCPServer(
     "mymcp",
+    version=_server_version(),
     instructions=_MCP_INSTRUCTIONS,
-    transport_security=_transport_security(),
-    stateless_http=global_config.server.mcp_stateless_http,
+    extensions=[Apps(), Events(), Skills()],
+    request_state_security=_request_state_security(),
 )
 
 _populated: bool = False
@@ -144,8 +276,8 @@ _EXCLUDED_DEFAULT_MCP_SERVICES = frozenset(
 )
 
 
-def build_mcp_server() -> FastMCP:
-    """Populate the FastMCP singleton and return it. Idempotent."""
+def build_mcp_server() -> MCPServer:
+    """Populate the MCPServer singleton and return it. Idempotent."""
     global _populated
     if _populated:
         return mcp
@@ -189,7 +321,7 @@ def llm_tool_surface() -> list[ServiceEntry]:
     return sorted(surface, key=lambda e: e.name)
 
 
-def _register_app_resources(mcp: FastMCP) -> None:
+def _register_app_resources(mcp: MCPServer) -> None:
     """Register ui:// resources for each MCP App with a built dist/mcp-app.html."""
     if not _APPS_DIR.is_dir():
         return
@@ -202,7 +334,7 @@ def _register_app_resources(mcp: FastMCP) -> None:
 
 
 def _register_app_resource(
-    mcp: FastMCP, uri: str, html_path: Path, app_name: str
+    mcp: MCPServer, uri: str, html_path: Path, app_name: str
 ) -> None:
     @mcp.resource(uri, mime_type=_APP_MIME_TYPE, name=f"{app_name} app")
     def _read_app() -> str:
@@ -212,29 +344,42 @@ def _register_app_resource(
         return html_path.read_text()
 
 
-def mount_on(app, path: str = "/mcp") -> None:
+def mount_on(app, path: str = "/mcp") -> Starlette:
     """Mount the streamable-HTTP MCP server onto a Starlette/FastAPI app.
 
-    FastMCP's ``streamable_http_app()`` already serves at ``/mcp`` internally,
+    ``MCPServer.streamable_http_app()`` already serves at ``/mcp`` internally,
     so we mount it at root to avoid a doubled prefix. Caller must also include
     :func:`lifespan` in the parent app's lifespan to start the session manager.
+
+    Returns the mounted sub-app. Because the mount sits at ``/``, it - not the
+    parent - receives every path the parent's own routes don't claim, so a
+    caller that wants to customize the 404 for unknown paths must register the
+    handler on the returned app.
     """
     if path != "/mcp":
         raise ValueError(
-            "Custom mount paths are not supported; FastMCP serves at /mcp internally."
+            "Custom mount paths are not supported; MCPServer serves at /mcp internally."
         )
     mcp = build_mcp_server()
-    app.mount("/", mcp.streamable_http_app())
+    # Transport options live on the app builder in SDK 2.x (not the
+    # constructor). ``stateless_http`` only governs handshake-era clients.
+    mcp_app = mcp.streamable_http_app(
+        stateless_http=global_config.server.mcp_stateless_http,
+        transport_security=_transport_security(),
+    )
+    app.mount("/", mcp_app)
+    return mcp_app
 
 
 @asynccontextmanager
 async def lifespan(_app):
-    """Async context manager that runs FastMCP's streamable-HTTP session manager.
+    """Async context manager that runs the SDK's streamable-HTTP session manager.
 
     The parent FastAPI app must include this in its ``lifespan=`` argument or
     incoming /mcp requests will fail with "Task group is not initialized".
     """
     mcp = build_mcp_server()
+    # Only exists once ``streamable_http_app()`` has run (``mount_on``).
     sm = mcp.session_manager
     # StreamableHTTPSessionManager.run() refuses re-entry once _has_started is set.
     # Reset it so the same instance can be restarted (tests with --count, hot-reload).

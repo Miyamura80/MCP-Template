@@ -7,3 +7,12 @@ server:
   host: "0.0.0.0"
   allowed_origins:
     - "https://YOUR-DASHBOARD-DOMAIN.example.com"
+
+# Behind a platform edge (Railway, Render, a load balancer) every socket peer
+# is the edge, so all anonymous callers share one rate-limit bucket. If your
+# edge sets X-Real-IP to the caller's address and overwrites any client value
+# (Railway does: docs.railway.com/networking/public-networking/specs-and-limits),
+# trust it. Leave this off when the server is reachable directly, or the header
+# can be forged.
+# rate_limit:
+#   trust_proxy_headers: true

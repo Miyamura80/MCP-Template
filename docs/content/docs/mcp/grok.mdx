@@ -1,0 +1,101 @@
+---
+title: Grok
+description: Connect your server to Grok on grok.com, the Grok Build CLI, or the xAI API
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+xAI exposes MCP in three places. Each one reaches your server's
+**streamable-HTTP** endpoint at `/mcp`.
+
+| Surface | Runs | Auth | `localhost`? |
+| --- | --- | --- | --- |
+| grok.com connectors | xAI's cloud | OAuth | No, needs a public URL |
+| Grok Build CLI (`grok`) | Your machine | OAuth or header | Yes |
+| xAI API (remote MCP tools) | xAI's cloud | Header | No, needs a public URL |
+
+## grok.com connectors
+
+1. Open [grok.com/connectors](https://grok.com/connectors).
+2. Click **New Connector**, then **Custom**.
+3. Set the transport to **Streamable HTTP** and paste
+   `https://YOUR-DEPLOYMENT/mcp`.
+4. Save, then finish the OAuth sign-in. Needs [OAuth 2.1](/docs/mcp/oauth)
+   configured on the deployment.
+
+<Callout type="info">
+Custom connectors may require a paid Grok plan, and xAI's docs do not spell out
+the OAuth registration method Grok uses. If sign-in fails with
+`invalid_client`, enable both Client ID Metadata Documents and Dynamic Client
+Registration in AuthKit (see [OAuth 2.1](/docs/mcp/oauth)).
+</Callout>
+
+## Grok Build CLI
+
+<Tabs items={['OAuth', 'API key']} groupId="mcp-auth">
+<Tab value="OAuth">
+
+```bash
+grok mcp add --transport http mymcp https://YOUR-DEPLOYMENT/mcp
+```
+
+In a session, run `/mcps`, select **mymcp** and press `i` to authenticate.
+
+</Tab>
+<Tab value="API key">
+
+```bash
+grok mcp add --transport http mymcp https://YOUR-DEPLOYMENT/mcp \
+  --header 'X-API-KEY: ${MYMCP_API_KEY}'
+```
+
+Or in `~/.grok/config.toml` (`--scope project` writes `.grok/config.toml`):
+
+```toml
+[mcp_servers.mymcp]
+url = "https://YOUR-DEPLOYMENT/mcp"
+headers = { "X-API-KEY" = "${MYMCP_API_KEY}" }
+```
+
+</Tab>
+</Tabs>
+
+`--transport http` is required; `grok mcp add` defaults to stdio. Check with
+`grok mcp list` or `grok mcp doctor mymcp`. Tools appear as `mymcp__<tool>`.
+
+## xAI API (remote MCP tools)
+
+Pass your server as a `mcp` tool on the Responses API. xAI calls it from its
+cloud, so use your public URL:
+
+```bash
+curl https://api.x.ai/v1/responses \
+  -H "Authorization: Bearer $XAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "grok-4.3",
+    "input": "List the tools you can call.",
+    "tools": [{
+      "type": "mcp",
+      "server_url": "https://YOUR-DEPLOYMENT/mcp",
+      "server_label": "mymcp",
+      "headers": { "X-API-KEY": "sk_..." }
+    }]
+  }'
+```
+
+The tool's `authorization` field sends `Authorization: Bearer <token>`; use it
+for an OAuth access token, and `headers` for an `X-API-KEY`. The xAI Python SDK
+names the same parameter `extra_headers`.
+
+<Callout type="warn">
+Field names here follow xAI's current docs; check
+[xAI: Remote MCP tools](https://docs.x.ai/developers/tools/remote-mcp) for the
+model name and any new fields before shipping.
+</Callout>
+
+## Related
+
+- [xAI: Grok connectors](https://docs.x.ai/grok/connectors)
+- [xAI: Grok Build MCP servers](https://docs.x.ai/build/features/mcp-servers)
+- [ChatGPT](/docs/mcp/chatgpt) - another cloud client

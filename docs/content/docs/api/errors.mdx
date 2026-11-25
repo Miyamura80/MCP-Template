@@ -40,7 +40,7 @@ request to thread your trace ID through the server logs.
 | HTTP | `error.code` | Retryable? | What to do |
 |------|--------------|------------|------------|
 | `400` | `bad_request` | No | Fix the request before retrying |
-| `401` | `unauthorized` | No | Verify the `Authorization: Bearer` header / API key |
+| `401` | `unauthorized` | No | Verify the `X-API-KEY` header (API key) or `Authorization: Bearer` (WorkOS JWT). When WorkOS is configured, a stale or invalid Bearer header is checked first and returns 401 even with a valid `X-API-KEY`, so drop it |
 | `402` | `payment_required` / `quota_exceeded` | After daily reset | Daily quota exhausted - the `Retry-After` can be hours away, so handle it separately from the [retry loop](#reference-retry-loop-python): wait for the reset or upgrade the plan |
 | `403` | `forbidden` | No | The key lacks the required [scope](/docs/api/authentication#scopes) |
 | `404` | `not_found` | No | Check the endpoint URL or resource ID |
@@ -112,7 +112,7 @@ def call_with_retry(client: httpx.Client, request: httpx.Request, max_attempts: 
 **Missing authentication (401):**
 
 ```bash
-curl http://localhost:8000/api/v1/auth/me
+curl http://localhost:8080/api/v1/auth/me
 ```
 
 ```json
@@ -161,13 +161,14 @@ the daily reset):
 {
   "error": {
     "code": "quota_exceeded",
-    "message": "Daily request limit (10000) exceeded for free_tier tier.",
+    "message": "Daily request limit (1000) exceeded for free_tier tier. Ask the user to upgrade at https://api.example.com/dashboard/billing?plan=plus",
     "request_id": "d4e5f60718293a4b",
     "details": {
-      "current_usage": 10000,
-      "daily_limit": 10000,
+      "current_usage": 1000,
+      "daily_limit": 1000,
       "tier": "free_tier",
-      "quota_reset_at": "2026-06-21T00:00:00+00:00"
+      "quota_reset_at": "2026-06-21T00:00:00+00:00",
+      "billing_url": "https://api.example.com/dashboard/billing?plan=plus"
     }
   }
 }

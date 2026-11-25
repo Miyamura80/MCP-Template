@@ -20,10 +20,12 @@ import hmac
 import ipaddress
 import secrets
 import socket
+import time
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 from loguru import logger as log
 from sqlalchemy.orm import Session
 
@@ -42,7 +44,8 @@ from models.webhooks import (
     WebhookUnsubscribeInput,
     WebhookUnsubscribeResult,
 )
-from services import service
+from services import InvalidArgument, service
+from services._ssrf_guard import ResolverThreads, build_client, validate_and_pin
 
 # Header names on delivered POSTs (kept here so the delivery module imports one).
 SIGNATURE_HEADER = "X-Webhook-Signature"
@@ -93,10 +96,6 @@ def decrypt_secret(ciphertext: bytes) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _is_dev() -> bool:
-    return (getattr(global_config, "DEV_ENV", "") or "").lower() in {"local", "dev"}
-
-
 def _candidate_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     """Best-effort resolution of ``host`` to IPs. Empty if it cannot resolve.
 
@@ -122,7 +121,7 @@ def _candidate_ips(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Addr
     return ips
 
 
-def _validate_webhook_url(url: str) -> None:
+def validate_webhook_url(url: str) -> None:
     """Reject non-https and SSRF-prone subscriber URLs.
 
     Blocks private / link-local / reserved / multicast destinations so a tenant
@@ -132,20 +131,20 @@ def _validate_webhook_url(url: str) -> None:
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError("Webhook url must be an http(s) URL")
+        raise InvalidArgument("Webhook url must be an http(s) URL")
     host = parsed.hostname
     if not host:
-        raise ValueError("Webhook url must include a host")
+        raise InvalidArgument("Webhook url must include a host")
 
-    dev = _is_dev()
+    dev = global_config.is_dev
     is_loopback_name = host.lower() in {"localhost", "ip6-localhost"}
     if parsed.scheme == "http" and not (dev and is_loopback_name):
-        raise ValueError("Webhook url must use https")
+        raise InvalidArgument("Webhook url must use https")
 
     for ip in _candidate_ips(host):
         if ip.is_loopback:
             if not dev:
-                raise ValueError("Webhook url must not target a loopback address")
+                raise InvalidArgument("Webhook url must not target a loopback address")
         elif (
             ip.is_private
             or ip.is_link_local
@@ -153,7 +152,50 @@ def _validate_webhook_url(url: str) -> None:
             or ip.is_multicast
             or ip.is_unspecified
         ):
-            raise ValueError("Webhook url must not target a private/reserved address")
+            raise InvalidArgument(
+                "Webhook url must not target a private/reserved address"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Outbound POST, shared by every webhook channel
+# ---------------------------------------------------------------------------
+
+# Delivery DNS runs on these threads; a hung lookup holds one (and only one
+# per host) until the system resolver gives up, never the caller itself.
+OUTBOUND_RESOLVER = ResolverThreads(8)
+
+
+def pinned_post(
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    *,
+    timeout: float,
+    deadline_s: float,
+    resolver: ResolverThreads = OUTBOUND_RESOLVER,
+) -> httpx.Response:
+    """POST to a subscriber, pinned to an IP that just passed the SSRF check.
+
+    The URL was validated when it was registered, but DNS can be flipped since
+    (rebinding), so it is re-resolved here and the connection pinned to a
+    validated global IP; the hostname rides in ``Host`` and TLS SNI. Redirects
+    are never followed. ``deadline_s`` bounds the whole call, DNS included, so
+    a subscriber that trickles its answer cannot hold the caller. Raises on
+    transport failure or SSRF reject; any HTTP status is returned as is.
+    """
+    deadline = time.monotonic() + deadline_s
+    # Loopback subscribers exist only in dev (registration enforces this).
+    target = validate_and_pin(
+        url, allow_loopback=global_config.is_dev, resolver=resolver, timeout=timeout
+    )
+    with build_client(timeout=timeout, deadline=deadline) as client:
+        return client.post(
+            target.url,
+            content=body,
+            headers={**headers, **target.headers},
+            extensions=target.extensions,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +212,7 @@ def _validate_webhook_url(url: str) -> None:
 )
 def webhook_subscribe(input: WebhookSubscribeInput) -> WebhookSubscribeResult:
     """Create a subscription and return its one-time signing secret."""
-    _validate_webhook_url(input.url)
+    validate_webhook_url(input.url)
 
     secret = _new_secret()
     secret_enc, key_id = _encrypt_secret(secret)
@@ -232,7 +274,7 @@ def webhook_list(input: WebhookListInput) -> WebhookListResult:
     description="Deactivate a webhook subscription so it stops receiving events",
     input_model=WebhookUnsubscribeInput,
     output_model=WebhookUnsubscribeResult,
-    mutating=True,
+    risk="dangerous",
 )
 def webhook_unsubscribe(
     input: WebhookUnsubscribeInput,
@@ -275,7 +317,7 @@ def webhook_rotate_secret(
             .one_or_none()
         )
         if row is None:
-            raise ValueError("Subscription not found")
+            raise InvalidArgument("Subscription not found")
         row.secret_enc = secret_enc
         row.key_id = key_id
         session.commit()
@@ -343,3 +385,54 @@ def enqueue_event(
         len(matching),
     )
     return event_id
+
+
+# ---------------------------------------------------------------------------
+# Purge - called on Gmail disconnect
+# ---------------------------------------------------------------------------
+
+
+def purge_user_events(user_id: str) -> tuple[int, int]:
+    """Delete every webhook event (and its deliveries) for a user.
+
+    Event payloads bank Gmail-derived content - subject, sender, snippet - as
+    plaintext JSON, so disconnecting must leave none of them behind. Returns
+    ``(events_deleted, deliveries_deleted)``.
+
+    Deliveries are removed in the same pass because they are keyed on
+    ``event_id``: leaving them would strand pending rows the runner can only
+    ever mark "dropped". Subscriptions themselves are *not* touched - they hold
+    no email content and survive a disconnect/reconnect cycle.
+
+    Both deletes match on a *subquery*, never a materialized id list: a busy
+    mailbox banks one event per message, and an ``IN (...)`` list that long
+    would blow the driver's bind-parameter limit. That failure would be
+    swallowed by the best-effort caller and quietly leave payloads behind, so
+    the purge must not scale with the user's event count.
+
+    Deliveries are matched by *subscription*, not by the user's event ids:
+    enqueue only ever fans an event out to its own user's subscriptions, so
+    the two predicates select the same rows - but the subscription one does
+    not depend on a snapshot of the event set, so it also catches deliveries
+    for an event enqueued concurrently with this purge. Events are deleted
+    last on purpose: if a push lands mid-purge the residue is a contentless
+    outbox row (which the runner drops as event-missing), never a payload.
+    """
+    with use_db_session() as session:
+        user_subs = (
+            session.query(WebhookSubscription.id)
+            .filter(WebhookSubscription.user_id == user_id)
+            .scalar_subquery()
+        )
+        deliveries = (
+            session.query(WebhookDelivery)
+            .filter(WebhookDelivery.subscription_id.in_(user_subs))
+            .delete(synchronize_session=False)
+        )
+        events = (
+            session.query(WebhookEvent)
+            .filter(WebhookEvent.user_id == user_id)
+            .delete(synchronize_session=False)
+        )
+        session.commit()
+        return int(events), int(deliveries)

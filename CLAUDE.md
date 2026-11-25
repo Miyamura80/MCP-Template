@@ -32,7 +32,9 @@ make ruff           # Run ruff linter
 make vulture        # Find dead code
 make ty             # Run type checker
 make lint_links     # Check for broken links in markdown files (README, etc.)
-make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, check_deps, lint_links, file_len_check, blind_except_check)
+make docs_test      # Run the docs site's vitest suite (docs/lib/*.test.ts)
+make tool_surface_docs_check # Fail if docs/ has drifted from the @service registry
+make ci             # Run all CI checks (ruff, vulture, ty, import_lint, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, api_key_header_check, tool_surface_docs_check, lint_immutable_refs)
 
 # Dependencies
 uv sync             # Install dependencies (not pip install)
@@ -50,7 +52,7 @@ uv run pytest path/to/test.py  # Run specific test
 
 Layering (top calls down, never the reverse):
 
-- **Transports:** `src/cli/app.py` (Typer) · `mcp_server/` (FastMCP) · `api_server/` (FastAPI)
+- **Transports:** `src/cli/app.py` (Typer) · `mcp_server/` (MCPServer, python-sdk 2.x) · `api_server/` (FastAPI)
 - **Services:** `services/` - pure `@service`-decorated functions, transport-agnostic
 - **Contracts:** `models/` - Pydantic input/output schemas shared by all transports
 - **Infra:** `common/` (config) · `db/` (SQLAlchemy + Alembic) · `utils/llm/` (DSPY) · `src/utils/` (logging, theme, errors)
@@ -58,7 +60,7 @@ Layering (top calls down, never the reverse):
 ### Top-level layout
 
 - **`src/cli/app.py`** + **`src/cli/commands/`** - Typer CLI (`mymcp`); `src/cli/commands/__init__.py` auto-discovers `src/cli/commands/*.py` and registers them.
-- **`mcp_server/`** - FastMCP server. Primary transport is **streamable HTTP**, mounted on the FastAPI app at `/mcp` from `api_server/server.py` (one process, one port, shared auth/CORS). Stdio is legacy/dev-only via `mymcp-mcp`. `mcp_server/server.py:build_mcp_server` populates a single FastMCP singleton from the service registry; `mount_on` + `lifespan` handle the streamable-HTTP wiring. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md).
+- **`mcp_server/`** - MCPServer (python-sdk 2.x, spec 2026-07-28) server. Primary transport is **streamable HTTP**, mounted on the FastAPI app at `/mcp` from `api_server/server.py` (one process, one port, shared auth/CORS). Stdio is legacy/dev-only via `mymcp-mcp`. `mcp_server/server.py:build_mcp_server` populates a single MCPServer singleton from the service registry; `mount_on` + `lifespan` handle the streamable-HTTP wiring; the one mount serves both 2026-07-28 stateless requests and handshake-era (2025-11-25 and earlier) sessions. See [`mcp_server/COMMON_TERMS.md`](./mcp_server/COMMON_TERMS.md).
 - **`api_server/`** - FastAPI HTTP server (`auth/`, `billing/`, `middleware/`, `routes/`). Hosts the `/mcp` mount; the primary entrypoint is `mymcp-serve`.
 - **`services/`** - `@service(name=, description=, input_model=, output_model=)`-decorated pure functions (`services/__init__.py:20`).
 - **`common/`** - pydantic-settings config.
@@ -67,7 +69,25 @@ Layering (top calls down, never the reverse):
 - **`src/`** - CLI plumbing (`src/cli/`) + shared utils (logging, theme, errors, output).
 - **`utils/llm/`** - DSPY + LiteLLM wrapper with fallback model, Tenacity retries, LangFuse observability.
 - **`tests/`** - subclass `TestTemplate` (`tests/test_template.py:14`) for per-test config isolation.
-- **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`.
+- **`docs/`** - Next.js + Fumadocs site; English source in `docs/content/en/`. Two
+  invariants are enforced, both in `make ci`:
+  - The tool reference in `docs/content/docs/mcp/tools.mdx` is **generated**.
+    Everything between the `{/* BEGIN generated */}` markers is rendered by
+    `scripts/gen_tool_docs.py` from `llm_tool_surface()` plus the enhancer
+    registry (which supplies the `**UI**` markers); descriptions are the
+    registry's own, so the page shows what an MCP client is actually told, and
+    the tool count is interpolated rather than asserted. Editorial input is the
+    `GROUPS` table in that script - a registered tool missing from it is a hard
+    error, not a silent omission. Run `make gen_tool_docs` after adding a
+    `@service`; `make tool_surface_docs_check` and the unconditional
+    `tool-surface-docs` prek hook fail on drift. The hook is not path-filtered
+    on purpose: a `files` filter never sees a `git rm`, and deleting a service is
+    exactly how the page ends up advertising tools that no longer exist.
+  - `make docs_test` runs vitest over `docs/lib/*.test.ts`. Pure helpers only -
+    today `mdx-to-markdown.ts`, the `string -> string` converter behind the
+    agent-facing `.mdx` twins and `llms-full.txt`. It is kept out of `source.ts`
+    so it imports nothing: `source.ts` pulls in the `fumadocs-mdx:collections/*`
+    virtual modules, which need the site's codegen to exist.
 - **`landing-page/`** - standalone Astro + Tailwind v4 marketing site, **separate** from `docs/` and the Python server, with its own Railway deploy (`landing-page/railway.toml`). Data-driven: all copy lives in `src/config/landing.ts`, design tokens in `src/styles/global.css` (`@theme`). Uses `bun`, never npm. See [`landing-page/README.md`](./landing-page/README.md).
 - **`.claude/`**, **`.agents/`**, **`.codex/`** - Claude/Codex agents and skills kept in sync by `scripts/sync_agent_config.py` (pre-commit enforced).
 
@@ -108,9 +128,11 @@ global_config.OPENAI_API_KEY  # secrets from .env
 from utils.llm.dspy_inference import DSPYInference
 import dspy
 
+
 class MySignature(dspy.Signature):
     input_field: str = dspy.InputField()
     output_field: str = dspy.OutputField()
+
 
 inf_module = DSPYInference(pred_signature=MySignature, observe=True)
 result = await inf_module.run(input_field="value")
@@ -121,6 +143,7 @@ result = await inf_module.run(input_field="value")
 ```python
 from tests.test_template import TestTemplate
 from tests.conftest import slow_test, nondeterministic_test
+
 
 class TestMyFeature(TestTemplate):
     def test_something(self):
@@ -166,8 +189,9 @@ Structure as: `init()` → `continue(id)` → `cleanup(id)`
 
 This template supports two MCP tool styles:
 
-- **Headless tools** (default) - sync wrapper, no `Context`, returns the
-  Pydantic output model so FastMCP derives `outputSchema`. The CLI/API/MCP
+- **Headless tools** (default) - sync wrapper, returns the Pydantic output
+  model so the SDK derives `outputSchema` (a hidden `ctx` is used only to read
+  client capabilities for the URL-elicitation upgrade). The CLI/API/MCP
   transports share identical behavior. Use this for any tool the LLM should
   call autonomously without UI affordances.
 - **Enhanced tools** (opt-in via `@enhance` in `mcp_server/enhancers/`) - async
@@ -185,6 +209,7 @@ don't.
 ```python
 from mcp_server.enhancers import enhance
 from mcp_server.enhancers.base import EnhancedTool
+
 
 @enhance("my_service", fallback="headless")
 async def my_enhanced(tool: EnhancedTool[MyInput, MyOutput]) -> MyOutput:
@@ -219,7 +244,9 @@ See `mcp_server/MCP_UI_ARCHITECTURE.md` for design rationale and
 - **Fast tier (default CI, pytest):** unit tests for the enhancer machinery
   plus `tests/test_mcp_e2e.py`, which runs a full MCP session over the
   streamable-HTTP mount and asserts the wire format (outputSchema,
-  `_meta.ui`, CallToolResult assembly). No Node needed.
+  `_meta.ui`, CallToolResult assembly), and `tests/test_mcp_protocol_eras.py`
+  (2026-07-28 stateless requests + `server/discover` alongside legacy
+  `initialize` sessions). No Node needed.
 - **Conformance tier:** `make mcp_conformance` (MCPJam protocol + apps
   suites, CI-gated, needs Node). OAuth conformance is manual - see
   `docs/content/docs/mcp/oauth.mdx`.

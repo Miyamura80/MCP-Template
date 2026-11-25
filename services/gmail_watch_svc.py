@@ -39,6 +39,8 @@ from models.gmail_watch import (
     GmailWatchStopResult,
 )
 from services import service
+from services.events import emit
+from services.events.catalog import GMAIL_MESSAGE_RECEIVED, gmail_message_payload
 from services.gmail_svc import (
     GmailNotConnectedError,
     _get_db_session,
@@ -177,9 +179,16 @@ def renew_due_watches() -> int:
 
 
 def _load_token_row_by_email(session: Session, email: str) -> GoogleToken | None:
+    """Resolve a mailbox for an inbound push. Mirrors ``_load_token_row``'s
+    definition of active: un-revoked *and* still holding a credential, so a
+    disconnected mailbox stops resolving (and stops enqueueing) immediately."""
     return (
         session.query(GoogleToken)
-        .filter(GoogleToken.email == email, GoogleToken.revoked_at.is_(None))
+        .filter(
+            GoogleToken.email == email,
+            GoogleToken.revoked_at.is_(None),
+            GoogleToken.refresh_token_enc.isnot(None),
+        )
         .first()
     )
 
@@ -353,6 +362,13 @@ def process_notification(
                 user_id=user_id,
                 event_type=WATCH_EVENT_TYPE,
                 payload=payload,
+            )
+            # Same notification for MCP Events subscribers (poll and webhook).
+            emit(
+                user_id,
+                GMAIL_MESSAGE_RECEIVED,
+                gmail_message_payload(payload),
+                session=session,
             )
         row.watch_history_id = _forward(row.watch_history_id, new_baseline)
         session.commit()

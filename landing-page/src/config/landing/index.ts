@@ -16,3 +16,4 @@ export * from "./nav";
 export * from "./get-started";
 export * from "./comparison";
 export * from "./content";
+export * from "./support";

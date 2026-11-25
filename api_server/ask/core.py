@@ -10,10 +10,10 @@ from uuid import uuid4
 
 from loguru import logger as log
 
-from api_server.ask.retriever import DocChunk, get_retriever
 from api_server.ask.signatures import AnswerFromDocs
 from common import global_config
 from models.ask import AskInput, AskResult, AskResultItem
+from services.docs_retriever import DocChunk, get_retriever
 from utils.llm.dspy_inference import DSPYInference
 
 _SCHEMA_CONTEXT = "https://schema.org"

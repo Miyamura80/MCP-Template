@@ -12,9 +12,23 @@ const routes = [
     priority: "0.7",
     changefreq: "monthly",
   })),
+  // The canonical support & contact page. /help and /contact serve the same
+  // body but are deliberately absent - they are noindex aliases of this URL.
+  { path: "/support", priority: "0.5", changefreq: "monthly" },
   { path: "/privacy", priority: "0.3", changefreq: "yearly" },
   { path: "/terms", priority: "0.3", changefreq: "yearly" },
 ];
+
+/**
+ * The trailing-slash form each page canonicalises to. Astro builds every route
+ * as `<path>/index.html` and its `<link rel="canonical">` points at the
+ * trailing-slash URL, so the sitemap must list that same variant or it advertises
+ * a non-canonical URL for every page. The root is exempt.
+ */
+function canonicalPath(path: string): string {
+  if (path === "/") return path;
+  return path.endsWith("/") ? path : `${path}/`;
+}
 
 export const GET: APIRoute = ({ site: astroSite }) => {
   const origin = (astroSite ?? new URL(site.url)).origin;
@@ -24,7 +38,7 @@ export const GET: APIRoute = ({ site: astroSite }) => {
     .map(
       (r) =>
         `  <url>\n` +
-        `    <loc>${origin}${r.path}</loc>\n` +
+        `    <loc>${origin}${canonicalPath(r.path)}</loc>\n` +
         `    <lastmod>${lastmod}</lastmod>\n` +
         `    <changefreq>${r.changefreq}</changefreq>\n` +
         `    <priority>${r.priority}</priority>\n` +
