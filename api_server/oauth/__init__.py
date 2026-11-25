@@ -1,7 +1,9 @@
 """Built-in OAuth 2.1 authorization server for MCP clients (opt-in).
 
-Enabled by ``MCP_AUTH_MODE=self``. In the default ``authkit`` mode nothing here
-is mounted, and MCP clients keep getting tokens directly from WorkOS AuthKit.
+Enabled by ``MCP_AUTH_MODE=self``, through the strategy in
+``api_server/auth/authorization_server.py``. In the default ``authkit`` mode
+nothing here is mounted, and MCP clients keep getting tokens directly from
+WorkOS AuthKit.
 
 In ``self`` mode this server issues, stores and can revoke the tokens MCP
 clients hold; WorkOS AuthKit only signs the user in. That is what makes a real
@@ -35,10 +37,6 @@ _AUTHORIZE_PATH = "/authorize"
 _REVOKE_PATH = "/revoke"
 # Public clients only (see cimd.parse_document): no client authentication.
 _CLIENT_AUTH_METHODS = ["none"]
-
-
-def is_self_mode() -> bool:
-    return global_config.MCP_AUTH_MODE == "self"
 
 
 def _options() -> tuple[ClientRegistrationOptions, RevocationOptions]:

@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from api_server.auth.authorization_server import authorization_server
 from api_server.dashboard import api_keys as dashboard_api_keys
 from api_server.dashboard import billing as dashboard_billing
 from api_server.dashboard import pages as dashboard_pages
@@ -195,14 +196,10 @@ app.include_router(dashboard_billing.router)
 dashboard_session.install(app)
 
 # --- Built-in OAuth server for MCP clients (opt-in) ------------------------
-# Only with MCP_AUTH_MODE=self (api_server/oauth/). Registered before the MCP
-# mount below, which sits at "/" and would otherwise answer /authorize and /token.
-if global_config.MCP_AUTH_MODE == "self":
-    import api_server.oauth as oauth_server  # noqa: PLC0415
-    from api_server.oauth import flow as oauth_flow  # noqa: PLC0415
-
-    app.include_router(oauth_flow.router)
-    app.router.routes.extend(oauth_server.create_sdk_routes())
+# Only with MCP_AUTH_MODE=self (api_server/oauth/); a no-op for AuthKit.
+# Registered before the MCP mount below, which sits at "/" and would otherwise
+# answer /authorize and /token.
+authorization_server().mount(app)
 
 # --- MCP server (streamable HTTP) -----------------------------------------
 # Mounts MCPServer at /mcp so CLI/API/MCP share one process, port, and middleware.

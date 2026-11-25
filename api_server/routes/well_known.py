@@ -66,7 +66,7 @@ from fastapi.responses import JSONResponse
 
 import api_server.oauth as oauth_server
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
-from api_server.oauth.flow import issuer_url as oauth_issuer_url
+from api_server.auth.authorization_server import authorization_server
 from common import global_config
 from common.config_models import BrandingConfig, IconConfig
 from models.a2a import (
@@ -345,17 +345,13 @@ def web_bot_auth_directory() -> JSONResponse:
 
 
 def _metadata() -> dict:
-    if oauth_server.is_self_mode():
-        # The built-in OAuth server issues MCP tokens (api_server/oauth/).
-        authorization_server = oauth_issuer_url()
-    else:
-        domain = authkit_domain()
-        if not domain:
-            raise HTTPException(status_code=404, detail="OAuth is not configured")
-        authorization_server = domain
+    # AuthKit's domain, or this origin when the built-in server issues tokens.
+    issuer = authorization_server().authorization_server_url()
+    if not issuer:
+        raise HTTPException(status_code=404, detail="OAuth is not configured")
     return {
         "resource": mcp_resource_url(),
-        "authorization_servers": [authorization_server],
+        "authorization_servers": [issuer],
         "bearer_methods_supported": ["header"],
     }
 
@@ -380,7 +376,7 @@ def _authorization_server_metadata() -> dict:
     With ``MCP_AUTH_MODE=self`` this server is the authorization server, so its
     own metadata is built locally and served instead.
     """
-    if oauth_server.is_self_mode():
+    if authorization_server().issues_tokens:
         return oauth_server.authorization_server_metadata()
     domain = authkit_domain()
     if not domain:

@@ -10,6 +10,7 @@ import html
 
 from fastapi.responses import HTMLResponse
 
+from api_server.auth.authorization_server import authorization_server
 from api_server.branded_page import render_page
 from api_server.dashboard.session import DashboardSession
 from common import global_config
@@ -32,10 +33,7 @@ def csrf_field(session: DashboardSession) -> str:
 
 def _sign_out(session: DashboardSession) -> str:
     """Sign out of this browser; with the built-in OAuth server, of every app."""
-    if global_config.MCP_AUTH_MODE == "self":
-        action, label = "/dashboard/sign-out-everywhere", "Sign out of all apps"
-    else:
-        action, label = "/dashboard/logout", "Sign out"
+    action, label = authorization_server().sign_out
     return (
         f"<form method='post' action='{action}'>{csrf_field(session)}"
         f"<button class='danger' type='submit'>{label}</button></form>"
