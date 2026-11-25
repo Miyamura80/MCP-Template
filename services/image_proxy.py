@@ -4,7 +4,7 @@ Why this exists: strict-CSP MCP hosts (claude.ai enforces
 ``img-src 'self' data: blob: https://assets.claude.ai`` on the app iframe)
 block every image an email references from an arbitrary sender domain, while
 lax hosts (Goose) load them straight from the network. The inbox reader app
-therefore calls ``gmail_inbox.fetch_image`` and renders the bytes as a
+therefore calls ``gmail_inbox_fetch_image`` and renders the bytes as a
 ``data:`` URI, which every conforming host allows.
 
 The URL comes out of attacker-controlled email HTML, so this is a classic

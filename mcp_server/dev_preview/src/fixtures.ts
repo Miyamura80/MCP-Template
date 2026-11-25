@@ -174,16 +174,16 @@ export function initialResult(app: string): ToolResult {
 /** Answer an app's callServerTool by name, as a real server would. */
 export function dispatch(name: string, args: Record<string, unknown>): ToolResult {
   switch (name) {
-    case "gmail_inbox.refresh":
+    case "gmail_inbox_refresh":
       return ok(INBOX_CURATE);
-    case "gmail_inbox.open_thread":
-    case "gmail_composer.get_thread":
+    case "gmail_inbox_open_thread":
+    case "gmail_composer_get_thread":
       return ok(THREADS[String(args.thread_id)] ?? {});
-    case "gmail_composer.refresh":
+    case "gmail_composer_refresh":
       return ok(COMPOSER_DRAFT);
-    case "pdf_signer.get_document":
+    case "pdf_signer_get_document":
       return ok(PDF_SIGNER_DOC);
-    case "pdf_signer.sign":
+    case "pdf_signer_sign":
       return ok({
         doc_id: "doc-fixture-nda",
         status: "signed",
@@ -191,9 +191,9 @@ export function dispatch(name: string, args: Record<string, unknown>): ToolResul
         signed_at_utc: "2026-07-22T12:00:00+00:00",
         message: `Signed by ${args.typed_name} on 2026-07-22T12:00:00+00:00.`,
       });
-    case "pdf_signer.cancel":
+    case "pdf_signer_cancel":
       return ok({ doc_id: "doc-fixture-nda", status: "open" });
-    case "gmail_composer.send":
+    case "gmail_composer_send":
       // A real message_id so the composer's Sent state (and the model-context
       // push it triggers) carries a plausible identifier.
       return ok({ message_id: "msg-fixture-0042", thread_id: "t-1002" });

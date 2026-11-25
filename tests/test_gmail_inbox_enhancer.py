@@ -174,11 +174,11 @@ class TestGmailInboxAppTools(TestTemplate):
     """The five app-only tools are registered and tagged with visibility=['app']."""
 
     EXPECTED = [
-        "gmail_inbox.refresh",
-        "gmail_inbox.open_thread",
-        "gmail_inbox.mark_read",
-        "gmail_inbox.archive",
-        "gmail_inbox.reply",
+        "gmail_inbox_refresh",
+        "gmail_inbox_open_thread",
+        "gmail_inbox_mark_read",
+        "gmail_inbox_archive",
+        "gmail_inbox_reply",
     ]
 
     def test_all_five_tools_registered(self):

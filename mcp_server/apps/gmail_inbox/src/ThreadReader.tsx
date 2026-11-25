@@ -81,7 +81,7 @@ export function ThreadReader({
     setPreviewLoading(true);
     try {
       const raw = await mcpApp.callServerTool({
-        name: "gmail_composer.get_attachment",
+        name: "gmail_composer_get_attachment",
         arguments: { message_id: att.message_id, attachment_id: att.attachment_id },
       });
       if (seq !== previewSeqRef.current) return;

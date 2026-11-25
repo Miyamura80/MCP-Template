@@ -127,20 +127,20 @@ class TestGmailComposerAppTools(TestTemplate):
 
     def test_all_four_app_tools_registered(self):
         names = {
-            "gmail_composer.save_draft",
-            "gmail_composer.send",
-            "gmail_composer.discard",
-            "gmail_composer.refresh",
+            "gmail_composer_save_draft",
+            "gmail_composer_send",
+            "gmail_composer_discard",
+            "gmail_composer_refresh",
         }
         registered = set(mcp._tool_manager._tools)
         assert names.issubset(registered), names - registered
 
     def test_app_tools_have_visibility_app_meta(self):
         for tool_name in (
-            "gmail_composer.save_draft",
-            "gmail_composer.send",
-            "gmail_composer.discard",
-            "gmail_composer.refresh",
+            "gmail_composer_save_draft",
+            "gmail_composer_send",
+            "gmail_composer_discard",
+            "gmail_composer_refresh",
         ):
             tool = mcp._tool_manager._tools[tool_name]
             # MCPServer stores the meta dict on the Tool record under `meta`.

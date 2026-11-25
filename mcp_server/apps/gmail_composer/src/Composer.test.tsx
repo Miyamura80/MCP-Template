@@ -101,7 +101,7 @@ describe("Composer", () => {
         await vi.advanceTimersByTimeAsync(900);
       });
       expect(callServerTool).toHaveBeenCalledWith({
-        name: "gmail_composer.save_draft",
+        name: "gmail_composer_save_draft",
         arguments: expect.objectContaining({
           draft_id: "d-1",
           subject: "Updated",
@@ -112,7 +112,7 @@ describe("Composer", () => {
     }
   });
 
-  it("Send button calls gmail_composer.send with current field values", async () => {
+  it("Send button calls gmail_composer_send with current field values", async () => {
     const sendResult = { structuredContent: { message_id: "msg-99" } };
     const { app, callServerTool } = makeMcpApp(sendResult);
     render(<Composer mcpApp={app} />);
@@ -122,7 +122,7 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
     await waitFor(() => {
       expect(callServerTool).toHaveBeenCalledWith({
-        name: "gmail_composer.send",
+        name: "gmail_composer_send",
         arguments: expect.objectContaining({
           draft_id: "d-1",
           to: "bob@example.com",
@@ -173,7 +173,7 @@ describe("Composer", () => {
     expect(screen.queryByText(/save failed/i)).not.toBeInTheDocument();
   });
 
-  it("Discard with confirm calls gmail_composer.discard", async () => {
+  it("Discard with confirm calls gmail_composer_discard", async () => {
     const { app, callServerTool, updateModelContext } = makeMcpApp({
       structuredContent: { discarded: true },
     });
@@ -185,7 +185,7 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: /yes, discard/i }));
     await waitFor(() => {
       expect(callServerTool).toHaveBeenCalledWith({
-        name: "gmail_composer.discard",
+        name: "gmail_composer_discard",
         arguments: { draft_id: "d-1" },
       });
     });

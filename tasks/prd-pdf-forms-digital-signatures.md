@@ -53,8 +53,8 @@ draft - without the PDF bytes ever passing through the model's context.
                  │    → attach to Gmail draft server-side         │        ▼
                  └────────────────────────────────────────────────┘  ┌────────────┐
                  ┌────────────────────────────────────────────────┐  │ pdf_signer │
-   App-only      │  pdf_signer.get_document(doc_id)   (bytes)     │◄─┤ MCP App    │
-   (iframe only, │  pdf_signer.sign(doc_id, typed_name, consent)  │◄─┤ (pdf.js    │
+   App-only      │  pdf_signer_get_document(doc_id)   (bytes)     │◄─┤ MCP App    │
+   (iframe only, │  pdf_signer_sign(doc_id, typed_name, consent)  │◄─┤ (pdf.js    │
    NEVER listed  │    1. assert status == awaiting_signature      │  │  preview + │
    to the LLM)   │    2. elicit() confirmation via host UI ◄─user │  │  type-name │
                  │    3. stamp appearance + audit metadata        │  │  ceremony) │
@@ -201,7 +201,7 @@ it by typing my name, so nothing is signed without my eyes on it.
 - [ ] Ceremony inputs: text box "Sign as (full legal name)" + required
       checkbox "I agree this constitutes my electronic signature". Sign
       button disabled until both present.
-- [ ] Sign click → app-only `pdf_signer.sign`; success state shows
+- [ ] Sign click → app-only `pdf_signer_sign`; success state shows
       "Signed by {name} · {date}" badge; cancel/error states rendered.
 - [ ] vitest suite incl. `appContract.test.ts` pinning the ext-apps `App`
       surface (repo convention); `make ci` passes.
@@ -215,8 +215,8 @@ with layered guarantees that no model ever signs.
 **Acceptance Criteria:**
 - [ ] `mcp_server/app_tools/pdf_signer.py` with `_APP_META` visibility
       hint (repo convention) and `guard_user_id`:
-      `pdf_signer.get_document(doc_id)` (bytes for the iframe) and
-      `pdf_signer.sign(doc_id, typed_name, consent)`.
+      `pdf_signer_get_document(doc_id)` (bytes for the iframe) and
+      `pdf_signer_sign(doc_id, typed_name, consent)`.
 - [ ] `sign` enforcement order: (1) doc status must be
       `awaiting_signature`; (2) `consent` must be true and `typed_name`
       non-empty; (3) when the client supports elicitation, elicit
@@ -308,9 +308,9 @@ prevented from coupling to Gmail, and the feature documented.
   awaiting_signature`, record the placement, and attach the signing app when
   the host supports MCP Apps.
 - FR-6: No LLM-visible tool may create, modify, or apply a signature. The
-  only signing entry point is app-only `pdf_signer.sign`, or the elicitation
+  only signing entry point is app-only `pdf_signer_sign`, or the elicitation
   fallback driven inside the enhancer.
-- FR-7: `pdf_signer.sign` must require typed name + consent, verify document
+- FR-7: `pdf_signer_sign` must require typed name + consent, verify document
   state, and - when the client supports elicitation - obtain a host-native
   confirmation naming the document and typed name before signing.
 - FR-8: Signing must stamp a visible signature (script-font typed name +

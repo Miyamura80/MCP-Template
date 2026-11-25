@@ -70,7 +70,7 @@ _APP_META = {"ui": {"visibility": ["app"]}}
 
 
 @mcp.tool(
-    name="gmail_inbox.refresh",
+    name="gmail_inbox_refresh",
     description="Re-run gmail_curate_inbox (called by the inbox reader app).",
     meta=_APP_META,
 )
@@ -86,7 +86,7 @@ def refresh(
 
 
 @mcp.tool(
-    name="gmail_inbox.open_thread",
+    name="gmail_inbox_open_thread",
     description="Fetch a single thread for the inbox reader app.",
     meta=_APP_META,
 )
@@ -102,7 +102,7 @@ def open_thread(thread_id: str, user_id: str = "") -> GmailThread:
 
 
 @mcp.tool(
-    name="gmail_inbox.mark_read",
+    name="gmail_inbox_mark_read",
     description="Mark a thread as read (removes the UNREAD label).",
     meta=_APP_META,
 )
@@ -114,7 +114,7 @@ def mark_read(thread_id: str, user_id: str = "") -> GmailMarkReadResult:
 
 
 @mcp.tool(
-    name="gmail_inbox.archive",
+    name="gmail_inbox_archive",
     description="Archive a thread (removes the INBOX label).",
     meta=_APP_META,
 )
@@ -126,7 +126,7 @@ def archive(thread_id: str, user_id: str = "") -> GmailArchiveResult:
 
 
 @mcp.tool(
-    name="gmail_inbox.reply",
+    name="gmail_inbox_reply",
     description="Create a reply draft on a thread (the composer app opens it next).",
     meta=_APP_META,
 )
@@ -143,7 +143,7 @@ def reply(
 
 
 @mcp.tool(
-    name="gmail_inbox.forward",
+    name="gmail_inbox_forward",
     description="Create a forward draft for a message in a thread.",
     meta=_APP_META,
 )
@@ -167,7 +167,7 @@ def forward(
 
 
 @mcp.tool(
-    name="gmail_inbox.mark_done",
+    name="gmail_inbox_mark_done",
     description="Mark a thread as done (applies MCP/Done label, hides from curated inbox).",
     meta=_APP_META,
 )
@@ -179,7 +179,7 @@ def mark_done(thread_id: str, user_id: str = "") -> GmailMarkDoneResult:
 
 
 @mcp.tool(
-    name="gmail_inbox.unmark_done",
+    name="gmail_inbox_unmark_done",
     description="Remove the done marker from a thread (undo mark-done).",
     meta=_APP_META,
 )
@@ -211,7 +211,7 @@ class _FocusedEmailResult(BaseModel):
 
 
 @mcp.tool(
-    name="gmail_inbox.set_focus",
+    name="gmail_inbox_set_focus",
     description="Store which thread the user is currently viewing (called by inbox UI).",
     meta=_APP_META,
 )
@@ -257,7 +257,7 @@ def get_focused_email(user_id: str = "") -> _FocusedEmailResult:
 
 
 @mcp.tool(
-    name="gmail_inbox.fetch_image",
+    name="gmail_inbox_fetch_image",
     description=(
         "Fetch a remote image referenced by an email's HTML and return it "
         "as base64 (called by the inbox reader app when the host CSP blocks "

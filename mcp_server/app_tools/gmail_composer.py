@@ -89,7 +89,7 @@ def _patch_attachments(
 
 
 @mcp.tool(
-    name="gmail_composer.save_draft",
+    name="gmail_composer_save_draft",
     description="Persist the current composer fields onto an existing Gmail draft.",
     meta=_APP_META,
 )
@@ -121,7 +121,7 @@ def save_draft(
 
 
 @mcp.tool(
-    name="gmail_composer.send",
+    name="gmail_composer_send",
     description="Persist composer fields then send the draft via Gmail.",
     meta=_APP_META,
 )
@@ -154,7 +154,7 @@ def send(
 
 
 @mcp.tool(
-    name="gmail_composer.discard",
+    name="gmail_composer_discard",
     description="Delete the current draft.",
     meta=_APP_META,
 )
@@ -164,7 +164,7 @@ def discard(draft_id: str, user_id: str = "") -> GmailDiscardDraftResult:
 
 
 @mcp.tool(
-    name="gmail_composer.refresh",
+    name="gmail_composer_refresh",
     description="Re-fetch the current draft (used by the composer to poll for agent edits).",
     meta=_APP_META,
 )
@@ -174,7 +174,7 @@ def refresh(draft_id: str, user_id: str = "") -> GmailDraft:
 
 
 @mcp.tool(
-    name="gmail_composer.get_thread",
+    name="gmail_composer_get_thread",
     description="Fetch the full thread for display in the composer's thread panel.",
     meta=_APP_META,
 )
@@ -190,7 +190,7 @@ def get_thread(thread_id: str, user_id: str = "") -> GmailThread:
 
 
 @mcp.tool(
-    name="gmail_composer.get_attachment",
+    name="gmail_composer_get_attachment",
     description="Fetch the raw base64 data for an attachment on a message.",
     meta=_APP_META,
 )

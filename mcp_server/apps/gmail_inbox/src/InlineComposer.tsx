@@ -121,7 +121,7 @@ export function InlineComposer({
     let cancelled = false;
     setLoadingThread(true);
     mcpApp.callServerTool({
-      name: "gmail_composer.get_thread",
+      name: "gmail_composer_get_thread",
       arguments: { thread_id: threadId },
     }).then((raw) => {
       if (cancelled) return;
@@ -137,7 +137,7 @@ export function InlineComposer({
     if (draft.to || draft.subject || draft.body) return;
     let cancelled = false;
     mcpApp.callServerTool({
-      name: "gmail_composer.refresh",
+      name: "gmail_composer_refresh",
       arguments: { draft_id: draft.draft_id },
     }).then((raw) => {
       if (cancelled) return;
@@ -211,7 +211,7 @@ export function InlineComposer({
     setPreviewLoading(true);
     try {
       const raw = await mcpApp.callServerTool({
-        name: "gmail_composer.get_attachment",
+        name: "gmail_composer_get_attachment",
         arguments: { message_id: att.message_id, attachment_id: att.attachment_id },
       });
       if (seq !== previewSeqRef.current) return;
@@ -246,7 +246,7 @@ export function InlineComposer({
       // `undefined` means "omit -> preserve all"; an array (including the empty
       // clear-all list) must be sent, so test against undefined, not truthiness.
       if (attachmentsArg !== undefined) args.attachments = attachmentsArg;
-      await mcpApp.callServerTool({ name: "gmail_composer.save_draft", arguments: args });
+      await mcpApp.callServerTool({ name: "gmail_composer_save_draft", arguments: args });
       setSaveStatus({ kind: "saved", at: new Date() });
       const latest = draftRef.current;
       if (latest && draftFieldsEqual(latest, snapshot)) localDirtyRef.current = false;
@@ -288,7 +288,7 @@ export function InlineComposer({
       // `undefined` means "omit -> preserve all"; an array (including the empty
       // clear-all list) must be sent, so test against undefined, not truthiness.
       if (attachmentsArg !== undefined) args.attachments = attachmentsArg;
-      const raw = await mcpApp.callServerTool({ name: "gmail_composer.send", arguments: args });
+      const raw = await mcpApp.callServerTool({ name: "gmail_composer_send", arguments: args });
       const inner = extractStructuredContent<{ message_id?: string }>(raw);
       const msgId = inner?.message_id ?? "";
       setSaveStatus({ kind: "sent", message_id: msgId });
@@ -303,7 +303,7 @@ export function InlineComposer({
     onDiscard();
     try {
       await mcpApp.callServerTool({
-        name: "gmail_composer.discard",
+        name: "gmail_composer_discard",
         arguments: { draft_id: draft.draft_id },
       });
     } catch { /* discard is best-effort */ }

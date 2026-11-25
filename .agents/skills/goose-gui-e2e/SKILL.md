@@ -64,6 +64,11 @@ Heavy tier - **not** in `make ci` (which stays Node/Rust/Electron-free):
 
 ## Preconditions (verify before setup)
 
+- **Goose is pinned** via `GOOSE_REF` (default in `setup.sh`). Bump it
+  deliberately: `GOOSE_REF=v1.61.0 bash setup.sh` re-checks-out the tree and
+  rebuilds. Goose `main` moves fast (engines bumps, bundle renames), which is
+  why the build is no longer unpinned.
+
 - **Official sources only by default.** Goose is built from a `git clone` of
   `github.com/block/goose`; Electron's binary comes from the official
   `github.com/electron/electron` release, checksum-verified. The sandbox needs
@@ -103,6 +108,9 @@ A scenario is JSON in `scripts/scenarios/<name>.json`:
   stack sets `GMAIL_FAKE_BACKEND=1`** (see below).
 - `expect` - checked by `mcp_probe.py`: `tool_called` + `round_trip` (from the
   tool-call log) and `app_rendered` + `dom_contains` (from the rendered iframe).
+  `dom_absent` (default `["MCP error"]`) lists text that must NOT appear: a
+  host-side rejection of an app -> server call renders as `MCP error <code>`,
+  which a `dom_contains`-only check would pass. Override with `[]` to opt out.
 
 ### Rendering the Gmail apps offline (`GMAIL_FAKE_BACKEND`)
 
@@ -121,7 +129,7 @@ can never stand in for a real mailbox in production.
 **Why the fake also serves the curated inbox:** the `gmail_inbox` app registers
 its `ontoolresult` handler in a mount effect, and if the host delivers the thread
 result *before* that runs, the app misses it and falls back to a curated-inbox
-refresh (`gmail_inbox.refresh` → `gmail_curate_inbox`) after ~800ms. So a
+refresh (`gmail_inbox_refresh` → `gmail_curate_inbox`) after ~800ms. So a
 thread-open renders the **reader** when it wins that race and the **curated list**
 when it loses. The fake serves both paths from the same fixture thread, and
 `gmail_thread_render` asserts on content present in both views, so the scenario is
@@ -132,7 +140,7 @@ proven independently via the tool-call log regardless of which view renders.
 
 A scenario may add an `interact` block to drive a real control **inside** the app
 iframe after it renders, exercising a **user-initiated** server round-trip (the
-`settings_subscribe` fixture does this - clicks "Add endpoint" → `settings.subscribe`):
+`settings_subscribe` fixture does this - clicks "Add endpoint" → `settings_subscribe`):
 
 ```json
 "expect": { "...": "...", "interaction_rendered": true },
@@ -194,6 +202,7 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | bg service dies next tool call | `setsid ... & disown` (`start_detached`); re-run `up.sh` to recover |
 | `/mcp` 401 | the extension must send the seeded `X-API-KEY` header (`configure_goose.sh`) |
 | app iframe not found | assert only on an **app-returning** tool; the Settings app renders offline |
+| app shows `MCP error -32602` ("tool not found" in the goose log) | Goose rewrites tool names outside `[a-zA-Z0-9_-]` and the app bridge then can't find them; keep tool names underscore-only (`tests/test_mcp_server.py::test_tool_names_are_host_safe`) |
 
 ## Files
 
@@ -209,9 +218,9 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | `mcp_probe.py` | assertion oracle - rendered iframe (`pw_result`) + tool round-trip (`toolcalls.jsonl`) |
 | `run_test.sh` / `run_all.sh` | drive + assert one / all scenarios |
 | `scenarios/settings_render.json` | scenario 1: LLM opens the Settings app; assert it renders |
-| `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings.subscribe` → assert the re-render |
+| `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings_subscribe` → assert the re-render |
 | `scenarios/gmail_thread_render.json` | scenario 3: LLM opens a thread via `gmail_get_thread`; assert the gmail_inbox reader iframe renders (needs `GMAIL_FAKE_BACKEND`) |
-| `scenarios/gmail_remote_images.json` | scenario 4: remote-image pipeline - assert the blocked-by-default "Show images" banner renders, click it, and assert the `gmail_inbox.fetch_image` round-trip re-renders as "Retry" (fixture URL is `.invalid`, so the SSRF guard rejects it deterministically offline and in CI) |
+| `scenarios/gmail_remote_images.json` | scenario 4: remote-image pipeline - assert the blocked-by-default "Show images" banner renders, click it, and assert the `gmail_inbox_fetch_image` round-trip re-renders as "Retry" (fixture URL is `.invalid`, so the SSRF guard rejects it deterministically offline and in CI) |
 
 Also outside the skill: `tests/test_apps_e2e.py` (guarded pytest entry) and
 `.github/workflows/apps_e2e.yaml` (opt-in CI).

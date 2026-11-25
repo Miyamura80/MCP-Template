@@ -14,7 +14,7 @@
  * (Goose) load them straight from the network. We normalize both to classic
  * email-client behavior: remote references are stripped at render time and a
  * "Show images" action fetches them through the server
- * (`gmail_inbox.fetch_image`) and re-renders with `data:` URIs, which every
+ * (`gmail_inbox_fetch_image`) and re-renders with `data:` URIs, which every
  * host CSP allows. This also stops tracking pixels firing without user
  * intent on lax hosts.
  *

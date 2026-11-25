@@ -137,7 +137,7 @@ try {
     const body = await frame.locator("body").innerText({ timeout: 4000 }).catch(() => "");
     result.matched = want.filter((t) => body.includes(t));
     result.missing = want.filter((t) => !body.includes(t));
-    // Give mount-time server calls (e.g. settings.get) a moment to settle, so a
+    // Give mount-time server calls (e.g. settings_get) a moment to settle, so a
     // host-side rejection has rendered before we check for it.
     await win.waitForTimeout(1500);
     const settled = await frame.locator("body").innerText({ timeout: 4000 }).catch(() => body);

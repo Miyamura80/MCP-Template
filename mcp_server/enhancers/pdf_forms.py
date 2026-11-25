@@ -179,7 +179,7 @@ async def pdf_request_signature_enhanced(
                 message=_sign_prompt(doc.filename), schema=_ElicitedSignature
             )
         except MCPError:
-            # Declared-but-broken host (see pdf_signer.sign for the Goose
+            # Declared-but-broken host (see pdf_signer_sign for the Goose
             # variant). Letting this propagate would trip the enhancer's
             # headless fallback, whose idempotent awaiting branch returns
             # "awaiting" forever - leaving the document locked with no

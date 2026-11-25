@@ -16,12 +16,12 @@ function makeMcpApp(opts?: {
   const callServerTool = vi.fn(
     async (args: { name: string; arguments: Record<string, unknown> }) => {
       calls.push(args);
-      if (args.name === "gmail_inbox.open_thread") {
+      if (args.name === "gmail_inbox_open_thread") {
         const tid = args.arguments.thread_id as string;
         const t = opts?.threadResults?.[tid];
         return t ? { structuredContent: t } : null;
       }
-      if (args.name === "gmail_inbox.refresh") {
+      if (args.name === "gmail_inbox_refresh") {
         return opts?.refreshResult
           ? { structuredContent: opts.refreshResult }
           : { structuredContent: { threads: [] } };
@@ -150,7 +150,7 @@ describe("Inbox", () => {
     expect(banner).toHaveTextContent("3 not yet triaged");
   });
 
-  it("clicking a row calls gmail_inbox.open_thread and renders the thread", async () => {
+  it("clicking a row calls gmail_inbox_open_thread and renders the thread", async () => {
     const { app, calls } = makeMcpApp({
       threadResults: { tA: plainThread },
     });
@@ -162,7 +162,7 @@ describe("Inbox", () => {
       expect(
         calls.some(
           (c) =>
-            c.name === "gmail_inbox.open_thread" &&
+            c.name === "gmail_inbox_open_thread" &&
             c.arguments.thread_id === "tA"
         )
       ).toBe(true);
@@ -184,7 +184,7 @@ describe("Inbox", () => {
     // The 800ms curated-inbox fallback must NOT fire, since the result arrived.
     await new Promise((resolve) => setTimeout(resolve, 900));
     expect(
-      calls.some((c) => c.name === "gmail_inbox.refresh")
+      calls.some((c) => c.name === "gmail_inbox_refresh")
     ).toBe(false);
   });
 
@@ -226,7 +226,7 @@ describe("Inbox", () => {
     fireEvent.click(markBtn);
     await waitFor(() => {
       expect(
-        calls.some((c) => c.name === "gmail_inbox.mark_read")
+        calls.some((c) => c.name === "gmail_inbox_mark_read")
       ).toBe(true);
     });
     await waitFor(() => {
@@ -248,11 +248,11 @@ describe("Inbox", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("row-tA")).not.toBeInTheDocument();
     });
-    expect(calls.some((c) => c.name === "gmail_inbox.archive")).toBe(true);
+    expect(calls.some((c) => c.name === "gmail_inbox_archive")).toBe(true);
     expect(screen.getByText(/select a thread/i)).toBeInTheDocument();
   });
 
-  it("reply triggers gmail_inbox.reply and shows a transient status", async () => {
+  it("reply triggers gmail_inbox_reply and shows a transient status", async () => {
     const { app, calls } = makeMcpApp({
       threadResults: { tA: plainThread },
     });
@@ -263,14 +263,14 @@ describe("Inbox", () => {
     const replyBtns = screen.getAllByRole("button", { name: /reply/i });
     fireEvent.click(replyBtns[0]);
     await waitFor(() => {
-      expect(calls.some((c) => c.name === "gmail_inbox.reply")).toBe(true);
+      expect(calls.some((c) => c.name === "gmail_inbox_reply")).toBe(true);
     });
     expect(
       await screen.findByText(/reply draft created/i)
     ).toBeInTheDocument();
   });
 
-  it("mark-done calls gmail_inbox.mark_done and removes the row", async () => {
+  it("mark-done calls gmail_inbox_mark_done and removes the row", async () => {
     const { app, calls } = makeMcpApp({
       threadResults: { tA: plainThread },
     });
@@ -287,7 +287,7 @@ describe("Inbox", () => {
       expect(screen.queryByTestId("row-tA")).not.toBeInTheDocument();
     });
     expect(
-      calls.some((c) => c.name === "gmail_inbox.mark_done")
+      calls.some((c) => c.name === "gmail_inbox_mark_done")
     ).toBe(true);
     expect(screen.getByText(/select a thread/i)).toBeInTheDocument();
   });
@@ -303,7 +303,7 @@ describe("Inbox", () => {
       expect(screen.queryByTestId("row-tA")).not.toBeInTheDocument();
     });
     expect(
-      calls.some((c) => c.name === "gmail_inbox.mark_done" && c.arguments.thread_id === "tA")
+      calls.some((c) => c.name === "gmail_inbox_mark_done" && c.arguments.thread_id === "tA")
     ).toBe(true);
   });
 

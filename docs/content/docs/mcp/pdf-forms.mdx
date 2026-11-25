@@ -25,10 +25,10 @@ client's native dialog. The model cannot produce a signature.
               │   → attach to Gmail draft, server-side    │        ▼
               └───────────────────────────────────────────┘ ┌─────────────┐
               ┌───────────────────────────────────────────┐ │ pdf_signer  │
-  App-only    │ pdf_signer.get_document(doc_id)           │◄┤ app: review │
-  (iframe,    │ pdf_signer.sign(doc_id, typed_name,       │◄┤ all pages,  │
+  App-only    │ pdf_signer_get_document(doc_id)           │◄┤ app: review │
+  (iframe,    │ pdf_signer_sign(doc_id, typed_name,       │◄┤ all pages,  │
   never for   │                 consent)                  │ │ type your   │
-  the LLM)    │ pdf_signer.cancel(doc_id)                 │◄┤ name, sign  │
+  the LLM)    │ pdf_signer_cancel(doc_id)                 │◄┤ name, sign  │
               └───────────────────────────────────────────┘ └─────────────┘
 ```
 
@@ -68,7 +68,7 @@ bottom-left corner, units in points (1/72 inch).
 Signing runs through layered guarantees, strongest first:
 
 1. **Server state machine.** No LLM-visible tool produces a signature.
-   `pdf_signer.sign` refuses any document that is not `awaiting_signature`,
+   `pdf_signer_sign` refuses any document that is not `awaiting_signature`,
    a state only `pdf_request_signature` can enter - and only a human ceremony
    can leave.
 2. **Host-native confirmation.** On clients that support MCP elicitation,

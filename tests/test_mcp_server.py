@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import re
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -86,7 +87,22 @@ class TestMCPServer(TestTemplate):
         # Headless tools must not grow UI metadata.
         assert tools["gmail_send"].meta is None
         # App-only companion tools keep visibility-only metadata.
-        assert tools["gmail_inbox.refresh"].meta == {"ui": {"visibility": ["app"]}}
+        assert tools["gmail_inbox_refresh"].meta == {"ui": {"visibility": ["app"]}}
+
+    def test_tool_names_are_host_safe(self):
+        """Every tool name (app-only ones included) must be provider-safe.
+
+        MCP allows dots in tool names, but hosts that forward tools to an LLM
+        rewrite names outside OpenAI's ``^[a-zA-Z0-9_-]{1,64}$``. Goose then
+        fails to resolve an MCP App's ``callServerTool("x.y")`` against its
+        rewritten name ("tool not found", -32602). Hosts also prefix the
+        extension name (``mymcp__``), so leave headroom under 64.
+        """
+        pattern = re.compile(r"^[a-zA-Z0-9_-]{1,48}$")
+        bad = [
+            t.name for t in asyncio.run(mcp.list_tools()) if not pattern.match(t.name)
+        ]
+        assert not bad, f"tool names not host-safe: {bad}"
 
     def test_enhanced_tools_do_not_publish_context_as_input(self):
         for tool_name in ("gmail_compose", "gmail_curate_inbox", "gmail_get_thread"):

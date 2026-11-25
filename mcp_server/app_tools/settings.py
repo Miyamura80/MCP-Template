@@ -34,7 +34,7 @@ _APP_META = {"ui": {"visibility": ["app"]}}
 
 
 @mcp.tool(
-    name="settings.get",
+    name="settings_get",
     description="Fetch the current settings snapshot for the Settings app.",
     meta=_APP_META,
 )
@@ -44,7 +44,7 @@ def get(user_id: str = "") -> WebhookSettingsResult:
 
 
 @mcp.tool(
-    name="settings.subscribe",
+    name="settings_subscribe",
     description="Register a webhook endpoint (returns the one-time signing secret).",
     meta=_APP_META,
 )
@@ -60,7 +60,7 @@ def subscribe(
 
 
 @mcp.tool(
-    name="settings.rotate_secret",
+    name="settings_rotate_secret",
     description="Issue a new signing secret for a webhook subscription.",
     meta=_APP_META,
 )
@@ -72,7 +72,7 @@ def rotate_secret(subscription_id: str, user_id: str = "") -> WebhookRotateSecre
 
 
 @mcp.tool(
-    name="settings.unsubscribe",
+    name="settings_unsubscribe",
     description="Deactivate a webhook subscription.",
     meta=_APP_META,
 )

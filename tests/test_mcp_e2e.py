@@ -454,7 +454,7 @@ class TestPdfToolsWireE2E(TestTemplate):
             gate = tools["pdf_request_signature"]
             assert gate["_meta"]["ui"]["resourceUri"] == "ui://mymcp/pdf_signer"
             # App-only ceremony tools carry the visibility hint on the wire.
-            sign_tool = tools["pdf_signer.sign"]
+            sign_tool = tools["pdf_signer_sign"]
             assert sign_tool["_meta"]["ui"]["visibility"] == ["app"]
 
     def test_pdf_signer_app_resource_serves_built_html(self):

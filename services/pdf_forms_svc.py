@@ -6,7 +6,7 @@ Gmail adapters live in ``services/pdf_gmail_bridge.py``.
 
 Security invariant: no service in this module (or anywhere LLM-visible)
 produces a signature. Signing happens only in the app-only
-``pdf_signer.sign`` tool or the host-elicitation fallback, both of which are
+``pdf_signer_sign`` tool or the host-elicitation fallback, both of which are
 human-gated (see the PRD's three-layer model).
 
 Coordinates are PDF user space: origin bottom-left, points (1/72 inch).

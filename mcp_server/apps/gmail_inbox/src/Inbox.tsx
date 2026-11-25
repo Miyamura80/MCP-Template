@@ -93,7 +93,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
   const upgradeThread = async (thread_id: string) => {
     try {
       const raw = await mcpApp.callServerTool({
-        name: "gmail_inbox.open_thread",
+        name: "gmail_inbox_open_thread",
         arguments: { thread_id },
       });
       const full = extractStructuredContent<Thread>(raw);
@@ -160,14 +160,14 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
   const pushThreadContext = (data: Thread | null) => {
     if (!data || data.messages.length === 0) {
       mcpApp.callServerTool({
-        name: "gmail_inbox.set_focus",
+        name: "gmail_inbox_set_focus",
         arguments: { thread_id: null },
       });
       return;
     }
     const lastMsg = data.messages[data.messages.length - 1];
     mcpApp.callServerTool({
-      name: "gmail_inbox.set_focus",
+      name: "gmail_inbox_set_focus",
       arguments: {
         thread_id: data.thread_id,
         subject: lastMsg?.subject || null,
@@ -193,7 +193,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     setError(null);
     try {
       const raw = await mcpApp.callServerTool({
-        name: "gmail_inbox.open_thread",
+        name: "gmail_inbox_open_thread",
         arguments: { thread_id },
       });
       if (seq !== openSeqRef.current) return;
@@ -215,7 +215,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     setError(null);
     try {
       const raw = await mcpApp.callServerTool({
-        name: "gmail_inbox.refresh",
+        name: "gmail_inbox_refresh",
         arguments: {},
       });
       const data = extractStructuredContent<CurateResult>(raw);
@@ -242,7 +242,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     );
     try {
       await mcpApp.callServerTool({
-        name: "gmail_inbox.mark_read",
+        name: "gmail_inbox_mark_read",
         arguments: { thread_id: selectedId },
       });
     } catch (err) {
@@ -262,7 +262,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     if (narrow) setViewMode("inbox");
     try {
       await mcpApp.callServerTool({
-        name: "gmail_inbox.archive",
+        name: "gmail_inbox_archive",
         arguments: { thread_id: removingId },
       });
     } catch (err) {
@@ -295,7 +295,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     } else {
       try {
         await mcpApp.callServerTool({
-          name: "gmail_inbox.reply",
+          name: "gmail_inbox_reply",
           arguments: { thread_id: selectedId },
         });
         setStatus("Reply draft created");
@@ -316,7 +316,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     const header = `---------- Forwarded message ----------\nFrom: ${message.from || ""}\nDate: ${message.date || ""}\nSubject: ${subject}\nTo: ${message.to || ""}\n\n`;
     try {
       await mcpApp.callServerTool({
-        name: "gmail_inbox.forward",
+        name: "gmail_inbox_forward",
         arguments: {
           thread_id: selectedId,
           subject,
@@ -343,7 +343,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     }
     try {
       await mcpApp.callServerTool({
-        name: "gmail_inbox.mark_done",
+        name: "gmail_inbox_mark_done",
         arguments: { thread_id: id },
       });
     } catch (err) {
@@ -362,7 +362,7 @@ export function Inbox({ mcpApp, resultBuffer }: InboxProps) {
     e.stopPropagation();
     try {
       await mcpApp.callServerTool({
-        name: "gmail_composer.discard",
+        name: "gmail_composer_discard",
         arguments: { draft_id: draftId },
       });
       setThreads((cur) =>
