@@ -1,0 +1,76 @@
+---
+title: Claude Code
+description: Add your server to Claude Code with one `claude mcp add` command
+icon: claude
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Claude Code connects to your server's **streamable-HTTP** endpoint at `/mcp`.
+It runs on your machine, so a local `http://localhost:8080/mcp` works as well as
+a deployed URL.
+
+## Add the server
+
+<Tabs items={['OAuth', 'API key']} groupId="mcp-auth">
+<Tab value="OAuth">
+
+```bash
+claude mcp add --transport http --scope user mymcp https://YOUR-DEPLOYMENT/mcp
+```
+
+Then start `claude`, run `/mcp`, select **mymcp** and sign in in the browser
+(or run `claude mcp login mymcp` from your shell). Needs
+[OAuth 2.1](/docs/mcp/oauth) configured on the deployment.
+
+</Tab>
+<Tab value="API key">
+
+```bash
+claude mcp add --transport http --scope user mymcp https://YOUR-DEPLOYMENT/mcp \
+  --header "X-API-KEY: sk_..."
+```
+
+</Tab>
+</Tabs>
+
+`--scope user` makes it available in every project. Use `--scope project` to
+write a shareable `.mcp.json` instead:
+
+```json
+{
+  "mcpServers": {
+    "mymcp": {
+      "type": "http",
+      "url": "https://YOUR-DEPLOYMENT/mcp",
+      "headers": { "X-API-KEY": "${MYMCP_API_KEY}" }
+    }
+  }
+}
+```
+
+<Callout type="warn">
+`type: "http"` is required for URL entries in `.mcp.json`; without it Claude
+Code treats the entry as stdio and skips it. Keep keys in env vars
+(`${MYMCP_API_KEY}`), never committed.
+</Callout>
+
+## Verify
+
+```bash
+claude mcp list
+```
+
+`mymcp` should show as connected. Inside a session, `/mcp` lists its tools.
+
+## Troubleshooting
+
+- **Already exists**: `claude mcp remove mymcp --scope user`, then add again.
+- **401**: the key is wrong or OAuth isn't configured. See [Debugging](/docs/mcp/debugging).
+- **MCP Apps**: Claude Code is a terminal client and does not render `ui://`
+  apps; tools fall back to their headless output.
+
+## Related
+
+- [Claude Code: MCP](https://code.claude.com/docs/en/mcp)
+- [Setup](/docs/mcp/setup) - stdio (`mymcp-mcp`) for local dev

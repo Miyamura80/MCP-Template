@@ -2,12 +2,17 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# One policy for what a valid key request is, whichever surface makes it
+# (REST /api/v1/auth/api-keys, the dashboard's create page).
+MAX_KEY_NAME = 100
+MAX_KEY_DAYS = 365
 
 
 class CreateAPIKeyRequest(BaseModel):
-    name: str = "Default"
-    expires_in_days: int | None = None
+    name: str = Field(default="Default", min_length=1, max_length=MAX_KEY_NAME)
+    expires_in_days: int | None = Field(default=None, ge=1, le=MAX_KEY_DAYS)
     scopes: list[str] | None = None
     scope_template: str | None = None
 

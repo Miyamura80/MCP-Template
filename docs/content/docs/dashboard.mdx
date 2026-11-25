@@ -1,0 +1,68 @@
+---
+title: Dashboard deep links
+description: Links an agent can give you to finish something only a person should do
+---
+
+Some things an agent should never do for you, such as minting a credential or
+approving a dangerous call. For those, the agent gives you a link to a
+dashboard page that is already filled in; you check it and click.
+
+Opening a link never changes anything. Each page needs you signed in (WorkOS;
+see [Approvals](/docs/mcp/approvals) for the sign-in setup) and a click on its
+button.
+
+## Create an API key
+
+```text
+/dashboard/settings/api-keys/create?name=ci-bot&expiration=30d&scope=read_only
+```
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `name` | up to 100 characters | empty |
+| `expiration` | `none`, or `1d` to `365d` | `none` |
+| `scope` | `read_only`, `standard` | `standard` |
+
+A value the page can't use is dropped, with a note saying so. `admin` (full
+access) is never taken from a link; pick it on the page yourself. The new key
+is shown once, after you click Create, and never appears in a URL. Send it as
+the `X-API-KEY` header.
+
+`/dashboard/settings/api-keys` lists your keys and revokes them.
+
+## Billing
+
+```text
+/dashboard/billing?plan=plus
+```
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `plan` | `free`, `plus` | none |
+| `checkout` | `success`, `cancel` (Stripe's return URLs set it) | none |
+
+The page shows your plan, today's usage against its daily limit, and the plans,
+with the linked one highlighted. Upgrade takes you to Stripe Checkout, where
+you confirm the payment; Open billing portal takes you to Stripe's portal to
+change card, read invoices or cancel. A link only names a plan: the price,
+trial and quantity come from the server's config, never from the URL. The
+page reads the database only, so opening it never calls Stripe. Back from a
+paid checkout, Plus shows "Confirming payment" instead of a button until
+Stripe's webhook lands, so a second click can't start a second subscription.
+
+Before each checkout the server also asks Stripe whether the customer already
+has a live subscription. Two checkout pages opened side by side can still both
+be paid, so turn on Stripe's **Limit customers to one subscription** setting
+(Settings, Checkout and Payment Links) as well.
+
+When an agent runs out of daily quota, the `402 quota_exceeded` error carries
+this link as `billing_url` and at the end of its `message`, so the agent can
+pass it on (see [Rate limits](/docs/api/rate-limits#handling-a-402-daily-quota)).
+
+## Approvals
+
+| Link | Page |
+|------|------|
+| `/dashboard/approvals/{id}` | one held dangerous call: its exact arguments, Approve or Deny |
+| `/dashboard/approvals` | every held call |
+| `/dashboard/approval` | your approval mode and per-tool overrides |

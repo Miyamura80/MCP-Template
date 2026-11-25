@@ -1,8 +1,9 @@
 import os
 import re
 import warnings
+from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import dotenv_values, load_dotenv
@@ -17,15 +18,19 @@ from pydantic_settings import (
 # Import configuration models
 from .config_models import (
     AgenticPaymentsConfig,
+    ApprovalsConfig,
     AskConfig,
     BrandingConfig,
     CliConfig,
     DefaultLlm,
+    EventsConfig,
     ExampleParent,
     FeaturesConfig,
+    FeedbackConfig,
     GmailConfig,
     LlmConfig,
     LoggingConfig,
+    OAuthConfig,
     PdfFormsConfig,
     RateLimitConfig,
     ServerConfig,
@@ -38,6 +43,11 @@ from .config_models import (
 root_dir = Path(__file__).parent.parent
 
 OPENAI_O_SERIES_PATTERN = r"o(\d+)(-mini)?"
+
+# Merged YAML view (env-free), captured once when the Config singleton is built
+# (see Config.settings_customise_sources). Consumed by Config.to_yaml_dict() as
+# the secret-free config view for the config_show / config_get services.
+_yaml_config_cache: dict[str, Any] = {}
 
 
 # Custom YAML settings source
@@ -194,10 +204,14 @@ class Config(BaseSettings):
         default_factory=lambda: SubscriptionConfig()
     )
     rate_limit: RateLimitConfig = Field(default_factory=lambda: RateLimitConfig())
+    oauth: OAuthConfig = Field(default_factory=lambda: OAuthConfig())
     payments: AgenticPaymentsConfig = Field(
         default_factory=lambda: AgenticPaymentsConfig()
     )
     ask: AskConfig = Field(default_factory=lambda: AskConfig())
+    feedback: FeedbackConfig = Field(default_factory=lambda: FeedbackConfig())
+    approvals: ApprovalsConfig = Field(default_factory=lambda: ApprovalsConfig())
+    events: EventsConfig = Field(default_factory=lambda: EventsConfig())
     web_bot_auth: WebBotAuthConfig = Field(default_factory=lambda: WebBotAuthConfig())
     gmail: GmailConfig = Field(default_factory=lambda: GmailConfig())
     pdf_forms: PdfFormsConfig = Field(default_factory=lambda: PdfFormsConfig())
@@ -225,6 +239,11 @@ class Config(BaseSettings):
     # Canonical public URL of the /mcp endpoint (RFC 8707 resource identifier);
     # must match the resource indicator configured in the WorkOS dashboard
     MCP_PUBLIC_URL: str | None = None
+    # Who issues the tokens MCP clients use. "authkit" (default): WorkOS AuthKit
+    # issues them and /mcp verifies them. "self": the built-in OAuth server
+    # (api_server/oauth/) issues, stores and can revoke them, with WorkOS AuthKit
+    # doing only the sign-in. Switching back to "authkit" is the rollback.
+    MCP_AUTH_MODE: Literal["authkit", "self"] = "authkit"
     # Canonical public base URL of the HTTP API (no trailing slash, e.g.
     # https://api.example.com). When set, it is advertised as the `servers`
     # entry in the published OpenAPI spec so codegen / Swagger "Try it out" and
@@ -235,6 +254,11 @@ class Config(BaseSettings):
     # publishes the matching public key as a JWK Set; unset -> the route 404s.
     WEB_BOT_AUTH_PRIVATE_KEY: str | None = None
     SESSION_SECRET_KEY: str = "change-me-in-production"
+    # Explicit opt-in for the unsigned ``{"sub": ...}`` test-mode auth token
+    # (see api_server/auth/workos_auth.py). Defaults OFF so the bypass is never
+    # live just because DEV_ENV is left at its "dev" default; a dev must both set
+    # this AND keep DEV_ENV in {local,dev}. Never set in a networked deployment.
+    ALLOW_TEST_TOKENS: bool = False
 
     # Stripe & billing
     STRIPE_SECRET_KEY: str | None = None
@@ -243,6 +267,11 @@ class Config(BaseSettings):
     STRIPE_TEST_WEBHOOK_SECRET: str | None = None
     STRIPE_ALLOW_LIVE_KEY_IN_DEV: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
+
+    # Agent feedback sinks (optional): Slack incoming-webhook URL, and a Linear
+    # personal API key (the Linear sink also needs feedback.linear.team_id)
+    FEEDBACK_SLACK_WEBHOOK_URL: str | None = None
+    FEEDBACK_LINEAR_API_KEY: str | None = None
 
     # Redis
     REDIS_URL: str | None = None
@@ -286,6 +315,17 @@ class Config(BaseSettings):
             "🖥️  local" if os.getenv("GITHUB_ACTIONS") != "true" else "☁️  CI"
         )
     )
+
+    @property
+    def is_dev(self) -> bool:
+        """True only for the two explicit development values.
+
+        Fails secure: anything else - unset, ``staging``, ``prod``, or a typo -
+        is treated as production, so a misspelled ``DEV_ENV`` can never relax a
+        security control. This is the single owner of that predicate; callers
+        must not re-derive it from ``DEV_ENV``.
+        """
+        return (self.DEV_ENV or "").lower() in {"local", "dev"}
 
     @model_validator(mode="after")
     def _require_secret_in_prod(self) -> "Config":
@@ -341,16 +381,51 @@ class Config(BaseSettings):
         3. YAML files (custom .global_config.yaml > production_config.yaml > global_config.yaml)
         4. Init settings (passed to constructor)
         """
+        yaml_source = YamlSettingsSource(settings_cls)
+        # Capture the merged YAML data once, here, where it is already computed
+        # to populate the model - so to_yaml_dict() reuses it instead of
+        # re-reading disk on every call and diverging from this singleton.
+        global _yaml_config_cache  # noqa: PLW0603
+        _yaml_config_cache = yaml_source.yaml_data
         return (
             env_settings,
             dotenv_settings,
-            YamlSettingsSource(settings_cls),
+            yaml_source,
             init_settings,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert config to dictionary."""
+        """Convert config to dictionary.
+
+        Includes environment-sourced fields (secrets). Internal use only - do
+        NOT expose the result to any transport. Anything user-facing must use
+        :meth:`to_yaml_dict`.
+        """
         return self.model_dump()
+
+    def to_yaml_dict(self) -> dict[str, Any]:
+        """Return only the YAML-sourced configuration, never ``.env`` secrets.
+
+        The merged YAML layer (``global_config.yaml`` + split configs + the
+        production overlay + ``.global_config.yaml``), captured once when this
+        singleton was built. Every secret (API keys, ``BACKEND_DB_URI``,
+        ``GOOGLE_TOKEN_ENC_KEY``, ``SESSION_SECRET_KEY``, ...) loads from the
+        environment via a *different* settings source, so secrets are absent
+        here by construction - this can never disclose one, even if a new secret
+        field is added later. This is the safe view for the ``config_show`` /
+        ``config_get`` services, reachable over the authenticated HTTP transport.
+
+        As defense in depth, any key that collides with a declared secret field
+        name is redacted, so a secret hand-placed in a YAML file cannot leak here
+        even though env secrets never reach this layer to begin with.
+
+        Note: this is the YAML *layer*, not the effective config. Pydantic
+        defaults for fields absent from every YAML file, and non-secret env-var
+        overrides (e.g. ``LLM_CONFIG__CACHE_ENABLED``), are intentionally not
+        reflected. Callers needing effective runtime values must not use this.
+        A fresh copy is returned so callers cannot mutate the cached view.
+        """
+        return _redact_secret_keys(deepcopy(_yaml_config_cache))
 
     def _identify_provider(self, model_name: str) -> str:
         """Identify the LLM provider from a model name string."""
@@ -387,6 +462,60 @@ class Config(BaseSettings):
                 )
             return key
         raise ValueError(f"No API key configured for model: {model_identifier}")
+
+
+# The credential-bearing (env-sourced) fields on Config, enumerated explicitly
+# rather than by keyword heuristic (which both over-matched non-secret flags
+# like STRIPE_ALLOW_LIVE_KEY_IN_DEV and missed names like REDIS_URL). Used to
+# defensively drop any key that collides with one of these names from the YAML
+# view: env secrets never appear in the YAML layer by construction, but this
+# ensures a secret mistakenly placed in a YAML file (e.g. a hand-edited
+# .global_config.yaml) can never leak through config_show / config_get either.
+# Non-secret env fields (DEV_ENV, FRONTEND_URL, WORKOS_CLIENT_ID, ...) are
+# intentionally omitted. Matched by exact key name, so lowercase nested config
+# keys are unaffected.
+_SECRET_FIELD_NAMES: frozenset[str] = frozenset(
+    {
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GROQ_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "GEMINI_API_KEY",
+        "X402_PRIVATE_KEY",
+        "BACKEND_DB_URI",
+        "REDIS_URL",
+        "WORKOS_API_KEY",
+        "WEB_BOT_AUTH_PRIVATE_KEY",
+        "SESSION_SECRET_KEY",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_TEST_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_TEST_WEBHOOK_SECRET",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_TOKEN_ENC_KEY",
+        "WEBHOOK_RUNNER_TOKEN",
+    }
+)
+
+
+def _redact_secret_keys(value: Any) -> Any:
+    """Recursively drop any dict key matching a secret field name.
+
+    Removing the key (rather than masking its value) keeps the guarantee simple:
+    a secret-named key never appears in the returned view at all.
+    """
+    if isinstance(value, dict):
+        # Case-insensitive: pydantic-settings is case_sensitive=False, so a
+        # lowercase YAML key like ``openai_api_key`` still populates the secret
+        # field and must be dropped too.
+        return {
+            k: _redact_secret_keys(v)
+            for k, v in value.items()
+            if not (isinstance(k, str) and k.upper() in _SECRET_FIELD_NAMES)
+        }
+    if isinstance(value, list):
+        return [_redact_secret_keys(v) for v in value]
+    return value
 
 
 # Load .env files before creating the config instance

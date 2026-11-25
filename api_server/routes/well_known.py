@@ -4,7 +4,7 @@ The discovery documents that live here:
 
 * **OAuth 2.0 Protected Resource Metadata** (RFC 9728) - tells MCP clients
   where the authorization server is. Required of resource servers by the MCP
-  spec (2025-11-25). Served at the path-form URI
+  spec (2026-07-28; unchanged since 2025-11-25). Served at the path-form URI
   (``/.well-known/oauth-protected-resource/mcp``, tried first because the MCP
   endpoint lives at ``/mcp``) and the root form. Returns 404 when OAuth is not
   configured, so unauthenticated discovery cleanly signals "no authorization
@@ -21,6 +21,11 @@ The discovery documents that live here:
   with a 307 redirect to AuthKit, but the scanners that motivated it do not
   follow the redirect; serving the document inline as a 200 is what actually
   satisfies them. The upstream document is fetched once and cached.
+
+  With ``MCP_AUTH_MODE=self`` this server is the authorization server itself:
+  the protected-resource document points at this origin, and this path serves
+  the built-in server's metadata (``api_server.oauth.authorization_server_metadata``),
+  built locally rather than fetched.
 
 * **MCP Server Card** (SEP-2127) - pre-connect *discovery*: the identity
   (name, title, description, version, icon) plus the endpoint (``serverUrl`` /
@@ -52,8 +57,6 @@ import functools
 import hashlib
 import json
 import time
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -61,7 +64,9 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+import api_server.oauth as oauth_server
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
+from api_server.oauth.flow import issuer_url as oauth_issuer_url
 from common import global_config
 from common.config_models import BrandingConfig, IconConfig
 from models.a2a import (
@@ -71,6 +76,7 @@ from models.a2a import (
     A2AAgentSkill,
 )
 from services import discover_services, get_registry
+from src.utils.package_info import package_version
 
 router = APIRouter(tags=["well-known"])
 
@@ -86,10 +92,7 @@ _WEB_BOT_AUTH_MEDIA_TYPE = "application/http-message-signatures-directory+json"
 
 def _server_version() -> str:
     """Resolve the published package version; fall back when not installed."""
-    try:
-        return _pkg_version("mcp-template")
-    except PackageNotFoundError:
-        return "0.0.0"
+    return package_version()
 
 
 def _icon(icon: IconConfig) -> dict:
@@ -104,7 +107,7 @@ def _tool_surface() -> list[dict]:
 
     Derived from the live service registry so the card can never drift from the
     tools the server actually exposes. Imported lazily: ``mcp_server.server``
-    builds the FastMCP singleton at import time, so we defer it to request time
+    builds the MCPServer singleton at import time, so we defer it to request time
     to keep this route module cheap to import.
     """
     from mcp_server.server import llm_tool_surface  # noqa: PLC0415
@@ -342,12 +345,17 @@ def web_bot_auth_directory() -> JSONResponse:
 
 
 def _metadata() -> dict:
-    domain = authkit_domain()
-    if not domain:
-        raise HTTPException(status_code=404, detail="OAuth is not configured")
+    if oauth_server.is_self_mode():
+        # The built-in OAuth server issues MCP tokens (api_server/oauth/).
+        authorization_server = oauth_issuer_url()
+    else:
+        domain = authkit_domain()
+        if not domain:
+            raise HTTPException(status_code=404, detail="OAuth is not configured")
+        authorization_server = domain
     return {
         "resource": mcp_resource_url(),
-        "authorization_servers": [domain],
+        "authorization_servers": [authorization_server],
         "bearer_methods_supported": ["header"],
     }
 
@@ -368,7 +376,12 @@ def _authorization_server_metadata() -> dict:
     404 when OAuth is unconfigured (mirrors the PRM routes); 502 when the
     upstream authorization server cannot be reached, so callers see a clear
     "try again" signal rather than a cached or partial document.
+
+    With ``MCP_AUTH_MODE=self`` this server is the authorization server, so its
+    own metadata is built locally and served instead.
     """
+    if oauth_server.is_self_mode():
+        return oauth_server.authorization_server_metadata()
     domain = authkit_domain()
     if not domain:
         raise HTTPException(status_code=404, detail="OAuth is not configured")

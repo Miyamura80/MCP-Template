@@ -42,7 +42,7 @@ from models.gmail import (
     GmailStatusResult,
     InlineImageUpload,
 )
-from services import ConnectRequiredError, service
+from services import ConnectRequiredError, ModelFacingError, service
 from services._gmail_fake_backend import build_fake_gmail_client
 
 # ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ from services._gmail_fake_backend import build_fake_gmail_client
 # ---------------------------------------------------------------------------
 
 
-class GoogleOAuthNotConfiguredError(RuntimeError):
+class GoogleOAuthNotConfiguredError(ModelFacingError, RuntimeError):
     """GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI missing.
 
     Subclasses RuntimeError so pre-existing callers catching the old bare
@@ -91,7 +91,7 @@ class GmailNotConnectedError(ConnectRequiredError):
             return None
 
 
-class GmailAttachmentTooLargeError(Exception):
+class GmailAttachmentTooLargeError(ModelFacingError):
     """Raised when a fetched attachment exceeds the configured size ceiling.
 
     Carries the sizes so a transport can build a precise client-facing message
@@ -328,7 +328,7 @@ def _revoke_with_google(row: GoogleToken) -> None:
     description="Revoke and remove the user's linked Gmail account",
     input_model=GmailDisconnectInput,
     output_model=GmailDisconnectResult,
-    mutating=True,
+    risk="dangerous",
 )
 def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
     """Revoke the stored refresh token with Google + erase every trace of it.
@@ -382,9 +382,14 @@ def gmail_disconnect(input: GmailDisconnectInput) -> GmailDisconnectResult:
     # subject / sender / snippet of every notified message as plaintext JSON,
     # so they must go the same way as the curation ledger. Best-effort for the
     # same reason - the disconnect itself is already committed.
+    from services.events.catalog import GMAIL_MESSAGE_RECEIVED  # noqa: PLC0415
+    from services.events.store import purge_user  # noqa: PLC0415
     from services.webhooks_svc import purge_user_events  # noqa: PLC0415
 
     try:
+        # MCP Events payloads carry the same message content; the user's
+        # subscriptions to them go too.
+        purge_user(input.user_id, GMAIL_MESSAGE_RECEIVED)
         events, deliveries = purge_user_events(input.user_id)
         if events or deliveries:
             log.debug(

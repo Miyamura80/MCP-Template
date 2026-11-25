@@ -43,6 +43,15 @@ SCOPE_TEMPLATES: dict[str, list[str]] = {
 }
 
 
+# What each template grants, in words, for pages that let a person choose one.
+SCOPE_TEMPLATE_HELP: dict[str, str] = {
+    "read_only": "read tools, billing and payments",
+    "standard": "run tools, billing and payments",
+    "admin": "everything, including admin",
+}
+assert set(SCOPE_TEMPLATE_HELP) == set(SCOPE_TEMPLATES), "describe every template"  # noqa: S101
+
+
 def validate_scopes(scopes: list[str], *, allow_templates: bool = True) -> list[str]:
     """Expand templates and validate scope strings.
 

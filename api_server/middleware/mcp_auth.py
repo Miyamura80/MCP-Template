@@ -5,7 +5,7 @@ flow - discovery via RFC 9728, registration and PKCE handled by AuthKit),
 WorkOS session JWTs, and API keys - so REST credentials keep working as a
 parallel path. Implemented as pure ASGI middleware (not
 :class:`BaseHTTPMiddleware`) so it doesn't buffer the streaming SSE responses
-FastMCP emits.
+MCPServer emits.
 
 401 responses advertise the Protected Resource Metadata URL via
 ``WWW-Authenticate`` when OAuth is configured, which is how MCP clients
@@ -17,16 +17,26 @@ import json
 import anyio
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+import api_server.oauth as oauth_server
 from api_server.auth.api_key_auth import validate_api_key
 from api_server.auth.authkit_auth import (
+    resolve_token_scopes,
     resource_metadata_url,
     verify_authkit_token,
 )
 from api_server.auth.unified_auth import AuthenticatedUser
 from api_server.auth.workos_auth import verify_workos_token
+from api_server.oauth.storage import lookup_access_token
 from common import global_config
 from db.engine import use_db_session
+from src.payments.request_context import reset_payment_header, set_payment_header
 from src.utils.current_user import reset_current_user, set_current_user
+from src.utils.mcp_url_flags import (
+    InvalidUrlFlagError,
+    parse_url_flags,
+    reset_url_flags,
+    set_url_flags,
+)
 
 _MCP_PATH = "/mcp"
 
@@ -59,16 +69,49 @@ class MCPAuthMiddleware:
             await _send_unauthorized(send)
             return
 
+        # Per-connection options from the MCP URL (``?dangerous_tools=false``).
+        # Parsed after auth so an unauthenticated caller learns nothing new.
+        try:
+            flags = parse_url_flags(scope.get("query_string", b""))
+        except InvalidUrlFlagError as exc:
+            await _send_json_error(send, 400, -32602, str(exc))
+            return
+
+        # Lift the X-PAYMENT header off the scope so the paywall can read it at
+        # the tool chokepoint (MCP tool calls have no Request object).
         token = set_current_user(user)
+        payment_token = set_payment_header(_payment_header_value(scope))
+        flags_token = set_url_flags(flags)
         try:
             await self.app(scope, receive, send)
         finally:
+            reset_url_flags(flags_token)
+            reset_payment_header(payment_token)
             reset_current_user(token)
+
+
+def _payment_header_value(scope: Scope) -> str | None:
+    """Return the ``X-PAYMENT`` header from the ASGI scope, if present."""
+    for key, value in scope["headers"]:
+        # ASGI lowercases header names, but normalize defensively (as
+        # `_authenticate` does) so a non-conforming server can't drop payments.
+        if key.lower() == b"x-payment":
+            return value.decode("latin-1")
+    return None
 
 
 async def _authenticate_async(scope: Scope) -> AuthenticatedUser | None:
     """Run blocking auth I/O in a thread to avoid blocking the event loop."""
     return await anyio.to_thread.run_sync(lambda: _authenticate(scope))  # ty: ignore[unresolved-attribute]
+
+
+def authenticate_scope(scope: Scope) -> AuthenticatedUser | None:
+    """Authenticate an ASGI scope exactly as the /mcp middleware does.
+
+    Blocking (DB, JWKS). Also used to re-verify the principal of a long-lived
+    ``events/stream`` while it is open (``mcp_server/events_ext.py``).
+    """
+    return _authenticate(scope)
 
 
 def _authenticate(scope: Scope) -> AuthenticatedUser | None:
@@ -77,6 +120,21 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
     }
 
     auth_header = headers.get("authorization", "")
+    scheme, _, credentials = auth_header.partition(" ")
+    if scheme.lower() == "bearer" and oauth_server.is_self_mode():
+        # The built-in OAuth server issued, stores and can revoke these tokens.
+        # The MCP spec forbids accepting tokens from any other authorization
+        # server, so AuthKit and WorkOS JWTs are not tried in this mode. The
+        # scheme is case-insensitive (RFC 9110 section 11.1).
+        access = lookup_access_token(credentials.strip())
+        if access is None or not access.subject:
+            return None
+        scopes = resolve_token_scopes(" ".join(access.scopes))
+        if scopes is None:
+            return None
+        return AuthenticatedUser(
+            user_id=access.subject, auth_method="oauth", scopes=scopes
+        )
     if auth_header.startswith("Bearer "):
         token = auth_header.removeprefix("Bearer ").strip()
         oauth_user = verify_authkit_token(token)
@@ -115,26 +173,38 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
 def _www_authenticate_value() -> bytes:
     """Build the 401 challenge; advertise PRM discovery when OAuth is on."""
     value = 'Bearer realm="mcp"'
-    if global_config.WORKOS_AUTHKIT_DOMAIN:
+    if global_config.WORKOS_AUTHKIT_DOMAIN or oauth_server.is_self_mode():
         value += f', resource_metadata="{resource_metadata_url()}"'
     return value.encode("latin-1")
 
 
 async def _send_unauthorized(send: Send) -> None:
+    await _send_json_error(
+        send,
+        401,
+        -32001,
+        "Authentication required",
+        extra_headers=[(b"www-authenticate", _www_authenticate_value())],
+    )
+
+
+async def _send_json_error(
+    send: Send,
+    status: int,
+    code: int,
+    message: str,
+    extra_headers: list[tuple[bytes, bytes]] | None = None,
+) -> None:
     body = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "error": {"code": -32001, "message": "Authentication required"},
-            "id": None,
-        }
+        {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": None}
     ).encode()
     await send(
         {
             "type": "http.response.start",
-            "status": 401,
+            "status": status,
             "headers": [
                 (b"content-type", b"application/json"),
-                (b"www-authenticate", _www_authenticate_value()),
+                *(extra_headers or []),
                 (b"content-length", str(len(body)).encode()),
             ],
         }

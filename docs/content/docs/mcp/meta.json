@@ -3,11 +3,21 @@
   "pages": [
     "index",
     "setup",
+    "clients",
     "claude-web-cowork",
     "chatgpt",
+    "claude-code",
+    "cursor",
+    "vscode",
+    "codex",
+    "grok",
+    "muse",
     "oauth",
     "tools",
     "pdf-forms",
+    "approvals",
+    "events",
+    "feedback",
     "debugging"
   ]
 }

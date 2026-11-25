@@ -7,6 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
+from mcp.types import (
+    ClientCapabilities,
+    ElicitationCapability,
+    ElicitResult,
+    InputRequiredResult,
+)
+from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 
 from mcp_server.app_tools import pdf_signer as app_tools
 from mcp_server.enhancers.base import EnhancedTool
@@ -230,6 +237,82 @@ class TestElicitationFallback(PdfSigningTestBase):
         assert "pdf_export" in result.guidance
         # Filling still works: the document was rolled back to open.
         assert repo.load_document(opened.doc_id, "u1").status == repo.PDF_STATUS_OPEN
+
+
+# ElicitResult.content: a flat map of primitive answers.
+_Answer = dict[str, str | int | float | list[str] | None]
+
+
+def _modern_ctx(*, request_state=None, answer=None) -> MagicMock:
+    """A 2026-07-28 request from a form-elicitation host (no back-channel)."""
+    ctx = MagicMock()
+    ctx.protocol_version = sorted(MODERN_PROTOCOL_VERSIONS)[-1]
+    ctx.client_capabilities = ClientCapabilities(elicitation=ElicitationCapability())
+    ctx.session.can_send_request = False
+    ctx.request_state = request_state
+    ctx.input_responses = {"signature": answer} if answer is not None else None
+    return ctx
+
+
+class TestMultiRoundTripSigning(PdfSigningTestBase):
+    """2026-07-28 hosts without apps sign through an InputRequiredResult."""
+
+    _run_enhancer = TestElicitationFallback._run_enhancer
+
+    def _ask(self, monkeypatch):
+        monkeypatch.setenv("MCP_DISABLE_APPS", "1")
+        opened = self._open(make_acroform_pdf())
+        first, _ = self._run_enhancer(opened.doc_id, _modern_ctx())
+        assert isinstance(first, InputRequiredResult)
+        assert first.request_state == f"pdf_sign:{opened.doc_id}"
+        prompt = first.input_requests["signature"].params
+        assert "full legal name" in prompt.message
+        assert set(prompt.requested_schema["properties"]) == {"full_name", "consent"}
+        doc = repo.load_document(opened.doc_id, "u1")
+        assert doc.status == repo.PDF_STATUS_AWAITING_SIGNATURE
+        return opened.doc_id, first.request_state
+
+    def _retry(self, doc_id, state, answer):
+        return self._run_enhancer(
+            doc_id, _modern_ctx(request_state=state, answer=answer)
+        )[0]
+
+    def test_accepted_answer_signs(self, monkeypatch):
+        doc_id, state = self._ask(monkeypatch)
+        content: _Answer = {"full_name": "Eito Miyamura", "consent": True}
+        result = self._retry(
+            doc_id, state, ElicitResult(action="accept", content=content)
+        )
+        assert result.status == "signed"
+        last = (repo.load_document(doc_id, "u1").audit or [])[-1]
+        assert last["channel"] == "elicitation"
+        assert last["confirmed_via_elicitation"] is True
+        assert last["typed_name"] == "Eito Miyamura"
+
+    def test_decline_reopens_document(self, monkeypatch):
+        doc_id, state = self._ask(monkeypatch)
+        result = self._retry(doc_id, state, ElicitResult(action="decline"))
+        assert result.status == "signing_declined"
+        assert repo.load_document(doc_id, "u1").status == repo.PDF_STATUS_OPEN
+
+    def test_malformed_answer_signs_nothing(self, monkeypatch):
+        doc_id, state = self._ask(monkeypatch)
+        content: _Answer = {"full_name": "Eito Miyamura"}  # consent missing
+        result = self._retry(
+            doc_id, state, ElicitResult(action="accept", content=content)
+        )
+        assert result.status == "signing_declined"
+        assert repo.load_document(doc_id, "u1").status == repo.PDF_STATUS_OPEN
+
+    def test_answer_for_another_document_asks_again(self, monkeypatch):
+        doc_id, _ = self._ask(monkeypatch)
+        content: _Answer = {"full_name": "Eito Miyamura", "consent": True}
+        result = self._retry(
+            doc_id, "pdf_sign:other", ElicitResult(action="accept", content=content)
+        )
+        assert isinstance(result, InputRequiredResult)
+        doc = repo.load_document(doc_id, "u1")
+        assert doc.status == repo.PDF_STATUS_AWAITING_SIGNATURE
 
 
 class TestPdfExport(PdfSigningTestBase):

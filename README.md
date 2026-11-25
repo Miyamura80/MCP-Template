@@ -63,7 +63,7 @@ The skill's source of truth lives in [`skills/gmail-mcp/SKILL.md`](skills/gmail-
 ## App Distribution
 
 - MCP server with OAuth
-- Claude and ChatGPT connectors
+- Claude connectors and ChatGPT apps
 - APIs and SDKs
 - Chat interfaces like iMessage and WhatsApp
 - A dashboard that uses the same MCP layer
@@ -74,10 +74,10 @@ The skill's source of truth lives in [`skills/gmail-mcp/SKILL.md`](skills/gmail-
 | Feature | Stack |
 |---|---|
 | CLI (auto-discovery commands, global flags, shell completions, self-update) | Typer |
-| MCP server (streamable HTTP at `/mcp`, services auto-registered as tools; stdio supported for local dev) | FastMCP |
+| MCP server (streamable HTTP at `/mcp`, services auto-registered as tools; stdio supported for local dev) | MCP Python SDK 2.x (`MCPServer`) |
 | HTTP API server (also hosts `/mcp`) | FastAPI + Uvicorn |
 | Auth | WorkOS + API keys |
-| Payments | Stripe |
+| Payments | Stripe subscriptions + x402 sell-side paywall (price a tool with `@service(price=...)`; agents pay per call in stablecoins, Cloudflare Wallets / x402 ecosystem) |
 | Database + migrations | SQLAlchemy + Alembic |
 | Config (YAML + `.env`) | Pydantic-settings |
 | LLM inference + observability | DSPY + LiteLLM + LangFuse |
@@ -93,7 +93,7 @@ One codebase, three interfaces. Write business logic once in `services/` and it 
 ```
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
 │ src/cli/app  │  │ mcp_server/  │  │ api_server/  │   transport / interface
-│  (Typer)     │  │ (FastMCP)    │  │ (FastAPI)    │
+│  (Typer)     │  │ (MCPServer)  │  │ (FastAPI)    │
 └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
        │                 │                 │
        └─────────────────┼─────────────────┘
@@ -166,6 +166,7 @@ Drop a Python file in `src/cli/commands/` and it is auto-discovered.
 from typing import Annotated
 import typer
 
+
 def main(name: Annotated[str, typer.Argument(help="Who to greet.")]) -> None:
     """Say hello."""
     typer.echo(f"Hello, {name}!")
@@ -182,6 +183,7 @@ uv run mymcp hello World   # Hello, World!
 import typer
 
 app = typer.Typer()
+
 
 @app.command()
 def migrate() -> None:

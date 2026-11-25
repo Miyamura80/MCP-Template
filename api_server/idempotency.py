@@ -31,6 +31,8 @@ from sqlalchemy.exc import IntegrityError
 
 from db.engine import use_db_session
 from db.models.idempotency_keys import IdempotencyRecord
+from services import InvalidArgument
+from services.approvals_errors import ApprovalGateError
 
 # Mirror the DB column width and (loosely) Stripe's own key-length guidance.
 _KEY_MAX_LEN = 255
@@ -147,7 +149,8 @@ def execute_idempotent(
     On the first request the computed model is returned and cached. Retries
     with the same key replay the cached response; the same key with a different
     payload returns 422; an in-flight key returns 409. If ``compute`` raises a
-    client error (HTTP 4xx, e.g. quota/validation) the claim is released so the
+    client error (HTTP 4xx, e.g. quota/validation, or a service's
+    ``InvalidArgument``) the claim is released so the
     request can be retried; ambiguous failures (5xx, network errors that may
     have already committed an irreversible side effect) keep the claim so a
     retry returns 409 rather than re-executing.
@@ -192,6 +195,12 @@ def execute_idempotent(
             # through to the no-release path below. Errors are never cached.
             if exc.status_code < 500:
                 _release(session, user_id, route, key)
+            raise
+        except (InvalidArgument, ApprovalGateError):
+            # A service rejecting its arguments, or the approval gate holding a
+            # dangerous call, happens before any side effect (the REST transport
+            # answers 400 / 202 / 403 / 409), so it is a client outcome too.
+            _release(session, user_id, route, key)
             raise
         # Any other failure - a 5xx HTTPException, a network drop, or an
         # unexpected exception - is *ambiguous*: the side effect may already

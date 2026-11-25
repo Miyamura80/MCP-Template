@@ -55,6 +55,29 @@ def create_api_key(
     return raw_key, row
 
 
+def aware_expires_at(row: APIKey) -> datetime | None:
+    """``expires_at`` with its zone (SQLite drops it; every value we write is UTC)."""
+    expires = row.expires_at
+    if expires is not None and expires.tzinfo is None:
+        return expires.replace(tzinfo=UTC)
+    return expires
+
+
+def is_expired(row: APIKey, now: datetime | None = None) -> bool:
+    expires = aware_expires_at(row)
+    return expires is not None and expires < (now or datetime.now(UTC))
+
+
+def list_active_keys(session: Session, user_id: str) -> list[APIKey]:
+    """The user's non-revoked keys, newest first."""
+    return (
+        session.query(APIKey)
+        .filter_by(user_id=user_id, revoked=False)
+        .order_by(APIKey.created_at.desc(), APIKey.id.desc())
+        .all()
+    )
+
+
 def validate_api_key(session: Session, raw_key: str) -> APIKey | None:
     """Validate a raw API key and return the DB row (or ``None``)."""
     if not raw_key.startswith(PREFIX):
@@ -63,16 +86,8 @@ def validate_api_key(session: Session, raw_key: str) -> APIKey | None:
     row = session.query(APIKey).filter_by(key_hash=key_hash).first()
     if row is None:
         return None
-    if row.revoked:
+    if row.revoked or is_expired(row):
         return None
-    if row.expires_at:
-        expires = (
-            row.expires_at
-            if row.expires_at.tzinfo
-            else row.expires_at.replace(tzinfo=UTC)
-        )
-        if expires < datetime.now(UTC):
-            return None
 
     row.last_used_at = datetime.now(UTC)
     session.commit()

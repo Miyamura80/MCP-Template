@@ -9,9 +9,11 @@ import typer
 from packaging.version import Version
 from rich.console import Console
 
+from src.utils.package_info import DIST_NAME
+
 console = Console(stderr=True)
 
-_PACKAGE_NAME = "mcp-template"
+_PACKAGE_NAME = DIST_NAME
 _PYPI_URL = f"https://pypi.org/pypi/{_PACKAGE_NAME}/json"
 _TIMEOUT = 5
 
@@ -45,6 +47,7 @@ def update_command() -> None:
         console.print(f"[green]Updated to {latest_str}![/green]")
     except subprocess.CalledProcessError:
         console.print(
-            "[red]Update failed.[/red] Try manually: uv pip install --upgrade mcp-template"
+            "[red]Update failed.[/red] Try manually: uv pip install --upgrade "
+            + _PACKAGE_NAME
         )
         raise typer.Exit(code=1) from None
