@@ -241,18 +241,20 @@ class TestPdfEdit(PdfServiceTestBase):
             self._edit(opened.doc_id, [SetFieldOp(name="full_name", value="x")])
         assert "immutable" in str(exc.value)
 
-    def test_add_text_non_latin1_rejected(self):
+    def test_add_text_uncovered_script_rejected(self):
+        # Hebrew is outside every bundled font: refuse rather than stamp
+        # empty .notdef boxes. (CJK/Greek/Cyrillic/Arabic are covered, see
+        # tests/test_pdf_unicode_fonts.py.)
         opened = self._open(make_flat_pdf())
+        before = repo.load_document(opened.doc_id, "u1").current_bytes
         with pytest.raises(PdfEditBatchError) as exc:
             self._edit(
-                opened.doc_id, [AddTextOp(page=1, x=110.0, y=650.0, text="宮村英人")]
+                opened.doc_id, [AddTextOp(page=1, x=110.0, y=650.0, text="שרה כהן")]
             )
-        assert "cannot render" in exc.value.errors[0]["error"]
+        assert "can render" in exc.value.errors[0]["error"]
+        assert "extra_font_paths" in exc.value.errors[0]["error"]
         # Atomicity: nothing stamped.
-        doc = repo.load_document(opened.doc_id, "u1")
-        assert not any(
-            "?" in line.text for line in inspect_pdf(doc.current_bytes).text_layout
-        )
+        assert repo.load_document(opened.doc_id, "u1").current_bytes == before
 
     def test_latin1_accents_still_accepted(self):
         opened = self._open(make_flat_pdf())

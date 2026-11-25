@@ -23,9 +23,9 @@ from models.pdf_forms import AddTextOp, PdfEditOp, PdfFormField, SetFieldOp
 from services import ModelFacingError
 from services.pdf_inspect import _qualified_name, inspect_pdf
 from services.pdf_overlay import (
+    OverlayText,
     build_text_overlay_page,
-    escape_pdf_text,
-    unencodable_pdf_text,
+    unrenderable_pdf_text,
 )
 
 
@@ -89,13 +89,12 @@ def _validate_ops(
             problem = _validate_set_field(op, fields_by_name)
         elif op.page > page_count:
             problem = f"page {op.page} out of range (document has {page_count} pages)"
-        elif bad := unencodable_pdf_text(op.text):
-            # Overlays draw with standard-14 Helvetica (Latin-1 only);
-            # letting these through would silently render '?' on the page.
+        elif bad := unrenderable_pdf_text(op.text):
+            # Letting these through would draw empty .notdef boxes.
             problem = (
-                f"text contains characters the overlay font cannot render: "
-                f"{bad!r}. add_text uses a Latin-1 (standard-14) font; "
-                "transliterate the text or restrict it to Latin script. "
+                f"text contains characters no overlay font can render: "
+                f"{bad!r}. Control characters are never allowed; other "
+                "scripts need a font in pdf_forms.fonts.extra_font_paths. "
                 "(AcroForm set_field values are not affected.)"
             )
         else:
@@ -107,13 +106,11 @@ def _validate_ops(
 
 def _overlay_page(width: float, height: float, items: list[AddTextOp]):
     """Build a single page whose content stream draws the given text items."""
-    chunks = [
-        b"BT /PdfEditF1 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (item.font_size, item.x, item.y, escape_pdf_text(item.text))
-        for item in items
-    ]
     return build_text_overlay_page(
-        width, height, {"/PdfEditF1": "/Helvetica"}, b"".join(chunks)
+        width,
+        height,
+        [OverlayText(item.x, item.y, item.font_size, item.text) for item in items],
+        font_prefix="PdfEdit",
     )
 
 

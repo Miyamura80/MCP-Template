@@ -430,6 +430,19 @@ class PdfSigningConfig(BaseModel):
         return self
 
 
+class PdfFontsConfig(BaseModel):
+    """Unicode fonts for PDF overlay text and the signature stamp."""
+
+    extra_font_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "TTF/OTF files tried, in order, after the bundled Noto subsets "
+            "for characters they lack (e.g. a full Noto Sans CJK or Hebrew "
+            "face). Relative paths resolve against the repo root."
+        ),
+    )
+
+
 class PdfFormsConfig(BaseModel):
     """PDF form-filling and signing configuration (loaded from pdf_forms.yaml)."""
 
@@ -463,3 +476,4 @@ class PdfFormsConfig(BaseModel):
         description="Age after which unexported document sessions may be swept.",
     )
     signing: PdfSigningConfig = Field(default_factory=PdfSigningConfig)
+    fonts: PdfFontsConfig = Field(default_factory=PdfFontsConfig)

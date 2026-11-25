@@ -20,9 +20,11 @@ Signing steps (US-007):
    ``pdf_forms.signing.dev_cert_dir``; production should configure
    ``cert_path``/``key_path`` with a real key pair.
 
-The stamp uses the standard-14 Helvetica-Oblique face rather than a bundled
-script font: zero licensing surface and it renders identically everywhere
-(the PRD's open question, resolved to the simplest v1).
+Latin-1 names stamp in standard-14 Helvetica-Oblique (nothing embedded).
+Any other script is drawn with an embedded subset of the bundled Noto fonts
+(SIL OFL 1.1, see ``services/pdf_fonts/OFL.txt``) with a synthetic oblique,
+so a CJK, Greek, Cyrillic or Arabic name stamps exactly as typed. A name no
+font covers is refused up front rather than stamped as empty boxes.
 """
 
 from __future__ import annotations
@@ -45,9 +47,9 @@ from services import ModelFacingError
 from services.pdf_documents_repo import load_document, update_document
 from services.pdf_inspect import inspect_pdf
 from services.pdf_overlay import (
+    OverlayText,
     build_text_overlay_page,
-    escape_pdf_text,
-    unencodable_pdf_text,
+    unrenderable_pdf_text,
 )
 
 _SEAL_FIELD_NAME = "MyMCP-Seal"
@@ -103,18 +105,18 @@ def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
     if not name:
         _audit_rejection(doc, "empty_typed_name")
         raise PdfSigningInputError("typed_name must be the signer's full legal name.")
-    if bad := unencodable_pdf_text(name):
-        # The stamp draws with standard-14 Helvetica (Latin-1 only); silently
-        # rendering '?' into a signature on a legal document is unacceptable,
-        # so refuse and ask for a renderable form of the name. The audit
-        # trail could store the original faithfully, but a stamp that
-        # contradicts the audit is worse than an honest error.
+    if bad := unrenderable_pdf_text(name):
+        # Control characters, or a script/ideograph no stamp font covers.
+        # Stamping empty boxes into a signature on a legal document is
+        # unacceptable, and a stamp that contradicts the audit trail is
+        # worse than an honest error, so refuse.
         _audit_rejection(doc, "unrenderable_typed_name")
         raise PdfSigningInputError(
             f"typed_name contains characters the signature stamp cannot "
-            f"render: {bad!r}. The stamp uses a Latin-1 (standard-14) font - "
-            "please sign with a Latin-script form of the name (e.g. a "
-            "romanized spelling)."
+            f"render: {bad!r}. Control characters are never allowed; for "
+            "other characters the stamp fonts cover Latin, Greek, Cyrillic, "
+            "Arabic and common CJK/Hangul (operators can add fonts via "
+            "pdf_forms.fonts.extra_font_paths)."
         )
     if not consent:
         _audit_rejection(doc, "consent_not_given")
@@ -281,27 +283,24 @@ def resolve_stamp_rect(
     return page, [x, y - _STAMP_DESCENT, x + _STAMP_WIDTH, y + _STAMP_ASCENT]
 
 
-def _stamp_content(x: float, y: float, typed_name: str, meta_lines: list[str]) -> bytes:
-    chunks = [
-        b"BT /MyMCPSigF1 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (
-            _NAME_FONT_SIZE,
-            x,
-            y + _NAME_BASELINE_OFFSET,
-            escape_pdf_text(typed_name),
+def _stamp_lines(
+    x: float, y: float, typed_name: str, meta_lines: list[str]
+) -> list[OverlayText]:
+    lines = [
+        OverlayText(
+            x, y + _NAME_BASELINE_OFFSET, _NAME_FONT_SIZE, typed_name, oblique=True
         )
     ]
-    chunks.extend(
-        b"BT /MyMCPSigF2 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (
-            _META_FONT_SIZE,
+    lines.extend(
+        OverlayText(
             x,
             y + _META_BASELINE_OFFSET - i * _META_LINE_SPACING,
-            escape_pdf_text(line),
+            _META_FONT_SIZE,
+            line,
         )
         for i, line in enumerate(meta_lines)
     )
-    return b"".join(chunks)
+    return lines
 
 
 def _apply_stamp_and_audit(
@@ -320,8 +319,8 @@ def _apply_stamp_and_audit(
     overlay = build_text_overlay_page(
         float(target.mediabox.width),
         float(target.mediabox.height),
-        {"/MyMCPSigF1": "/Helvetica-Oblique", "/MyMCPSigF2": "/Helvetica"},
-        _stamp_content(x, y, audit["typed_name"], meta_lines),
+        _stamp_lines(x, y, audit["typed_name"], meta_lines),
+        font_prefix="MyMCPSig",
     )
     target.merge_page(overlay)
     writer.add_metadata({_AUDIT_INFO_KEY: json.dumps(audit, sort_keys=True)})
