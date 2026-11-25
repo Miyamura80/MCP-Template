@@ -13,7 +13,7 @@ for p in 'dist/electron' 'xvfb-run' 'Xvfb' 'vite.renderer.config.mts' 'mock_llm'
 done
 log "stopped test services (server/mock/vite/electron/xvfb)"
 if [ "${1:-}" = "--reset" ]; then
-  rm -f "$E2E_DB" "$API_KEY_FILE" "$TOOLCALL_LOG"
-  log "reset: dropped e2e DB, cached API key, tool-call log"
+  rm -f "$E2E_DB" "$API_KEY_FILE" "$TOOLCALL_LOG" "$E2E_HOME/enc_key.txt"
+  log "reset: dropped e2e DB, cached API key + enc key, tool-call log"
 fi
 echo "teardown complete"

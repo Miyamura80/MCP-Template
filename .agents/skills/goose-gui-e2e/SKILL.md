@@ -44,9 +44,10 @@ bash run_all.sh              # run every scenario, print a summary
 bash down.sh                 # stop test services  (down.sh --reset also drops the e2e DB + key)
 ```
 
-`make test_apps_e2e` runs `up.sh && run_all.sh`. Each `run_test.sh` writes a
-screenshot of the real Goose GUI (with the Settings app rendered) to
-`$E2E_HOME/shot_<scenario>.png`.
+`make test_apps_e2e` runs `up.sh && run_all.sh`. Set `E2E_VIDEO=1` to also
+record each drive as `$E2E_HOME/video_<scenario>.mp4`: ffmpeg `x11grab` captures
+the Xvfb display (Playwright's `recordVideo` stalls Electron's first window),
+and the driver lingers ~2.5s on each milestone so the video is watchable.
 
 ## Where this runs in the suite
 
@@ -58,18 +59,29 @@ Heavy tier - **not** in `make ci` (which stays Node/Rust/Electron-free):
   tests/test_apps_e2e.py --no-cov`). It shells out to `up.sh` + `run_all.sh`.
   (`--no-cov` keeps a single-file run from tripping `pytest.ini`'s coverage gate.)
 - **CI:** `.github/workflows/apps_e2e.yaml` - `workflow_dispatch` + weekly cron. It
-  builds Goose via `setup.sh` (open egress, so the npmmirror preconditions below
-  don't apply on GitHub runners) and runs the guarded pytest entry.
+  builds Goose via `setup.sh` and runs the guarded pytest entry.
 
 ## Preconditions (verify before setup)
 
-- **npmmirror on the network allowlist.** Electron's binary is fetched from a
-  mirror because GitHub release assets are egress-blocked in the sandbox. In the
-  environment's **Network access → Custom**, add `registry.npmmirror.com` and
-  `cdn.npmmirror.com` (keep the default package-manager list checked). `setup.sh`
-  preflights this and fails loudly if it's missing.
-- Sandbox provides: `cargo`, `pnpm`/`node`, `bun`, `uv`, `xvfb-run`. `setup.sh`
-  uses `git clone` (allowed) + the mirror - none of the GitHub-blocked paths.
+- **Goose is pinned** via `GOOSE_REF` (a tag, branch or SHA; default in
+  `setup.sh`). Bump it deliberately: `GOOSE_REF=v1.61.0 bash setup.sh` checks
+  out that ref whenever the tree's HEAD differs, cleans old build products, and
+  rebuilds. Goose `main` moves fast (engines bumps, bundle renames), which is why
+  the build is no longer unpinned. Node/pnpm matching Goose's `engines` are
+  provisioned from nodejs.org/npm under `$E2E_HOME/node` when the system ones
+  don't satisfy them.
+- **Upgrading an existing `$E2E_HOME`:** `up.sh` now encrypts with its own key
+  (`$E2E_HOME/enc_key.txt`), so run `bash down.sh --reset` once to drop an e2e DB
+  whose secrets were encrypted under your `.env` key.
+
+- **Official sources only by default.** Goose is built from a `git clone` of
+  `github.com/block/goose`; Electron's binary comes from the official
+  `github.com/electron/electron` release, checksum-verified. The sandbox needs
+  `github.com` + `release-assets.githubusercontent.com` reachable. If release
+  assets are blocked, point `ELECTRON_BASE_URL` at a mirror (e.g.
+  `https://registry.npmmirror.com/-/binary/electron`); `setup.sh` preflights the
+  URL and fails loudly if it is unreachable.
+- Sandbox provides: `cargo`, `pnpm`/`node`, `bun`, `uv`, `xvfb-run`, `ffmpeg`.
 
 ## How a scenario works
 
@@ -101,6 +113,10 @@ A scenario is JSON in `scripts/scenarios/<name>.json`:
   stack sets `GMAIL_FAKE_BACKEND=1`** (see below).
 - `expect` - checked by `mcp_probe.py`: `tool_called` + `round_trip` (from the
   tool-call log) and `app_rendered` + `dom_contains` (from the rendered iframe).
+  `dom_absent` (default `["MCP error"]`, checked by `pw_scenario.mjs` after the
+  render and after any interaction) lists text that must NOT appear: a host-side
+  rejection of an app -> server call renders as `MCP error <code>`, which a
+  `dom_contains`-only check would pass. Override with `[]` to opt out.
 
 ### Rendering the Gmail apps offline (`GMAIL_FAKE_BACKEND`)
 
@@ -119,7 +135,7 @@ can never stand in for a real mailbox in production.
 **Why the fake also serves the curated inbox:** the `gmail_inbox` app registers
 its `ontoolresult` handler in a mount effect, and if the host delivers the thread
 result *before* that runs, the app misses it and falls back to a curated-inbox
-refresh (`gmail_inbox.refresh` → `gmail_curate_inbox`) after ~800ms. So a
+refresh (`gmail_inbox_refresh` → `gmail_curate_inbox`) after ~800ms. So a
 thread-open renders the **reader** when it wins that race and the **curated list**
 when it loses. The fake serves both paths from the same fixture thread, and
 `gmail_thread_render` asserts on content present in both views, so the scenario is
@@ -130,7 +146,7 @@ proven independently via the tool-call log regardless of which view renders.
 
 A scenario may add an `interact` block to drive a real control **inside** the app
 iframe after it renders, exercising a **user-initiated** server round-trip (the
-`settings_subscribe` fixture does this - clicks "Add endpoint" → `settings.subscribe`):
+`settings_subscribe` fixture does this - clicks "Add endpoint" → `settings_subscribe`):
 
 ```json
 "expect": { "...": "...", "interaction_rendered": true },
@@ -184,7 +200,7 @@ Baked into the scripts; listed so you recognize them if something drifts:
 
 | Symptom | Cause → handled by |
 |---|---|
-| Electron binary 403 | GitHub release assets blocked → mirror + checksum (`setup.sh`) |
+| Electron binary 403 | GitHub release assets blocked → set `ELECTRON_BASE_URL` to a mirror (`setup.sh`) |
 | `@electron/node-gyp` 403 on `pnpm install` | git tarball on codeload blocked → registry override (`setup.sh`) |
 | Electron SIGSEGV "Missing X server" | needs a display → `xvfb-run` owns Xvfb per test |
 | Electron crash under Xvfb | `--no-sandbox --disable-gpu` (NOT `--in-process-gpu`) |
@@ -192,6 +208,7 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | bg service dies next tool call | `setsid ... & disown` (`start_detached`); re-run `up.sh` to recover |
 | `/mcp` 401 | the extension must send the seeded `X-API-KEY` header (`configure_goose.sh`) |
 | app iframe not found | assert only on an **app-returning** tool; the Settings app renders offline |
+| app shows `MCP error -32602` ("tool not found" in the goose log) | Goose rewrites tool names outside `[a-zA-Z0-9_-]` and the app bridge then can't find them; keep tool names underscore-only (`tests/test_mcp_server.py::test_tool_names_are_host_safe`) |
 
 ## Files
 
@@ -207,9 +224,9 @@ Baked into the scripts; listed so you recognize them if something drifts:
 | `mcp_probe.py` | assertion oracle - rendered iframe (`pw_result`) + tool round-trip (`toolcalls.jsonl`) |
 | `run_test.sh` / `run_all.sh` | drive + assert one / all scenarios |
 | `scenarios/settings_render.json` | scenario 1: LLM opens the Settings app; assert it renders |
-| `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings.subscribe` → assert the re-render |
+| `scenarios/settings_subscribe.json` | scenario 2: click "Add endpoint" → `settings_subscribe` → assert the re-render |
 | `scenarios/gmail_thread_render.json` | scenario 3: LLM opens a thread via `gmail_get_thread`; assert the gmail_inbox reader iframe renders (needs `GMAIL_FAKE_BACKEND`) |
-| `scenarios/gmail_remote_images.json` | scenario 4: remote-image pipeline - assert the blocked-by-default "Show images" banner renders, click it, and assert the `gmail_inbox.fetch_image` round-trip re-renders as "Retry" (fixture URL is `.invalid`, so the SSRF guard rejects it deterministically offline and in CI) |
+| `scenarios/gmail_remote_images.json` | scenario 4: remote-image pipeline - assert the blocked-by-default "Show images" banner renders, click it, and assert the `gmail_inbox_fetch_image` round-trip re-renders as "Retry" (fixture URL is `.invalid`, so the SSRF guard rejects it deterministically offline and in CI) |
 
 Also outside the skill: `tests/test_apps_e2e.py` (guarded pytest entry) and
 `.github/workflows/apps_e2e.yaml` (opt-in CI).

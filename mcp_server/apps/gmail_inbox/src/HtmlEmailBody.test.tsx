@@ -46,7 +46,7 @@ describe("HtmlEmailBody", () => {
     expect(screen.queryByTestId("show-images-banner")).toBeNull();
   });
 
-  it("Show images fetches via gmail_inbox.fetch_image and swaps in data: URIs", async () => {
+  it("Show images fetches via gmail_inbox_fetch_image and swaps in data: URIs", async () => {
     const app = makeApp();
     const { container } = renderBody(app);
     fireEvent.click(screen.getByTestId("show-images-btn"));
@@ -54,7 +54,7 @@ describe("HtmlEmailBody", () => {
       expect(container.innerHTML).toContain("data:image/png;base64,AAAA"),
     );
     expect(app.callServerTool).toHaveBeenCalledWith({
-      name: "gmail_inbox.fetch_image",
+      name: "gmail_inbox_fetch_image",
       arguments: { url: "https://cdn.example.com/logo.png" },
     });
     expect(screen.queryByTestId("show-images-banner")).toBeNull();

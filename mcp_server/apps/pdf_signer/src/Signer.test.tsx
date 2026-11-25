@@ -31,8 +31,8 @@ const DOC = {
 function makeApp(overrides: Partial<Record<string, unknown>> = {}) {
   const calls: { name: string; arguments: Record<string, unknown> }[] = [];
   const responses: Record<string, unknown> = {
-    "pdf_signer.get_document": { structuredContent: DOC },
-    "pdf_signer.sign": {
+    "pdf_signer_get_document": { structuredContent: DOC },
+    "pdf_signer_sign": {
       structuredContent: {
         doc_id: DOC.doc_id,
         status: "signed",
@@ -41,7 +41,7 @@ function makeApp(overrides: Partial<Record<string, unknown>> = {}) {
         message: "Signed by Eito Miyamura on 2026-07-05T12:00:00+00:00.",
       },
     },
-    "pdf_signer.cancel": {
+    "pdf_signer_cancel": {
       structuredContent: { doc_id: DOC.doc_id, status: "open" },
     },
     ...overrides,
@@ -83,7 +83,7 @@ describe("Signer ceremony", () => {
     });
     await waitFor(() => expect(screen.getByText("nda.pdf")).toBeInTheDocument());
     expect(app.calls[0]).toEqual({
-      name: "pdf_signer.get_document",
+      name: "pdf_signer_get_document",
       arguments: { doc_id: DOC.doc_id },
     });
   });
@@ -115,7 +115,7 @@ describe("Signer ceremony", () => {
     await waitFor(() =>
       expect(screen.getByTestId("signed-badge")).toBeInTheDocument()
     );
-    const signCall = app.calls.find((c) => c.name === "pdf_signer.sign");
+    const signCall = app.calls.find((c) => c.name === "pdf_signer_sign");
     expect(signCall?.arguments).toEqual({
       doc_id: DOC.doc_id,
       typed_name: "Eito Miyamura",
@@ -132,7 +132,7 @@ describe("Signer ceremony", () => {
 
   it("declined host confirmation keeps the ceremony open with a notice", async () => {
     const app = makeApp({
-      "pdf_signer.sign": {
+      "pdf_signer_sign": {
         structuredContent: {
           doc_id: DOC.doc_id,
           status: "declined",
@@ -156,7 +156,7 @@ describe("Signer ceremony", () => {
 
   it("sign errors surface as a banner and allow retry", async () => {
     const app = makeApp({
-      "pdf_signer.sign": new Error("boom"),
+      "pdf_signer_sign": new Error("boom"),
     });
     await renderWithDocument(app);
     fireEvent.change(screen.getByLabelText(/Sign as/), {
@@ -169,14 +169,14 @@ describe("Signer ceremony", () => {
     expect(screen.getByRole("button", { name: /Sign document/ })).toBeInTheDocument();
   });
 
-  it("cancel calls pdf_signer.cancel and shows the cancelled state", async () => {
+  it("cancel calls pdf_signer_cancel and shows the cancelled state", async () => {
     const app = makeApp();
     await renderWithDocument(app);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
       expect(screen.getByText("Signing cancelled")).toBeInTheDocument()
     );
-    expect(app.calls.some((c) => c.name === "pdf_signer.cancel")).toBe(true);
+    expect(app.calls.some((c) => c.name === "pdf_signer_cancel")).toBe(true);
     expect(
       screen.getByText(/can be edited again/)
     ).toBeInTheDocument();
@@ -184,7 +184,7 @@ describe("Signer ceremony", () => {
 
   it("an already-signed document shows the badge instead of the ceremony", async () => {
     const app = makeApp({
-      "pdf_signer.get_document": {
+      "pdf_signer_get_document": {
         structuredContent: { ...DOC, status: "signed" },
       },
     });

@@ -7,7 +7,7 @@ The visibility hint is a convention some hosts do not enforce (see
 MCP_UI_EDGE_CASES.md A4), so signing does not rely on it - the layered
 guarantees are:
 
-1. the server state machine: ``pdf_signer.sign`` refuses any document that
+1. the server state machine: ``pdf_signer_sign`` refuses any document that
    is not ``awaiting_signature``, a state only ``pdf_request_signature``
    enters;
 2. when the client supports elicitation, a host-native confirmation dialog
@@ -51,7 +51,7 @@ _APP_META = {"ui": {"visibility": ["app"]}}
 
 
 @mcp.tool(
-    name="pdf_signer.get_document",
+    name="pdf_signer_get_document",
     description="Fetch a PDF document session's bytes for the signing app viewer.",
     meta=_APP_META,
 )
@@ -85,7 +85,7 @@ class _SignConfirmation(BaseModel):
 
 
 @mcp.tool(
-    name="pdf_signer.sign",
+    name="pdf_signer_sign",
     description=(
         "Complete the signing ceremony (called by the signing app after the "
         "user typed their full legal name and ticked the consent box)."
@@ -133,7 +133,7 @@ async def sign(
             # elicit *error* degrades to the unconfirmed path exactly like an
             # undeclared capability. A user *decline* (below) still aborts.
             log.warning(
-                "pdf_signer.sign: host errored the confirmation elicitation "
+                "pdf_signer_sign: host errored the confirmation elicitation "
                 "({}); proceeding with app-ceremony-only signing",
                 exc,
             )
@@ -183,7 +183,7 @@ async def sign(
 
 
 @mcp.tool(
-    name="pdf_signer.cancel",
+    name="pdf_signer_cancel",
     description=(
         "Cancel the signing ceremony (called by the signing app); the "
         "document returns to 'open' and can be edited again."

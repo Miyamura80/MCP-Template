@@ -232,6 +232,9 @@ Apps live in `mcp_server/apps/<name>/`:
 - `make build_apps` rebuilds the bundle (developer-only; not part of CI)
 - `make dev_host` runs the upstream `@modelcontextprotocol/ext-apps` basic-host
   for manual smoke testing
+- App-only tool names use `<app>_<action>` (e.g. `settings_get`), never dots:
+  hosts rewrite names outside `[a-zA-Z0-9_-]`, and Goose then can't resolve the
+  app's `callServerTool` ("tool not found"). `test_tool_names_are_host_safe` enforces it.
 - Code used by more than one app goes in `mcp_server/apps/_shared/`, imported
   by relative path (`_`-prefixed dirs are never registered as apps). It must not import packages (it has no `node_modules`);
   see its README.

@@ -38,6 +38,36 @@ mkdir -p "$E2E_HOME"
 : "${E2E_USER_ID:=e2e-user}"
 : "${API_KEY_FILE:=$E2E_HOME/api_key.txt}"
 
+# Node/pnpm that setup.sh provisions when the system ones don't satisfy goose's
+# `engines`. Prepended so every script (pnpm, electron-forge, vite) agrees.
+: "${E2E_NODE:=$E2E_HOME/node}"
+use_e2e_node() {
+  [ -d "$E2E_NODE/bin" ] || return 0
+  case ":$PATH:" in *":$E2E_NODE/bin:"*) ;; *) export PATH="$E2E_NODE/bin:$PATH" ;; esac
+}
+use_e2e_node
+
+# version_ge A B: true if dotted version A >= B.
+version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+
+# fetch_verified BASE_URL FILE DEST_DIR: download BASE_URL/FILE plus the release's
+# SHASUMS256.txt into DEST_DIR and verify FILE against it. SHASUMS lines are
+# `<hash>  <name>` or `<hash> *<name>` (binary marker), so accept either.
+fetch_verified() {
+  local base="${1%/}" file="$2" dest="$3"
+  mkdir -p "$dest"
+  curl -fsSL --max-time 30 -o "$dest/SHASUMS256.txt" "$base/SHASUMS256.txt" || return 1
+  log "downloading $file from $base"
+  curl -fsSL -o "$dest/$file" "$base/$file" || return 1
+  ( cd "$dest" && grep -E "[ *]${file//./\\.}\$" SHASUMS256.txt | sha256sum -c - >/dev/null ) \
+    || { echo "FATAL: checksum mismatch for $file"; return 1; }
+  log "checksum OK: $file"
+}
+
+# The goose desktop main-process bundle Playwright launches. Goose >= 1.61 emits
+# main.cjs, older builds main.js. Single source for setup.sh and pw_scenario.mjs.
+goose_main_bundle() { ls "$DESK"/.vite/build/main.cjs "$DESK"/.vite/build/main.js 2>/dev/null | head -1; }
+
 # ports / hosts. NB: these leak into `uv run` for the template server + seed, and
 # pydantic-settings is case-insensitive - so an env var named SERVER/HOST/PORT/GMAIL
 # would be misread as a config field and crash boot. Keep the SRV_ prefix.

@@ -36,7 +36,7 @@ export function Settings({ mcpApp }: Props) {
   const refresh = useCallback(async () => {
     try {
       const raw = await mcpApp.callServerTool({
-        name: "settings.get",
+        name: "settings_get",
         arguments: {},
       });
       const data = extractStructuredContent<Snapshot>(raw);
@@ -67,7 +67,7 @@ export function Settings({ mcpApp }: Props) {
     setError(null);
     try {
       const raw = await mcpApp.callServerTool({
-        name: "settings.subscribe",
+        name: "settings_subscribe",
         arguments: { url: trimmed, event_types: null },
       });
       const res = extractStructuredContent<SecretResult>(raw);
@@ -89,7 +89,7 @@ export function Settings({ mcpApp }: Props) {
     setError(null);
     try {
       const raw = await mcpApp.callServerTool({
-        name: "settings.rotate_secret",
+        name: "settings_rotate_secret",
         arguments: { subscription_id: id },
       });
       const res = extractStructuredContent<SecretResult>(raw);
@@ -110,7 +110,7 @@ export function Settings({ mcpApp }: Props) {
     setError(null);
     try {
       await mcpApp.callServerTool({
-        name: "settings.unsubscribe",
+        name: "settings_unsubscribe",
         arguments: { subscription_id: id },
       });
       await refresh();

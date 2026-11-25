@@ -24,7 +24,7 @@ function makeEchoingMcpApp() {
   const callServerTool = vi.fn(
     async ({ name, arguments: args }: { name: string; arguments: Record<string, any> }) => {   // eslint-disable-line @typescript-eslint/no-explicit-any
       calls.push({ name, args });
-      if (name === "gmail_composer.save_draft") {
+      if (name === "gmail_composer_save_draft") {
         const atts = ((args.attachments as any[]) ?? []).map((a) =>   // eslint-disable-line @typescript-eslint/no-explicit-any
           a.data_base64 !== undefined
             ? { attachment_id: `srv-${a.filename}`, filename: a.filename, mime_type: a.mime_type, size: 1 }
@@ -106,7 +106,7 @@ describe("Composer attachments", () => {
       fireEvent.change(input, { target: { files: [file] } });
     });
     await waitFor(() => {
-      const save = calls.find((c) => c.name === "gmail_composer.save_draft");
+      const save = calls.find((c) => c.name === "gmail_composer_save_draft");
       // Existing file preserved by reference; new file uploaded as base64
       // ("hello" -> aGVsbG8=).
       expect(save?.args.attachments).toEqual([
@@ -151,7 +151,7 @@ describe("Composer attachments", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /remove drop\.pdf/i }));
     await waitFor(() => {
-      const save = calls.find((c) => c.name === "gmail_composer.save_draft");
+      const save = calls.find((c) => c.name === "gmail_composer_save_draft");
       expect(save?.args.attachments).toEqual([{ attachment_id: "att-1" }]);
     });
   });
@@ -175,7 +175,7 @@ describe("Composer attachments", () => {
       fireEvent.change(input, { target: { files: [file] } });
     });
     await waitFor(() => {
-      const save = calls.find((c) => c.name === "gmail_composer.save_draft");
+      const save = calls.find((c) => c.name === "gmail_composer_save_draft");
       expect(save?.args.body).toBe("Hi Bob EDITED");
     });
   });
@@ -198,7 +198,7 @@ describe("Composer attachments", () => {
       fireEvent.change(input, { target: { files: [fileB] } });
     });
     await waitFor(() => {
-      const saves = calls.filter((c) => c.name === "gmail_composer.save_draft");
+      const saves = calls.filter((c) => c.name === "gmail_composer_save_draft");
       expect(saves.length).toBe(2);
       // The second save carries BOTH files (a ref to the first + the second),
       // proving it built on the committed result of the first, not a stale draft.
@@ -220,7 +220,7 @@ describe("Composer attachments", () => {
         resolveDiscard = r;
       });
       const callServerTool = vi.fn((a: { name: string }) =>
-        a.name === "gmail_composer.discard"
+        a.name === "gmail_composer_discard"
           ? discardPromise
           : Promise.resolve({ structuredContent: {} }),
       );
@@ -246,7 +246,7 @@ describe("Composer attachments", () => {
         resolveDiscard({ structuredContent: { discarded: true } });
       });
       const savedDraft = callServerTool.mock.calls.some(
-        (c) => (c[0] as { name: string }).name === "gmail_composer.save_draft",
+        (c) => (c[0] as { name: string }).name === "gmail_composer_save_draft",
       );
       expect(savedDraft).toBe(false);
     } finally {
@@ -288,10 +288,10 @@ describe("Composer attachments", () => {
       fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
     });
     await waitFor(() => {
-      expect(calls.some((c) => c.name === "gmail_composer.send")).toBe(true);
+      expect(calls.some((c) => c.name === "gmail_composer_send")).toBe(true);
     });
-    const saveIdx = calls.findIndex((c) => c.name === "gmail_composer.save_draft");
-    const sendIdx = calls.findIndex((c) => c.name === "gmail_composer.send");
+    const saveIdx = calls.findIndex((c) => c.name === "gmail_composer_save_draft");
+    const sendIdx = calls.findIndex((c) => c.name === "gmail_composer_send");
     expect(saveIdx).toBeGreaterThanOrEqual(0);
     expect(saveIdx).toBeLessThan(sendIdx);
   });
@@ -308,7 +308,7 @@ describe("Composer attachments", () => {
       fireEvent.click(sendBtn);
     });
     await waitFor(() => {
-      expect(calls.filter((c) => c.name === "gmail_composer.send").length).toBe(1);
+      expect(calls.filter((c) => c.name === "gmail_composer_send").length).toBe(1);
     });
   });
 
@@ -320,7 +320,7 @@ describe("Composer attachments", () => {
     const seen: string[] = [];
     const callServerTool = vi.fn((a: { name: string }) => {
       seen.push(a.name);
-      return a.name === "gmail_composer.send"
+      return a.name === "gmail_composer_send"
         ? sendPromise
         : Promise.resolve({ structuredContent: {} });
     });
@@ -343,7 +343,7 @@ describe("Composer attachments", () => {
     await act(async () => {
       fireEvent.change(input, { target: { files: [file] } });
     });
-    expect(seen.includes("gmail_composer.save_draft")).toBe(false);
+    expect(seen.includes("gmail_composer_save_draft")).toBe(false);
     await act(async () => {
       resolveSend({ structuredContent: { message_id: "m" } });
     });

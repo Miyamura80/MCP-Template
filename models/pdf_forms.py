@@ -351,7 +351,7 @@ class PdfSignerDocument(BaseModel):
     """Full document payload for the signing iframe's pdf.js viewer.
 
     Contains the raw PDF bytes (base64) - returned ONLY by the app-only
-    ``pdf_signer.get_document`` tool, never by an LLM-visible one (FR-10).
+    ``pdf_signer_get_document`` tool, never by an LLM-visible one (FR-10).
     """
 
     doc_id: str

@@ -115,10 +115,10 @@ class TestSettingsAppWiring(TestTemplate):
 
         # Guarded app-only tools the iframe calls.
         for name in (
-            "settings.get",
-            "settings.subscribe",
-            "settings.rotate_secret",
-            "settings.unsubscribe",
+            "settings_get",
+            "settings_subscribe",
+            "settings_rotate_secret",
+            "settings_unsubscribe",
         ):
             assert name in by_name, f"missing app-tool {name}"
 

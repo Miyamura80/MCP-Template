@@ -18,7 +18,7 @@ from services.pdf_overlay import OverlayText, fit_font_size
 
 # Stamp geometry (PDF user space, points). The name baseline sits 18pt above
 # the anchor, metadata lines below it; the footprint rect derived from these
-# is what pdf_signer.get_document reports to the iframe, so the "Sign here"
+# is what pdf_signer_get_document reports to the iframe, so the "Sign here"
 # highlight and the actual stamp can never drift apart.
 _NAME_FONT_SIZE = 14.0
 _META_FONT_SIZE = 6.5

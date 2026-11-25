@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import re
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -86,7 +87,46 @@ class TestMCPServer(TestTemplate):
         # Headless tools must not grow UI metadata.
         assert tools["gmail_send"].meta is None
         # App-only companion tools keep visibility-only metadata.
-        assert tools["gmail_inbox.refresh"].meta == {"ui": {"visibility": ["app"]}}
+        assert tools["gmail_inbox_refresh"].meta == {"ui": {"visibility": ["app"]}}
+
+    def test_tool_names_are_host_safe(self):
+        """Every tool name (app-only ones included) must be provider-safe.
+
+        MCP allows dots in tool names, but hosts that forward tools to an LLM
+        rewrite names outside OpenAI's ``^[a-zA-Z0-9_-]{1,64}$``. Goose then
+        fails to resolve an MCP App's ``callServerTool("x.y")`` against its
+        rewritten name ("tool not found", -32602). Hosts also prefix the
+        extension key (Goose: ``<key>__``), so the budget is 64 minus a
+        16-char allowance for that prefix.
+        """
+        pattern = re.compile(r"[a-zA-Z0-9_-]{1,48}")
+        names = [t.name for t in asyncio.run(mcp.list_tools())]
+        bad = [n for n in names if not pattern.fullmatch(n)]
+        assert not bad, f"tool names not host-safe: {bad}"
+
+    def test_app_frontend_tool_names_exist_on_server(self):
+        """Every tool an app calls (and dev_preview answers) is registered.
+
+        Tool names are string literals in the app sources with no type link to
+        the Python registrations; a typo or half-done rename otherwise only
+        shows up in a real host.
+        """
+        registered = {t.name for t in asyncio.run(mcp.list_tools())}
+        repo = Path(__file__).resolve().parents[1]
+        call_re = re.compile(r"callServerTool\(\s*\{\s*name:\s*\"([^\"]+)\"")
+        case_re = re.compile(r"case\s+\"([^\"]+)\":")
+        called: dict[str, str] = {}
+        for src in sorted((repo / "mcp_server/apps").glob("*/src/**/*.ts*")):
+            if ".test." in src.name:
+                continue
+            for name in call_re.findall(src.read_text()):
+                called.setdefault(name, str(src.relative_to(repo)))
+        fixtures = repo / "mcp_server/dev_preview/src/fixtures.ts"
+        for name in case_re.findall(fixtures.read_text()):
+            called.setdefault(name, str(fixtures.relative_to(repo)))
+        assert len(called) >= 20, f"scan found too few call sites: {called}"
+        unknown = {n: where for n, where in called.items() if n not in registered}
+        assert not unknown, f"apps call tools the server does not register: {unknown}"
 
     def test_enhanced_tools_do_not_publish_context_as_input(self):
         for tool_name in ("gmail_compose", "gmail_curate_inbox", "gmail_get_thread"):

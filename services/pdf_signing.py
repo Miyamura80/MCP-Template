@@ -3,7 +3,7 @@
 Part of the PDF core (isolation seam): no Gmail imports.
 
 This module is the ONLY place a signature is produced, and it is not a
-``@service`` - it is called exclusively from the app-only ``pdf_signer.sign``
+``@service`` - it is called exclusively from the app-only ``pdf_signer_sign``
 tool and the host-elicitation fallback, both human-gated. The state machine
 is the hard guarantee: :func:`perform_signing` refuses any document that is
 not ``awaiting_signature``, a state only ``pdf_request_signature`` can enter

@@ -147,7 +147,7 @@ export function Composer({ mcpApp }: ComposerProps) {
     if (attachments !== undefined) args.attachments = attachments;
     try {
       const raw = await mcpApp.callServerTool({
-        name: "gmail_composer.save_draft",
+        name: "gmail_composer_save_draft",
         arguments: args,
       });
       const saved = extractDraft(raw);
@@ -218,7 +218,7 @@ export function Composer({ mcpApp }: ComposerProps) {
         const cur = draftRef.current;
         if (!cur) throw new Error("no draft to send");
         return mcpApp.callServerTool({
-          name: "gmail_composer.send",
+          name: "gmail_composer_send",
           arguments: { draft_id: cur.draft_id, ...draftFields(cur) },
         });
       });
@@ -252,7 +252,7 @@ export function Composer({ mcpApp }: ComposerProps) {
       // Serialized so it runs after any in-flight save rather than racing it.
       await enqueue(() =>
         mcpApp.callServerTool({
-          name: "gmail_composer.discard",
+          name: "gmail_composer_discard",
           arguments: { draft_id: cur.draft_id },
         }),
       );
@@ -303,7 +303,7 @@ export function Composer({ mcpApp }: ComposerProps) {
     let cancelled = false;
     mcpApp
       .callServerTool({
-        name: "gmail_composer.get_thread",
+        name: "gmail_composer_get_thread",
         arguments: { thread_id: tid },
       })
       .then((raw) => {

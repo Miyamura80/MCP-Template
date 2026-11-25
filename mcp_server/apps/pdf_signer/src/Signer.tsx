@@ -4,7 +4,7 @@
 // The user reviews every page (all pages render into one scrollable column,
 // with the signature placement highlighted), types their full legal name,
 // ticks the consent checkbox, and clicks Sign - which calls the app-only
-// pdf_signer.sign tool. The model never sees this UI and cannot drive it;
+// pdf_signer_sign tool. The model never sees this UI and cannot drive it;
 // on elicitation-capable hosts the server additionally asks the host to
 // show a native confirmation dialog before sealing.
 
@@ -134,13 +134,13 @@ export function Signer({
       setError(null);
       try {
         const raw = await mcpApp.callServerTool({
-          name: "pdf_signer.get_document",
+          name: "pdf_signer_get_document",
           arguments: { doc_id: docId },
         });
         if (stale()) return;
         const data = extractStructuredContent<SignerDocument>(raw);
         if (data === null) {
-          throw new Error("malformed pdf_signer.get_document result");
+          throw new Error("malformed pdf_signer_get_document result");
         }
         const rendered = await renderAllPages(data.data_base64);
         if (stale()) return;
@@ -191,7 +191,7 @@ export function Signer({
     setError(null);
     try {
       const raw = await mcpApp.callServerTool({
-        name: "pdf_signer.sign",
+        name: "pdf_signer_sign",
         arguments: {
           doc_id: doc.doc_id,
           typed_name: typedName.trim(),
@@ -200,7 +200,7 @@ export function Signer({
       });
       const result = extractStructuredContent<SignOutcome>(raw);
       if (result === null) {
-        throw new Error("malformed pdf_signer.sign result");
+        throw new Error("malformed pdf_signer_sign result");
       }
       setOutcome(result);
       if (result.status === "signed") {
@@ -233,7 +233,7 @@ export function Signer({
     if (!doc) return;
     try {
       const raw = await mcpApp.callServerTool({
-        name: "pdf_signer.cancel",
+        name: "pdf_signer_cancel",
         arguments: { doc_id: doc.doc_id },
       });
       // A resolved-but-error tool result (isError) must not show as

@@ -19,12 +19,12 @@ function makeApp(
   getSnap: Snapshot = snap()
 ) {
   const responses: Record<string, unknown> = {
-    "settings.get": { structuredContent: getSnap },
-    "settings.subscribe": {
+    "settings_get": { structuredContent: getSnap },
+    "settings_subscribe": {
       structuredContent: { id: "s1", secret: "whsec_abc123" },
     },
-    "settings.unsubscribe": { structuredContent: { unsubscribed: true } },
-    "settings.rotate_secret": {
+    "settings_unsubscribe": { structuredContent: { unsubscribed: true } },
+    "settings_rotate_secret": {
       structuredContent: { id: "s1", secret: "whsec_new999" },
     },
   };
@@ -39,7 +39,7 @@ function makeApp(
 
 describe("Settings panel", () => {
   it("renders the gmail snapshot from ontoolresult, not the refresh fallback", async () => {
-    // settings.get returns nothing, so a rendered email can only have come
+    // settings_get returns nothing, so a rendered email can only have come
     // from the ontoolresult payload - the path this test actually names.
     const app: McpAppLike = {
       callServerTool: vi.fn(async () => ({})),
@@ -60,7 +60,7 @@ describe("Settings panel", () => {
     fireEvent.click(await screen.findByText("Rotate"));
     expect(await screen.findByText("whsec_new999")).toBeInTheDocument();
     expect(
-      calls.find((c) => c.name === "settings.rotate_secret")?.args.subscription_id
+      calls.find((c) => c.name === "settings_rotate_secret")?.args.subscription_id
     ).toBe("s1");
   });
 
@@ -74,7 +74,7 @@ describe("Settings panel", () => {
     fireEvent.click(await screen.findByText("Remove"));
     await waitFor(() =>
       expect(
-        calls.find((c) => c.name === "settings.unsubscribe")?.args.subscription_id
+        calls.find((c) => c.name === "settings_unsubscribe")?.args.subscription_id
       ).toBe("s1")
     );
   });
@@ -91,7 +91,7 @@ describe("Settings panel", () => {
     fireEvent.click(screen.getByText("Add endpoint"));
 
     expect(await screen.findByText("whsec_abc123")).toBeInTheDocument();
-    const sub = calls.find((c) => c.name === "settings.subscribe");
+    const sub = calls.find((c) => c.name === "settings_subscribe");
     expect(sub?.args.url).toBe("https://hooks.example.com/gmail");
   });
 

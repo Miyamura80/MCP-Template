@@ -4,7 +4,7 @@
  *
  * Blocking + sanitization happen in one DOMPurify pass (see remoteImages.ts
  * for the why). On "Show images" each unresolved URL is fetched server-side
- * through the app-only `gmail_inbox.fetch_image` tool and the HTML is
+ * through the app-only `gmail_inbox_fetch_image` tool and the HTML is
  * re-derived from the ORIGINAL untrusted source with the resolved map - the
  * transform never re-ingests its own output.
  *
@@ -30,7 +30,7 @@ export type ServerToolCaller = {
 };
 
 // Cap per-click proxy fetches so a pathological newsletter can't fan out
-// into hundreds of parallel gmail_inbox.fetch_image calls. Remaining images
+// into hundreds of parallel gmail_inbox_fetch_image calls. Remaining images
 // stay blocked and the banner offers another round.
 const MAX_REMOTE_IMAGES_PER_FETCH = 20;
 
@@ -88,7 +88,7 @@ export function HtmlEmailBody({
         async (url): Promise<[string, string] | null> => {
           try {
             const raw = await mcpApp.callServerTool({
-              name: "gmail_inbox.fetch_image",
+              name: "gmail_inbox_fetch_image",
               arguments: { url },
             });
             const parsed = extractStructuredContent<{
