@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["fonttools>=4.33.3"]
+# dependencies = ["fonttools==4.68.0"]
 # ///
 """Regenerate the subsetted Noto fonts vendored in ``services/pdf_fonts/``.
 
@@ -19,27 +19,69 @@ the scripts signer names are realistically written in:
 Anything else (Hebrew, Indic, Thai, rarer CJK) is refused with a clear error
 unless an operator adds a font via ``pdf_forms.fonts.extra_font_paths``.
 
-Sources are the static 400-weight TTFs Google Fonts publishes, taken from the
-``@expo-google-fonts/<family>`` npm tarballs (e.g.
-``https://registry.npmjs.org/@expo-google-fonts/noto-sans-jp/-/noto-sans-jp-0.4.4.tgz``,
-file ``package/400Regular/NotoSansJP_400Regular.ttf``). All are SIL OFL 1.1;
-subsetting is a permitted modification and none of the family names collide
-with a Reserved Font Name (the CJK faces reserve only "Source").
+Sources are the static 400-weight TTFs Google Fonts serves, as packaged in
+the version-pinned ``@expo-google-fonts/<family>`` npm tarballs listed in
+``SOURCES`` (google/fonts itself ships only variable fonts, so it has no
+byte-identical static file to pin). Each download is verified against the
+recorded sha256 before subsetting. All are SIL OFL 1.1; subsetting is a
+permitted modification and none of the family names collide with a Reserved
+Font Name (the CJK faces reserve only "Source").
+
+The output is reproducible (pinned fontTools, no timestamp recalculation).
+After a deliberate change, update the sha256 values this script prints in
+``BUNDLED_FONTS`` (``services/pdf_fonts/__init__.py``);
+``tests/test_pdf_unicode_fonts.py`` checks the vendored files against them.
 
 Usage::
 
-    uv run scripts/build_pdf_fonts.py <dir with the five *_400Regular.ttf>
+    uv run scripts/build_pdf_fonts.py
 """
 
 from __future__ import annotations
 
+import hashlib
+import io
 import sys
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
 from fontTools import subset
 from fontTools.ttLib import TTFont
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "services" / "pdf_fonts"
+
+_NPM = "https://registry.npmjs.org/@expo-google-fonts"
+
+# family -> (tarball URL, member path, sha256 of that TTF)
+SOURCES: dict[str, tuple[str, str, str]] = {
+    "NotoSans": (
+        f"{_NPM}/noto-sans/-/noto-sans-0.4.2.tgz",
+        "package/400Regular/NotoSans_400Regular.ttf",
+        "fe8c022f48d8dd29f17b744d16f9346f4357e16f7d4f7be58b000ae7c291b614",
+    ),
+    "NotoSansArabic": (
+        f"{_NPM}/noto-sans-arabic/-/noto-sans-arabic-0.4.3.tgz",
+        "package/400Regular/NotoSansArabic_400Regular.ttf",
+        "252629ca0e87b6233851249b8cbf7b43445211a8caf199f1b306a19202251508",
+    ),
+    "NotoSansJP": (
+        f"{_NPM}/noto-sans-jp/-/noto-sans-jp-0.4.4.tgz",
+        "package/400Regular/NotoSansJP_400Regular.ttf",
+        "6255ea4692e97ef27330304fb96fd650f9111f868cd585fcf2802d42823930e5",
+    ),
+    "NotoSansSC": (
+        f"{_NPM}/noto-sans-sc/-/noto-sans-sc-0.4.4.tgz",
+        "package/400Regular/NotoSansSC_400Regular.ttf",
+        "d45f67f0a7c0ca3f256950777ce6a61cc7ce5f9696d02900cbbaac25f8aa7d16",
+    ),
+    "NotoSansKR": (
+        f"{_NPM}/noto-sans-kr/-/noto-sans-kr-0.4.4.tgz",
+        "package/400Regular/NotoSansKR_400Regular.ttf",
+        "b4a747e78805bc25b610dcfc3003cb5fb2e2ec034763774b24216ed15889eef4",
+    ),
+}
 
 
 def _span(lo: int, hi: int) -> set[int]:
@@ -102,12 +144,36 @@ def _subset(src: Path, unicodes: set[int], out: Path) -> None:
     subsetter.populate(unicodes=wanted)
     subsetter.subset(font)
     font.save(out)
-    print(f"{out.name}: {len(wanted)} code points, {out.stat().st_size:,} bytes")
+    digest = hashlib.sha256(out.read_bytes()).hexdigest()
+    size = out.stat().st_size
+    print(f"{out.name}: {len(wanted)} code points, {size:,} bytes, sha256 {digest}")
 
 
-def main(src_dir: Path) -> None:
-    def src(family: str) -> Path:
-        return src_dir / f"{family}_400Regular.ttf"
+def _fetch(family: str, dest: Path) -> Path:
+    """Download one source TTF and refuse it unless its sha256 matches."""
+    url, member, expected = SOURCES[family]
+    with urllib.request.urlopen(url, timeout=120) as response:
+        archive = response.read()
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        extracted = tar.extractfile(member)
+        if extracted is None:
+            sys.exit(f"{url}: {member} missing from the tarball")
+        data = extracted.read()
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != expected:
+        sys.exit(f"{family}: sha256 mismatch (expected {expected}, got {actual})")
+    path = dest / f"{family}.ttf"
+    path.write_bytes(data)
+    return path
+
+
+def main() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        sources = {family: _fetch(family, Path(tmp)) for family in SOURCES}
+        _build(sources.__getitem__)
+
+
+def _build(src) -> None:
 
     _subset(src("NotoSans"), LATIN, OUT_DIR / "NotoSans-Regular.subset.ttf")
     _subset(
@@ -125,6 +191,4 @@ def main(src_dir: Path) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit(__doc__)
-    main(Path(sys.argv[1]))
+    main()

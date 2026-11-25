@@ -193,7 +193,7 @@ class TestPerformSigning(PdfSigningTestBase):
         doc_id = self._open_awaiting()
         with pytest.raises(pdf_signing.PdfSigningInputError) as exc:
             self._sign(doc_id, typed_name="שרה כהן")
-        assert "cannot render" in str(exc.value)
+        assert "don't cover" in str(exc.value)
         assert (
             repo.load_document(doc_id, "u1").status
             == repo.PDF_STATUS_AWAITING_SIGNATURE

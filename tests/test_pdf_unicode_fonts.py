@@ -5,7 +5,10 @@ embedded font, stay extractable (ToUnicode), and leave Latin-1 output on the
 standard-14 path. Characters no font covers are still refused up front.
 """
 
+import hashlib
 import io
+import re
+import unicodedata
 from typing import Any
 from unittest.mock import patch
 
@@ -16,11 +19,15 @@ from pypdf import PdfReader, PdfWriter
 from common import global_config
 from models.pdf_forms import AddTextOp, PdfEditInput, SignaturePlacement
 from services import pdf_documents_repo as repo
-from services import pdf_fonts, pdf_forms_svc
+from services import pdf_fonts, pdf_forms_svc, pdf_signing
+from services.pdf_edit_engine import PdfEditBatchError
 from services.pdf_overlay import (
     OverlayText,
     build_text_overlay_page,
+    fit_font_size,
+    text_width,
     unrenderable_pdf_text,
+    unrenderable_reason,
 )
 from tests.pdf_fixtures import make_flat_pdf
 from tests.pdf_harness import PdfSigningTestBase
@@ -28,6 +35,8 @@ from tests.test_template import TestTemplate
 
 NAMES = ["山田太郎", "宮村英人", "王小明", "Ελένη", "Иван", "김민준", "Nguyễn Văn An"]
 ARABIC_NAME = "محمد علي"
+VOCALIZED = "مُحَمَّد"
+RLO_SPOOF = "John\u202eeod"  # displays as "John doe" in bidi-aware viewers
 
 
 def _overlay_pdf(items: list[OverlayText]) -> bytes:
@@ -52,6 +61,42 @@ def _embedded_font_bytes(font) -> bytes:
     return descriptor["/FontFile2"].get_object().get_data()
 
 
+def _to_unicode(font) -> dict[int, str]:
+    """Parse a font's /ToUnicode CMap (bfchar + array-form bfrange)."""
+    cmap = font["/ToUnicode"].get_object().get_data().decode("ascii")
+    out: dict[int, str] = {}
+
+    def text(hexstr: str) -> str:
+        return bytes.fromhex(hexstr).decode("utf-16-be")
+
+    for block in re.findall(r"beginbfchar(.*?)endbfchar", cmap, re.S):
+        for cid, dst in re.findall(r"<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]*)>", block):
+            out[int(cid, 16)] = text(dst)
+    for block in re.findall(r"beginbfrange(.*?)endbfrange", cmap, re.S):
+        for lo, _hi, targets in re.findall(
+            r"<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*\[(.*?)\]", block
+        ):
+            for offset, dst in enumerate(re.findall(r"<([0-9a-fA-F]*)>", targets)):
+                out[int(lo, 16) + offset] = text(dst)
+    return out
+
+
+def _arabic_font(data: bytes):
+    fonts = _fonts_on_page(data)
+    return next(f for name, f in fonts.items() if "NotoSansArabic" in name)
+
+
+def _clusters(word: str) -> list[str]:
+    """Split into base letter + following combining marks."""
+    out: list[str] = []
+    for char in word:
+        if out and unicodedata.combining(char):
+            out[-1] += char
+        else:
+            out.append(char)
+    return out
+
+
 def _ink_ratio(data: bytes, box: tuple[float, float, float, float]) -> float:
     """Fraction of non-white pixels inside ``box`` (PDF points) at 2x scale."""
     page = pdfium.PdfDocument(data)[0]
@@ -74,6 +119,36 @@ class TestFontChain(TestTemplate):
         assert unrenderable_pdf_text("a\x01b") == "\x01"
         assert unrenderable_pdf_text("山田\x07") == "\x07"
 
+    @pytest.mark.parametrize(
+        "char",
+        ["\u061c", "\u200b", "\u200e", "\u200f", "\u202a", "\u202e"]
+        + ["\u2066", "\u2069", "\ufeff"],
+    )
+    def test_bidi_and_invisible_controls_rejected(self, char):
+        assert unrenderable_pdf_text(f"John{char}eod") == char
+
+    def test_joiners_allowed(self):
+        assert unrenderable_pdf_text("می\u200cخواهم") == ""
+        assert unrenderable_pdf_text("محمد\u200d") == ""
+
+    def test_reason_names_only_the_actual_failure(self):
+        control = unrenderable_reason(RLO_SPOOF) or ""
+        assert "control" in control
+        assert "cover" not in control
+        uncovered = unrenderable_reason("שרה") or ""
+        assert "don't cover" in uncovered
+        assert "transliterate" in uncovered
+        assert pdf_fonts.COVERAGE_SUMMARY in uncovered
+        assert "control" not in uncovered
+        # The operator remedy is for logs/docs, not the model.
+        assert "extra_font_paths" not in uncovered
+        assert unrenderable_reason("山田太郎") is None
+
+    def test_vendored_fonts_match_recorded_hashes(self):
+        for name, expected in pdf_fonts.BUNDLED_FONTS.items():
+            data = (pdf_fonts.FONT_DIR / name).read_bytes()
+            assert hashlib.sha256(data).hexdigest() == expected, name
+
     def test_runs_pick_first_covering_face(self):
         runs = pdf_fonts.split_runs("Signed by 山田 on 2026")
         assert [(r.face.path.name, r.text) for r in runs] == [
@@ -89,13 +164,15 @@ class TestFontChain(TestTemplate):
         texts = [r.text for r in runs]
         assert texts[0] == "by "
         assert texts[-1] == " on"
-        rtl = [r.text for r in runs if r.rtl]
+        rtl = [r.text for r in runs if r.rtl and r.text.strip()]
         assert rtl == ["علي", "محمد"]
 
     def test_extra_font_paths_extend_coverage(self):
-        without_kr = tuple(
-            n for n in pdf_fonts.BUNDLED_FONTS if not n.startswith("NotoSansKR")
-        )
+        without_kr = {
+            n: h
+            for n, h in pdf_fonts.BUNDLED_FONTS.items()
+            if not n.startswith("NotoSansKR")
+        }
         kr_path = str(pdf_fonts.FONT_DIR / "NotoSansKR-Regular.subset.ttf")
         fonts_cfg = global_config.pdf_forms.fonts
         with patch.object(pdf_fonts, "BUNDLED_FONTS", without_kr):
@@ -133,12 +210,20 @@ class TestOverlayRendering(TestTemplate):
         # Glyphs actually paint: the first name's line is not blank.
         assert _ink_ratio(data, (50, 696, 110, 712)) > 0.05
 
-    def test_arabic_is_shaped_and_extractable(self):
+    def test_arabic_to_unicode_cmap_is_exact(self):
+        # One entry per joined letter form, each mapping to its own letter
+        # (no empty entries from pyHanko's RTL cluster bug).
         data = _overlay_pdf([OverlayText(50.0, 700.0, 14.0, ARABIC_NAME)])
-        text = PdfReader(io.BytesIO(data)).pages[0].extract_text()
-        assert set(ARABIC_NAME.replace(" ", "")) <= set(text)
-        assert any("NotoSansArabic" in name for name in _fonts_on_page(data))
+        cmap = _to_unicode(_arabic_font(data))
+        assert sorted(cmap.values()) == sorted(ARABIC_NAME.replace(" ", ""))
         assert _ink_ratio(data, (50, 696, 110, 712)) > 0.03
+
+    def test_vocalized_arabic_maps_every_base_letter(self):
+        # Vowel marks share a cluster with their letter: the cluster's text
+        # must land on the base glyph (GDEF class), never on a mark glyph.
+        data = _overlay_pdf([OverlayText(50.0, 700.0, 14.0, VOCALIZED)])
+        values = sorted(_to_unicode(_arabic_font(data)).values())
+        assert values == sorted(_clusters(VOCALIZED))
 
     def test_latin1_text_keeps_standard14_fonts(self):
         data = _overlay_pdf(
@@ -153,7 +238,52 @@ class TestOverlayRendering(TestTemplate):
         assert "Renée Müller" in PdfReader(io.BytesIO(data)).pages[0].extract_text()
 
 
+class TestStampFitting(TestTemplate):
+    def test_fit_shrinks_then_refuses(self):
+        assert fit_font_size("Ann Lee", 14.0, 200.0, 8.0) == 14.0
+        long_name = "Wolfeschlegelsteinhausenbergerdorff Hubert Blaine"
+        size = fit_font_size(long_name, 14.0, 200.0, 8.0)
+        assert size is not None and 8.0 <= size < 14.0
+        assert text_width(long_name, size) <= 200.0 + 1e-6
+        assert fit_font_size(long_name * 3, 14.0, 200.0, 8.0) is None
+
+
 class TestUnicodeSigningAndEditing(PdfSigningTestBase):
+    def test_bidi_spoofed_name_refused(self):
+        doc_id = self._open_awaiting()
+        with pytest.raises(pdf_signing.PdfSigningInputError) as exc:
+            self._sign(doc_id, typed_name=RLO_SPOOF)
+        assert "control" in str(exc.value)
+        assert (
+            repo.load_document(doc_id, "u1").status
+            == repo.PDF_STATUS_AWAITING_SIGNATURE
+        )
+
+    def test_overlong_name_refused(self):
+        doc_id = self._open_awaiting()
+        with pytest.raises(pdf_signing.PdfSigningInputError) as exc:
+            self._sign(doc_id, typed_name="Hubert Blaine Wolfeschlegel " * 4)
+        assert "too long" in str(exc.value)
+
+    def test_long_name_stamp_is_shrunk_to_fit(self):
+        name = "Wolfeschlegelsteinhausenbergerdorff Hubert Blaine"
+        doc_id = self._open_awaiting()
+        doc, _ = self._sign(doc_id, typed_name=name)
+        assert name in PdfReader(io.BytesIO(doc.current_bytes)).pages[0].extract_text()
+        assert b"/MyMCPSigF1 14.00 Tf" not in doc.current_bytes
+
+    def test_add_text_bidi_spoof_rejected(self):
+        opened = self._open(make_flat_pdf())
+        with pytest.raises(PdfEditBatchError) as exc:
+            pdf_forms_svc.pdf_edit(
+                PdfEditInput(
+                    user_id="u1",
+                    doc_id=opened.doc_id,
+                    ops=[AddTextOp(page=1, x=110.0, y=650.0, text=RLO_SPOOF)],
+                )
+            )
+        assert "control" in exc.value.errors[0]["error"]
+
     @pytest.mark.parametrize("name", ["山田太郎", "Ελένη Παπαδοπούλου", "Иван Петров"])
     def test_non_latin_signature_stamps_and_seals(self, name):
         from tests.test_pdf_signing import _validate_seal  # noqa: PLC0415 - reuse
@@ -173,8 +303,8 @@ class TestUnicodeSigningAndEditing(PdfSigningTestBase):
         opened = self._open(make_flat_pdf())
         self._request(opened.doc_id, SignaturePlacement(page=1, x=140.0, y=545.0))
         doc, _ = self._sign(opened.doc_id, typed_name=ARABIC_NAME)
-        text = PdfReader(io.BytesIO(doc.current_bytes)).pages[0].extract_text()
-        assert set(ARABIC_NAME.replace(" ", "")) <= set(text)
+        cmap = _to_unicode(_arabic_font(doc.current_bytes))
+        assert sorted(cmap.values()) == sorted(ARABIC_NAME.replace(" ", ""))
 
     def test_add_text_non_latin_overlay(self):
         opened = self._open(make_flat_pdf())

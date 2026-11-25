@@ -23,17 +23,28 @@ callers can ``merge_page`` it as before.
 
 from __future__ import annotations
 
+import functools
 import io
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 import uharfbuzz as hb
+from loguru import logger as log
 from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.font.opentype import GlyphAccumulator
 from pyhanko.pdf_utils.writer import PdfFileWriter
 from pypdf import PdfReader
 
-from services.pdf_fonts import FontFace, split_runs, uncovered_chars
+from services.pdf_fonts import (
+    COVERAGE_SUMMARY,
+    FontFace,
+    split_runs,
+    uncovered_chars,
+)
+from services.pdf_fonts.bidi import BIDI_CONTROLS
+
+# GDEF GlyphClassDef value for combining marks.
+_GDEF_MARK_CLASS = 3
 
 # tan(12 deg): Helvetica-Oblique's slant, reused as a synthetic oblique for
 # embedded faces so a non-Latin signature still reads as "the signed name".
@@ -52,7 +63,9 @@ class OverlayText:
 
 
 def _is_control(code: int) -> bool:
-    return code < 0x20 or 0x7F <= code <= 0x9F
+    # C0/C1 controls, plus bidi overrides and invisible zero-width characters
+    # that could make a stamped name display differently from what was typed.
+    return code < 0x20 or 0x7F <= code <= 0x9F or code in BIDI_CONTROLS
 
 
 def _is_latin1_printable(text: str) -> bool:
@@ -65,8 +78,9 @@ def unrenderable_pdf_text(text: str) -> str:
     Callers MUST reject text containing these up front: letting them through
     would stamp an empty ``.notdef`` box - unacceptable for a signature stamp
     on a legal document, and bad even for a plain form overlay. Control
-    characters (C0/C1) are always rejected; anything else is fine as long as
-    some face in the font chain covers it. Returns "" when fully renderable.
+    characters (C0/C1, bidi controls, zero-width space/BOM) are always
+    rejected; anything else is fine as long as some face in the font chain
+    covers it. Returns "" when fully renderable.
     """
     if _is_latin1_printable(text):
         return ""
@@ -76,15 +90,67 @@ def unrenderable_pdf_text(text: str) -> str:
     return "".join(seen)
 
 
-class _Accumulator(GlyphAccumulator):
-    """pyHanko's accumulator with a correct ToUnicode map for RTL runs.
+def unrenderable_reason(text: str) -> str | None:
+    """Model-facing explanation of why ``text`` cannot be drawn, or None.
 
-    pyHanko derives each glyph's source text as ``txt[cluster:next_cluster]``
-    in output order, which assumes ascending clusters. HarfBuzz emits RTL
-    glyphs in visual order (descending clusters), so every Arabic glyph
-    would map to "" and the run would not extract or search. Reshape the
-    run and remap each single-glyph cluster to its logical span instead.
+    Mentions control characters only when they are present, and points at
+    transliteration for uncovered scripts. The operator-side remedy
+    (``pdf_forms.fonts.extra_font_paths``) goes to the log, not the model.
     """
+    bad = unrenderable_pdf_text(text)
+    if not bad:
+        return None
+    controls = "".join(c for c in bad if _is_control(ord(c)))
+    uncovered = "".join(c for c in bad if not _is_control(ord(c)))
+    reasons = []
+    if controls:
+        reasons.append(
+            f"contains invisible control or text-direction characters "
+            f"{controls!r}, which are not allowed"
+        )
+    if uncovered:
+        log.info(
+            "PDF overlay refused characters {!r} no font covers; add a font "
+            "via pdf_forms.fonts.extra_font_paths to support them.",
+            uncovered,
+        )
+        reasons.append(
+            f"contains characters the server's fonts don't cover: "
+            f"{uncovered!r} (supported: {COVERAGE_SUMMARY}); transliterate "
+            "or remove them"
+        )
+    return "; ".join(reasons)
+
+
+class _Accumulator(GlyphAccumulator):
+    """TEMPORARY SHIM over pyHanko's accumulator: fix RTL ToUnicode maps.
+
+    pyHanko (0.35.x) derives each glyph's source text as
+    ``txt[cluster:next_cluster]`` in output order, which assumes ascending
+    clusters. HarfBuzz emits RTL glyphs in visual order (descending
+    clusters), so every Arabic glyph would map to "" and the run would not
+    extract or search. Reshape the run and remap each cluster's logical span
+    onto its base glyph instead. Relies on pyHanko internals
+    (``_get_cid_and_width``, ``_cid_to_unicode``, ``hb_font``), hence the
+    ``<0.36`` pin in pyproject.toml; drop this class once pyHanko maps RTL
+    clusters itself (tests/test_pdf_unicode_fonts.py pins the behaviour).
+    """
+
+    @functools.cached_property
+    def _glyph_classes(self) -> dict[str, int]:
+        if "GDEF" not in self.tt:
+            return {}
+        class_def = self.tt["GDEF"].table.GlyphClassDef
+        return dict(class_def.classDefs) if class_def is not None else {}
+
+    def _base_glyph(self, gids: list[int]) -> int | None:
+        """First non-mark glyph of a cluster (marks carry no text of their own)."""
+        real = [g for g in gids if g != 0]
+        for gid in real:
+            name = self.tt.getGlyphName(gid)
+            if self._glyph_classes.get(name) != _GDEF_MARK_CLASS:
+                return gid
+        return real[0] if real else None
 
     def shape(self, txt: str, with_actual_text: bool = True):
         result = super().shape(txt, with_actual_text)
@@ -105,12 +171,60 @@ class _Accumulator(GlyphAccumulator):
         starts = sorted(gids_by_cluster)
         ends = [*starts[1:], len(txt)]
         for start, end in zip(starts, ends, strict=True):
-            gids = [g for g in gids_by_cluster[start] if g != 0]
-            if gids:
-                # A multi-glyph cluster maps its text to the first glyph only:
-                # mapping it to every glyph would duplicate it on extraction.
-                cid, _ = self._get_cid_and_width(gids[0])
-                self._cid_to_unicode[cid] = txt[start:end]
+            # A multi-glyph cluster (letter + vowel marks) maps its whole text
+            # to the base glyph only: mapping it to every glyph would
+            # duplicate it on extraction.
+            gid = self._base_glyph(gids_by_cluster[start])
+            if gid is None:
+                continue
+            for other in gids_by_cluster[start]:
+                if other not in (0, gid):
+                    # pyHanko's fallback maps mark glyphs to the bare mark;
+                    # drop that so the vowel is not extracted twice.
+                    other_cid, _ = self._get_cid_and_width(other)
+                    self._cid_to_unicode.pop(other_cid, None)
+            cid, _ = self._get_cid_and_width(gid)
+            self._cid_to_unicode[cid] = txt[start:end]
+
+
+@functools.cache
+def _hb_font(face: FontFace):
+    # uharfbuzz is a compiled extension without type stubs.
+    return hb.Font(hb.Face(face.data))  # ty: ignore[unresolved-attribute]
+
+
+def text_width(text: str, size: float) -> float:
+    """Shaped advance width of ``text`` at ``size`` points.
+
+    Measured with the Unicode chain even for Latin-1 text (drawn in
+    Helvetica): Noto Sans runs slightly wider than Helvetica, so the
+    estimate errs toward fitting. ``text`` must be renderable.
+    """
+    total = 0.0
+    for run in split_runs(text):
+        font = _hb_font(run.face)
+        buf = hb.Buffer()  # ty: ignore[unresolved-attribute]
+        buf.add_str(run.text)
+        buf.direction = "rtl" if run.rtl else "ltr"
+        buf.guess_segment_properties()
+        hb.shape(font, buf)  # ty: ignore[unresolved-attribute]
+        advance = sum(pos.x_advance for pos in buf.glyph_positions)
+        total += advance / font.face.upem * size
+    return total
+
+
+def fit_font_size(
+    text: str, preferred: float, max_width: float, minimum: float
+) -> float | None:
+    """Largest size <= ``preferred`` at which ``text`` fits ``max_width``.
+
+    Returns None when even ``minimum`` overflows.
+    """
+    width = text_width(text, preferred)
+    if width <= max_width:
+        return preferred
+    size = preferred * max_width / width  # width scales linearly with size
+    return size if size >= minimum else None
 
 
 def _escape_literal(text: str) -> bytes:

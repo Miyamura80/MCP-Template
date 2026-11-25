@@ -127,7 +127,11 @@ Latin-1 text. Anything else (`山田太郎`, `Ελένη`, `Иван`, `محمد
 with HarfBuzz and drawn with an embedded, per-document subset of the Noto
 fonts bundled in `services/pdf_fonts/` (SIL OFL 1.1), with a ToUnicode map so
 the text stays searchable and copyable. Arabic is joined and laid out
-right-to-left inside a left-to-right line.
+right-to-left inside a left-to-right line, with numbers kept left-to-right.
+Bidi control characters (e.g. U+202E RIGHT-TO-LEFT OVERRIDE) and invisible
+zero-width spaces are always rejected, so a stamped name cannot display
+differently from what was typed. A typed name wider than the stamp shrinks
+to fit (down to 8pt); a name still too long at that size is refused.
 
 The bundle is ~2.8 MB rather than the ~16 MB a full CJK face costs, so its
 coverage is deliberate: Latin (incl. Vietnamese), Greek, Cyrillic, Arabic,
@@ -136,8 +140,9 @@ Hangul syllables. Text with characters outside it (Hebrew, Indic scripts,
 rarer ideographs, emoji) or with control characters is rejected with a clear
 error instead of stamping empty boxes. To cover more, list extra TTF/OTF
 files in `pdf_forms.fonts.extra_font_paths`; they are tried after the
-bundled fonts, and an unreadable path is skipped with a warning
-in the log. `scripts/build_pdf_fonts.py` regenerates the bundled subsets.
+bundled fonts, and an unreadable path is skipped with a warning in the log
+at server startup. `scripts/build_pdf_fonts.py` downloads the pinned,
+sha256-verified sources and regenerates the bundled subsets reproducibly.
 
 ### The sealing certificate
 

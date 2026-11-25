@@ -43,6 +43,7 @@ from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
 from services import InvalidArgument
 from services.gmail_svc import GmailAttachmentTooLargeError
+from services.pdf_fonts import font_chain
 from services.pdf_signing import warn_if_untrusted_seal
 from src.utils.package_info import package_version
 
@@ -104,6 +105,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Compose MCP sessions, the periodic runners and the CIMD fetch tasks."""
     # Surface a non-dev deployment sealing with the untrusted dev cert.
     warn_if_untrusted_seal()
+    # Load the PDF stamp fonts now so a broken install (missing bundled font)
+    # or an unreadable pdf_forms.fonts.extra_font_paths entry logs at boot.
+    font_chain()
     async with mcp_lifespan(app), runner_lifespan(app), cimd_lifespan():
         yield
 

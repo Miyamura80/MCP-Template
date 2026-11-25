@@ -2151,7 +2151,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
-    { name = "pyhanko", extras = ["opentype"], specifier = ">=0.35.2" },
+    { name = "pyhanko", extras = ["opentype"], specifier = ">=0.35.2,<0.36" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.0" },
     { name = "pylint", specifier = ">=4.0.6" },
     { name = "pypdf", specifier = ">=7.0.0" },

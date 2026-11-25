@@ -25,7 +25,7 @@ from services.pdf_inspect import _qualified_name, inspect_pdf
 from services.pdf_overlay import (
     OverlayText,
     build_text_overlay_page,
-    unrenderable_pdf_text,
+    unrenderable_reason,
 )
 
 
@@ -89,12 +89,10 @@ def _validate_ops(
             problem = _validate_set_field(op, fields_by_name)
         elif op.page > page_count:
             problem = f"page {op.page} out of range (document has {page_count} pages)"
-        elif bad := unrenderable_pdf_text(op.text):
+        elif reason := unrenderable_reason(op.text):
             # Letting these through would draw empty .notdef boxes.
             problem = (
-                f"text contains characters no overlay font can render: "
-                f"{bad!r}. Control characters are never allowed; other "
-                "scripts need a font in pdf_forms.fonts.extra_font_paths. "
+                f"add_text cannot be drawn: the text {reason}. "
                 "(AcroForm set_field values are not affected.)"
             )
         else:

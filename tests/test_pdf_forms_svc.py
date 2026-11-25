@@ -251,8 +251,8 @@ class TestPdfEdit(PdfServiceTestBase):
             self._edit(
                 opened.doc_id, [AddTextOp(page=1, x=110.0, y=650.0, text="שרה כהן")]
             )
-        assert "can render" in exc.value.errors[0]["error"]
-        assert "extra_font_paths" in exc.value.errors[0]["error"]
+        assert "don't cover" in exc.value.errors[0]["error"]
+        assert "transliterate" in exc.value.errors[0]["error"]
         # Atomicity: nothing stamped.
         assert repo.load_document(opened.doc_id, "u1").current_bytes == before
 

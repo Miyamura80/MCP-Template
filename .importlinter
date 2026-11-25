@@ -106,6 +106,7 @@ source_modules =
     services.pdf_render
     services.pdf_edit_engine
     services.pdf_overlay
+    services.pdf_fonts
     services.pdf_signing
     services.pdf_documents_repo
     services.pdf_ports

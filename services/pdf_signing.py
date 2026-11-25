@@ -21,11 +21,8 @@ Signing steps (US-007):
    ``cert_path``/``key_path`` with a real key pair. Outside dev, falling back
    to the dev cert logs a loud error (:func:`warn_if_untrusted_seal`).
 
-Latin-1 names stamp in standard-14 Helvetica-Oblique (nothing embedded).
-Any other script is drawn with an embedded subset of the bundled Noto fonts
-(SIL OFL 1.1, see ``services/pdf_fonts/OFL.txt``) with a synthetic oblique,
-so a CJK, Greek, Cyrillic or Arabic name stamps exactly as typed. A name no
-font covers is refused up front rather than stamped as empty boxes.
+Latin-1 names stamp in Helvetica-Oblique; other scripts use embedded Noto
+subsets (:mod:`services.pdf_overlay`). Names no font covers are refused.
 """
 
 from __future__ import annotations
@@ -51,7 +48,8 @@ from services.pdf_inspect import inspect_pdf
 from services.pdf_overlay import (
     OverlayText,
     build_text_overlay_page,
-    unrenderable_pdf_text,
+    fit_font_size,
+    unrenderable_reason,
 )
 
 _SEAL_FIELD_NAME = "MyMCP-Seal"
@@ -67,6 +65,10 @@ _NAME_BASELINE_OFFSET = 18.0
 _META_BASELINE_OFFSET = 10.0
 _META_LINE_SPACING = 8.0
 _STAMP_WIDTH = 200.0
+# Lines wider than the stamp shrink to fit, down to these floors; a name that
+# still overflows at its floor is refused rather than spilling off the stamp.
+_MIN_NAME_FONT_SIZE = 8.0
+_MIN_META_FONT_SIZE = 4.0
 _STAMP_DESCENT = 4.0  # below the anchor, covering the last metadata line
 _STAMP_ASCENT = _NAME_BASELINE_OFFSET + _NAME_FONT_SIZE  # top of the typed name
 
@@ -107,18 +109,17 @@ def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
     if not name:
         _audit_rejection(doc, "empty_typed_name")
         raise PdfSigningInputError("typed_name must be the signer's full legal name.")
-    if bad := unrenderable_pdf_text(name):
-        # Control characters, or a script/ideograph no stamp font covers.
-        # Stamping empty boxes into a signature on a legal document is
-        # unacceptable, and a stamp that contradicts the audit trail is
-        # worse than an honest error, so refuse.
+    if reason := unrenderable_reason(name):
+        # Stamping empty boxes (or a direction-spoofed name) into a signature
+        # on a legal document is unacceptable, and a stamp that contradicts
+        # the audit trail is worse than an honest error, so refuse.
         _audit_rejection(doc, "unrenderable_typed_name")
+        raise PdfSigningInputError(f"typed_name cannot be stamped: it {reason}.")
+    if fit_font_size(name, _NAME_FONT_SIZE, _STAMP_WIDTH, _MIN_NAME_FONT_SIZE) is None:
+        _audit_rejection(doc, "typed_name_too_long")
         raise PdfSigningInputError(
-            f"typed_name contains characters the signature stamp cannot "
-            f"render: {bad!r}. Control characters are never allowed; for "
-            "other characters the stamp fonts cover Latin, Greek, Cyrillic, "
-            "Arabic and common CJK/Hangul (operators can add fonts via "
-            "pdf_forms.fonts.extra_font_paths)."
+            "typed_name is too long to fit the signature stamp; use a shorter "
+            "form of the full legal name."
         )
     if not consent:
         _audit_rejection(doc, "consent_not_given")
@@ -343,16 +344,18 @@ def resolve_stamp_rect(
 def _stamp_lines(
     x: float, y: float, typed_name: str, meta_lines: list[str]
 ) -> list[OverlayText]:
+    def fit(text: str, preferred: float, minimum: float) -> float:
+        return fit_font_size(text, preferred, _STAMP_WIDTH, minimum) or minimum
+
+    name_size = fit(typed_name, _NAME_FONT_SIZE, _MIN_NAME_FONT_SIZE)
     lines = [
-        OverlayText(
-            x, y + _NAME_BASELINE_OFFSET, _NAME_FONT_SIZE, typed_name, oblique=True
-        )
+        OverlayText(x, y + _NAME_BASELINE_OFFSET, name_size, typed_name, oblique=True)
     ]
     lines.extend(
         OverlayText(
             x,
             y + _META_BASELINE_OFFSET - i * _META_LINE_SPACING,
-            _META_FONT_SIZE,
+            fit(line, _META_FONT_SIZE, _MIN_META_FONT_SIZE),
             line,
         )
         for i, line in enumerate(meta_lines)
