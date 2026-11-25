@@ -94,8 +94,11 @@ What it does (`api_server/oauth/`):
 - **Client ID Metadata Documents** only; Dynamic Client Registration is
   deprecated in the 2026-07-28 spec and is refused. The document fetch goes
   through an SSRF guard (`services/_ssrf_guard.py`) with a 5 s deadline, a
-  10 KB cap and a short cache. Only public clients
-  (`token_endpoint_auth_method: none`) are accepted.
+  10 KB cap and a short cache. Only public clients are accepted: when the
+  document lists `token_endpoint_auth_methods_supported`, that list must
+  include `none` (ChatGPT, for example, prefers `private_key_jwt` but lists
+  `none`); otherwise `token_endpoint_auth_method` must be `none` or absent.
+  The client is always stored as public, with no secret.
 - A **consent page** names the client and the redirect host (with a warning
   for loopback redirects) before the user is sent to AuthKit, and binds each
   sign-in to its browser with a cookie nonce.
