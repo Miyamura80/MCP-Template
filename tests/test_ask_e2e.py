@@ -11,10 +11,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from api_server.ask.retriever import DocsRetriever
 from api_server.server import app
 from common import global_config
 from models.ask import AskResult
+from services.docs_retriever import DocsRetriever
 from tests.test_template import TestTemplate
 
 _BASE_URL = "https://docs.example.com"

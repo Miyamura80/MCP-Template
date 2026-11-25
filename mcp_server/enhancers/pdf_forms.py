@@ -10,8 +10,11 @@ render iframes. On hosts without apps but with elicitation, falls back to a
 host-native typed-name prompt (US-008) - the elicitation dialog is rendered
 by the host outside any iframe, so the model cannot answer it; the accepted
 response runs the same server-side stamp+audit+seal path with
-``channel: "elicitation"`` recorded. With neither capability the request is
-rolled back and the model is told signing is unavailable here.
+``channel: "elicitation"`` recorded. On 2026-07-28 that prompt is a
+multi-round-trip ``InputRequiredResult`` (the host retries the call with the
+answer); on handshake-era sessions it is an in-band ``elicitation/create``.
+With neither capability the request is rolled back and the model is told
+signing is unavailable here.
 
 Part of the PDF core (isolation seam): no Gmail imports.
 """
@@ -19,8 +22,9 @@ Part of the PDF core (isolation seam): no Gmail imports.
 import asyncio
 
 from mcp.server.elicitation import AcceptedElicitation
-from mcp.shared.exceptions import McpError
-from pydantic import BaseModel, Field
+from mcp.shared.exceptions import MCPError
+from mcp.types import InputRequiredResult
+from pydantic import BaseModel, Field, ValidationError
 
 from mcp_server.enhancers import enhance
 from mcp_server.enhancers.base import EnhancedTool
@@ -36,6 +40,10 @@ from services.pdf_documents_repo import load_document
 from services.pdf_signing import abort_signing, perform_signing
 
 SIGNER_APP_URI = "ui://mymcp/pdf_signer"
+# The 2026-07-28 round trip: the input request's key and our requestState
+# prefix (the SDK seals the state and binds it to the user and this call).
+_SIGN_INPUT_KEY = "signature"
+_SIGN_STATE_PREFIX = "pdf_sign:"
 
 
 def _move_page_images_to_content[T: PdfOpenResult | PdfEditResult](
@@ -78,10 +86,82 @@ class _ElicitedSignature(BaseModel):
     )
 
 
+def _sign_prompt(filename: str) -> str:
+    return (
+        f"'{filename}' is ready to sign. Type your full legal name to sign it - "
+        "this applies your electronic signature and seals the document."
+    )
+
+
+async def _apply_answer(
+    doc_id: str, user_id: str, signature: _ElicitedSignature | None
+) -> PdfRequestSignatureResult:
+    """Sign on an accepted, consented answer; otherwise roll back to editable."""
+    if signature is not None and signature.consent and signature.full_name.strip():
+        # Blocking work (pypdf clone + RSA seal) off the event loop.
+        signed_doc, audit = await asyncio.to_thread(
+            perform_signing,
+            doc_id=doc_id,
+            user_id=user_id,
+            typed_name=signature.full_name,
+            consent=signature.consent,
+            channel="elicitation",
+            confirmed_via_elicitation=True,
+        )
+        return PdfRequestSignatureResult(
+            doc_id=signed_doc.doc_id,
+            status="signed",
+            guidance=(
+                f"Signed by {audit['typed_name']} on "
+                f"{audit['signed_at_utc']} and sealed. The document is "
+                "now immutable; use pdf_export to deliver it."
+            ),
+        )
+    # Declined/cancelled (or consent withheld): back to editable.
+    abort_signing(
+        doc_id=doc_id,
+        user_id=user_id,
+        reason="elicitation_declined",
+        channel="elicitation",
+        back_to_open=True,
+    )
+    return PdfRequestSignatureResult(
+        doc_id=doc_id,
+        status="signing_declined",
+        guidance=(
+            "The user declined to sign. The document is editable again; "
+            "ask them what they'd like to change."
+        ),
+    )
+
+
+async def _sign_by_round_trip(
+    tool: EnhancedTool[PdfRequestSignatureInput, PdfRequestSignatureResult],
+) -> PdfRequestSignatureResult | InputRequiredResult:
+    """2026-07-28: ask in an ``InputRequiredResult``; sign on the retry."""
+    doc_id = tool.input.doc_id
+    user_id = tool.input.user_id
+    state = f"{_SIGN_STATE_PREFIX}{doc_id}"
+    answer = tool.input_response(_SIGN_INPUT_KEY)
+    if tool.request_state != state or answer is None:
+        # First round (or an answer for another document): ask.
+        doc = load_document(doc_id, user_id)
+        return tool.input_required(
+            _SIGN_INPUT_KEY, _sign_prompt(doc.filename), _ElicitedSignature, state
+        )
+    signature = None
+    if answer.action == "accept" and answer.content is not None:
+        try:
+            signature = _ElicitedSignature.model_validate(answer.content)
+        except ValidationError:
+            signature = None  # a malformed answer signs nothing
+    return await _apply_answer(doc_id, user_id, signature)
+
+
 @enhance("pdf_request_signature", fallback="headless", app_uri=SIGNER_APP_URI)
 async def pdf_request_signature_enhanced(
     tool: EnhancedTool[PdfRequestSignatureInput, PdfRequestSignatureResult],
-) -> PdfRequestSignatureResult:
+) -> PdfRequestSignatureResult | InputRequiredResult:
     result = await asyncio.to_thread(tool.call)
     if result.status != "awaiting_user_signature":
         return result
@@ -90,18 +170,15 @@ async def pdf_request_signature_enhanced(
         return result
     doc_id = tool.input.doc_id
     user_id = tool.input.user_id
+    if tool.can_request_input:
+        return await _sign_by_round_trip(tool)
     if tool.can_elicit:
         doc = load_document(doc_id, user_id)
         try:
             elicited = await tool.elicit(
-                message=(
-                    f"'{doc.filename}' is ready to sign. Type your full legal "
-                    "name to sign it - this applies your electronic signature "
-                    "and seals the document."
-                ),
-                schema=_ElicitedSignature,
+                message=_sign_prompt(doc.filename), schema=_ElicitedSignature
             )
-        except McpError:
+        except MCPError:
             # Declared-but-broken host (see pdf_signer.sign for the Goose
             # variant). Letting this propagate would trip the enhancer's
             # headless fallback, whose idempotent awaiting branch returns
@@ -131,42 +208,7 @@ async def pdf_request_signature_enhanced(
             if isinstance(elicited, AcceptedElicitation)
             else None
         )
-        if signature is not None and signature.consent and signature.full_name.strip():
-            # Blocking work (pypdf clone + RSA seal) off the event loop.
-            signed_doc, audit = await asyncio.to_thread(
-                perform_signing,
-                doc_id=doc_id,
-                user_id=user_id,
-                typed_name=signature.full_name,
-                consent=signature.consent,
-                channel="elicitation",
-                confirmed_via_elicitation=True,
-            )
-            return PdfRequestSignatureResult(
-                doc_id=signed_doc.doc_id,
-                status="signed",
-                guidance=(
-                    f"Signed by {audit['typed_name']} on "
-                    f"{audit['signed_at_utc']} and sealed. The document is "
-                    "now immutable; use pdf_export to deliver it."
-                ),
-            )
-        # Declined/cancelled (or consent withheld): back to editable.
-        abort_signing(
-            doc_id=doc_id,
-            user_id=user_id,
-            reason="elicitation_declined",
-            channel="elicitation",
-            back_to_open=True,
-        )
-        return PdfRequestSignatureResult(
-            doc_id=doc_id,
-            status="signing_declined",
-            guidance=(
-                "The user declined to sign. The document is editable again; "
-                "ask them what they'd like to change."
-            ),
-        )
+        return await _apply_answer(doc_id, user_id, signature)
     # Neither apps nor elicitation: don't leave the document locked.
     abort_signing(
         doc_id=doc_id,

@@ -1,11 +1,12 @@
 """Tests for the SSRF-guarded remote image fetcher (services/image_proxy.py).
 
-All network I/O is mocked: DNS via ``socket.getaddrinfo`` and HTTP via a fake
-``httpx.Client``. The suite pins the security contract - scheme allowlist,
-malformed-URL rejection, public-address-only DNS, IP-pinned connections with
-Host/SNI preservation, per-hop redirect validation, image-only content type,
-the streamed size cap, and the wall-clock deadline - plus the happy path's
-base64 output.
+Most network I/O is mocked: DNS via ``socket.getaddrinfo`` (in the shared
+SSRF guard) and HTTP via a fake client. The suite pins the security contract -
+scheme allowlist, malformed-URL rejection, public-address-only DNS, IP-pinned
+connections with Host/SNI preservation, per-hop redirect validation,
+image-only content type, the streamed size cap, and the wall-clock deadline -
+plus the happy path's base64 output. The deadline is tested against a real
+loopback server that stalls mid-response (``tests/stall_server.py``).
 """
 
 from __future__ import annotations
@@ -13,13 +14,17 @@ from __future__ import annotations
 import base64
 import contextlib
 import socket
+import time
 from typing import Any
 from unittest import mock
 
 import pytest
 
+import services._ssrf_guard as ssrf_guard
 import services.image_proxy as image_proxy
+from services._ssrf_guard import PinnedTarget
 from services.image_proxy import ImageFetchError, fetch_remote_image
+from tests.stall_server import StallServer
 from tests.test_template import TestTemplate
 
 _PUBLIC_IP = "93.184.216.34"
@@ -75,8 +80,8 @@ def _patched_fetch(
 ) -> tuple[Any, _FakeClient]:
     client = _FakeClient(responses)
     with (
-        mock.patch.object(image_proxy.socket, "getaddrinfo", return_value=addrinfo),
-        mock.patch.object(image_proxy.httpx, "Client", return_value=client),
+        mock.patch.object(ssrf_guard.socket, "getaddrinfo", return_value=addrinfo),
+        mock.patch.object(image_proxy, "build_client", return_value=client),
     ):
         result = fetch_remote_image(url)
     return result, client
@@ -99,31 +104,53 @@ class TestImageProxy(TestTemplate):
     def test_rejects_host_resolving_to_private_address(self):
         with (
             mock.patch.object(
-                image_proxy.socket, "getaddrinfo", return_value=_PRIVATE_ADDRINFO
+                ssrf_guard.socket, "getaddrinfo", return_value=_PRIVATE_ADDRINFO
             ),
             pytest.raises(ImageFetchError, match="non-public"),
         ):
             fetch_remote_image("https://internal.example.com/a.png")
+
+    def test_rejects_host_resolving_to_nat64_loopback(self):
+        # 64:ff9b::7f00:1 reaches 127.0.0.1 on a NAT64 network, yet is_global
+        # alone reports it public.
+        nat64 = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("64:ff9b::7f00:1", 443))]
+        with (
+            mock.patch.object(ssrf_guard.socket, "getaddrinfo", return_value=nat64),
+            pytest.raises(ImageFetchError, match="non-public"),
+        ):
+            fetch_remote_image("https://rebind.example.com/a.png")
+
+    def test_error_text_does_not_name_the_private_address(self):
+        with (
+            mock.patch.object(
+                ssrf_guard.socket, "getaddrinfo", return_value=_PRIVATE_ADDRINFO
+            ),
+            pytest.raises(ImageFetchError) as excinfo,
+        ):
+            fetch_remote_image("https://internal.example.com/a.png")
+        assert "192.168" not in str(excinfo.value)
 
     def test_rejects_loopback_literal(self):
         # No mocking needed: 127.0.0.1 resolves to itself.
         with pytest.raises(ImageFetchError, match="non-public"):
             fetch_remote_image("http://127.0.0.1:8080/admin.png")
 
-    def test_client_does_not_trust_proxy_env(self):
-        # An environment proxy could route past the local DNS validation, so
-        # the client must be constructed with trust_env=False.
+    def test_uses_the_hardened_client_with_a_deadline(self):
+        # build_client is the only client with trust_env=False, no automatic
+        # redirects and a deadline on every socket operation.
         client = _FakeClient([_FakeResponse()])
         with (
             mock.patch.object(
-                image_proxy.socket, "getaddrinfo", return_value=_PUBLIC_ADDRINFO
+                ssrf_guard.socket, "getaddrinfo", return_value=_PUBLIC_ADDRINFO
             ),
             mock.patch.object(
-                image_proxy.httpx, "Client", return_value=client
+                image_proxy, "build_client", return_value=client
             ) as client_factory,
         ):
+            before = time.monotonic()
             fetch_remote_image("https://example.com/a.png")
-        assert client_factory.call_args.kwargs["trust_env"] is False
+        deadline = client_factory.call_args.kwargs["deadline"]
+        assert before < deadline <= before + image_proxy._TOTAL_DEADLINE_SECONDS + 1
 
     def test_pins_connection_to_validated_ip_with_host_and_sni(self):
         result, client = _patched_fetch("https://example.com/a.png", [_FakeResponse()])
@@ -162,22 +189,6 @@ class TestImageProxy(TestTemplate):
         with pytest.raises(ImageFetchError, match="invalid Content-Length"):
             _patched_fetch(
                 "https://example.com/a.png", [_FakeResponse(headers=headers)]
-            )
-
-    def test_deadline_enforced_between_streamed_chunks(self):
-        # A trickling sender that stays under the per-read timeout must still
-        # hit the wall-clock deadline. Clock calls: deadline calc, loop guard,
-        # then one check per chunk - the second chunk lands past the deadline.
-        clock = iter([0.0, 1.0, 5.0, 30.0])
-        with (
-            mock.patch.object(
-                image_proxy.time, "monotonic", side_effect=lambda: next(clock)
-            ),
-            pytest.raises(ImageFetchError, match="deadline"),
-        ):
-            _patched_fetch(
-                "https://example.com/a.png",
-                [_FakeResponse(chunks=[b"a", b"b"])],
             )
 
     def test_rejects_non_200_status(self):
@@ -227,11 +238,11 @@ class TestImageProxy(TestTemplate):
         # per-hop re-validation must catch the second one.
         with (
             mock.patch.object(
-                image_proxy.socket,
+                ssrf_guard.socket,
                 "getaddrinfo",
                 side_effect=[_PUBLIC_ADDRINFO, _PRIVATE_ADDRINFO],
             ),
-            mock.patch.object(image_proxy.httpx, "Client", return_value=client),
+            mock.patch.object(image_proxy, "build_client", return_value=client),
             pytest.raises(ImageFetchError, match="non-public"),
         ):
             fetch_remote_image("https://example.com/a.png")
@@ -247,3 +258,32 @@ class TestImageProxy(TestTemplate):
         ]
         with pytest.raises(ImageFetchError, match="redirect"):
             _patched_fetch("https://example.com/a.png", hops)
+
+
+_DEADLINE = 0.5
+_LIMIT = 1.5  # what a fetch may take, deadline plus generous slack
+
+
+class TestImageProxyDeadline(TestTemplate):
+    """A sender that trickles bytes inside the per-read timeout is cut off."""
+
+    @pytest.fixture(autouse=True)
+    def _server(self):
+        self.stall_server = StallServer()
+        with (
+            mock.patch.object(image_proxy, "_TOTAL_DEADLINE_SECONDS", _DEADLINE),
+            mock.patch.object(image_proxy, "validate_and_pin", side_effect=self._pin),
+        ):
+            yield
+        self.stall_server.close()
+
+    def _pin(self, url: str) -> PinnedTarget:
+        # https://img.example/<path> -> the loopback server's <path>
+        return PinnedTarget(url=self.stall_server.url("/" + url.split("/", 3)[3]))
+
+    @pytest.mark.parametrize("mode", ["header", "body"])
+    def test_stalling_sender_is_cut_off_at_the_deadline(self, mode):
+        start = time.monotonic()
+        with pytest.raises(ImageFetchError, match="deadline"):
+            fetch_remote_image(f"https://img.example/{mode}.png")
+        assert time.monotonic() - start < _LIMIT

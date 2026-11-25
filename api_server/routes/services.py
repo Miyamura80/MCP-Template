@@ -1,12 +1,20 @@
 """Auto-register every service as an authenticated ``POST /api/v1/services/{name}``."""
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 from api_server.auth import AuthenticatedUser
 from api_server.auth.scopes import SERVICES_EXECUTE, require_scopes
 from api_server.billing.limits import ensure_daily_limit
+from api_server.billing.paywall import enforce_payment
 from api_server.idempotency import execute_idempotent
 from services import ServiceEntry, discover_services, get_registry
+from services.approvals_errors import (
+    ApprovalDeniedError,
+    ApprovalGateError,
+    ApprovalRequiredError,
+)
+from services.approvals_svc import Replay, check_gate, running
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
@@ -44,20 +52,71 @@ def _make_route(entry: ServiceEntry) -> None:
             body = body.model_copy(update={"user_id": _user.user_id})
 
         def _compute():
-            # Quota is checked inside the compute so idempotent replays don't
-            # double-count usage; the first execution still enforces the limit.
-            ensure_daily_limit(_user.user_id)
-            return func(body)
+            # Dangerous services may be held for approval (raises; nothing has
+            # run). REST can't ask the human inline, so elicitation-mode
+            # settings escalate to browser. A retry of an approved call gets
+            # its stored result.
+            decision = check_gate(
+                entry, body, user_id=_user.user_id, url_mode=None,
+                can_confirm_inline=False,
+            )  # fmt: skip
+            if isinstance(decision, Replay):
+                return output_model.model_validate(decision.output)  # ty: ignore[unresolved-attribute]
+            # Claim an approved call before metering, so a lost race isn't charged.
+            with running(decision) as done:
+                # Priced services are gated by the x402 paywall (verify + settle the
+                # X-PAYMENT header). When the paywall actually charges the call it
+                # bypasses the free quota; when it's inactive (x402 disabled) it
+                # returns False and we still apply the daily quota, so a priced
+                # service is never unlimited. Both run inside the compute so
+                # idempotent replays don't double-charge or double-count.
+                charged = False
+                price = entry.price
+                if price is not None:
+                    charged = enforce_payment(
+                        user_id=_user.user_id,
+                        route=entry.name,
+                        price=price,
+                        asset=entry.asset,
+                        payment_header=request.headers.get("X-PAYMENT"),
+                        mutating=entry.mutating,
+                    )
+                if not charged:
+                    ensure_daily_limit(_user.user_id)
+                result = func(body)
+                done(result)
+            return result
 
-        if not entry.mutating:
-            return _compute()
-        return execute_idempotent(
-            request=request,
-            user_id=_user.user_id,
-            route=entry.name,
-            request_payload=body.model_dump(mode="json"),
-            compute=_compute,
-        )
+        try:
+            if not entry.mutating:
+                return _compute()
+            return execute_idempotent(
+                request=request,
+                user_id=_user.user_id,
+                route=entry.name,
+                request_payload=body.model_dump(mode="json"),
+                compute=_compute,
+            )
+        except ApprovalGateError as exc:
+            return _gate_response(exc)
+
+
+def _gate_response(exc: ApprovalGateError) -> JSONResponse:
+    """Nothing ran. Held: ``202 Accepted`` (retry the same call after approval
+    to get its stored result, or poll ``get_approval``). Denied: 403. The same
+    approved call already running: 409."""
+    if isinstance(exc, ApprovalDeniedError):
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
+    if not isinstance(exc, ApprovalRequiredError):
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "approval_required",
+            "message": str(exc),
+            "approval": exc.view.model_dump(mode="json"),
+        },
+    )
 
 
 _register_service_routes()

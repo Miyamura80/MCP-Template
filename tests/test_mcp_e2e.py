@@ -1,10 +1,17 @@
 """Wire-level E2E tests for the streamable-HTTP /mcp endpoint.
 
-Runs a full MCP session through the FastAPI mount - initialize,
+Covers both protocol eras the one mount serves (python-sdk 2.x):
+
+- **Handshake era** (2025-11-25 and earlier): runs a full MCP session through
+  the FastAPI mount - initialize,
 notifications/initialized, tools/list, tools/call, resources/list,
 resources/read - and asserts what actually crosses the wire: serialized
 outputSchema, ``_meta.ui`` shapes, CallToolResult assembly, and
-structuredContent. This is the fast in-CI tier of the two-tier strategy
+structuredContent.
+- **2026-07-28** (stateless core): self-contained POSTs with no initialize and
+  no ``Mcp-Session-Id``; see ``tests/test_mcp_protocol_eras.py``.
+
+This is the fast in-CI tier of the two-tier strategy
 from issue #42; MCPJam conformance (``make mcp_conformance``) is the
 spec-conformance tier.
 
@@ -41,15 +48,26 @@ _PROTOCOL_VERSION = "2025-03-26"
 
 
 @contextmanager
-def _patch_db():
-    """Wire an in-memory SQLite into db.engine for the duration of the block."""
+def _patch_db(db_file: str | None = None):
+    """Wire a throwaway SQLite into db.engine for the duration of the block.
+
+    The default in-memory database shares ONE connection (StaticPool) across
+    every session and thread, so a session closing on one thread rolls back
+    another thread's uncommitted write. Tests that write from a second thread
+    while the app is serving pass ``db_file`` to get a connection per thread.
+    """
     orig_engine = db_engine._engine
     orig_session = db_engine._SessionLocal
-    eng = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if db_file is None:
+        eng = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        eng = create_engine(
+            f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
+        )
     Base.metadata.create_all(eng)
     session_factory = sessionmaker(bind=eng, autoflush=False, expire_on_commit=False)
     db_engine._engine = eng
@@ -59,6 +77,7 @@ def _patch_db():
     finally:
         db_engine._engine = orig_engine
         db_engine._SessionLocal = orig_session
+        eng.dispose()
 
 
 def _read_sse_first_message(response) -> dict:
@@ -79,22 +98,34 @@ def _read_sse_first_message(response) -> dict:
 class _McpSession:
     """Minimal JSON-RPC client speaking streamable HTTP against a TestClient."""
 
-    def __init__(self, client: TestClient, api_key: str):
+    def __init__(
+        self,
+        client: TestClient,
+        api_key: str,
+        protocol_version: str = _PROTOCOL_VERSION,
+        path: str = "/mcp",
+    ):
         self._client = client
+        self._path = path
         self._api_key = api_key
         self._session_id: str | None = None
         self._next_id = 0
-        self._protocol_version = _PROTOCOL_VERSION
+        self._requested_version = protocol_version
+        self._protocol_version = protocol_version
+        self._negotiated = False
 
     def _headers(self) -> dict:
         headers = {
             "Accept": "application/json, text/event-stream",
             "Host": "127.0.0.1:8080",
             "X-API-KEY": self._api_key,
-            # Post-initialize requests must carry the *negotiated* version,
-            # not the one the client originally requested.
-            "MCP-Protocol-Version": self._protocol_version,
         }
+        # Post-initialize requests must carry the *negotiated* version, not the
+        # one the client originally requested. ``initialize`` itself carries
+        # none: a version header outside the handshake set would route the
+        # POST to the 2026-07-28 stateless entry instead.
+        if self._negotiated:
+            headers["MCP-Protocol-Version"] = self._protocol_version
         if self._session_id:
             headers["mcp-session-id"] = self._session_id
         return headers
@@ -103,7 +134,7 @@ class _McpSession:
         """POST a JSON-RPC request; return the `result` member of the response."""
         self._next_id += 1
         resp = self._client.post(
-            "/mcp",
+            self._path,
             headers=self._headers(),
             json={
                 "jsonrpc": "2.0",
@@ -123,7 +154,7 @@ class _McpSession:
         """POST a JSON-RPC request expected to fail; return the `error` member."""
         self._next_id += 1
         resp = self._client.post(
-            "/mcp",
+            self._path,
             headers=self._headers(),
             json={
                 "jsonrpc": "2.0",
@@ -139,7 +170,7 @@ class _McpSession:
 
     def notify(self, method: str) -> None:
         resp = self._client.post(
-            "/mcp",
+            self._path,
             headers=self._headers(),
             json={"jsonrpc": "2.0", "method": method},
         )
@@ -149,30 +180,38 @@ class _McpSession:
         result = self.request(
             "initialize",
             {
-                "protocolVersion": _PROTOCOL_VERSION,
+                "protocolVersion": self._requested_version,
                 "capabilities": {},
                 "clientInfo": {"name": "e2e-test", "version": "0"},
             },
         )
         self._protocol_version = result["protocolVersion"]
+        self._negotiated = True
         self.notify("notifications/initialized")
         return result
 
 
 @contextmanager
-def _wire_session(user_id: str):
-    """Yield a handshaken MCP session backed by a fresh DB and API key."""
+def _wire_client(user_id: str, db_file: str | None = None):
+    """Yield ``(TestClient, api_key)`` backed by a fresh DB and API key."""
     with patch("api_server.middleware.mcp_auth.global_config") as mock_config:
         mock_config.WORKOS_CLIENT_ID = None
         mock_config.WORKOS_AUTHKIT_DOMAIN = None
-        with _patch_db() as session_factory:
+        with _patch_db(db_file) as session_factory:
             with session_factory() as s:
                 raw_key, _ = create_api_key(s, user_id=user_id, scopes=["*"])
 
             with TestClient(app) as client:
-                session = _McpSession(client, raw_key)
-                session.handshake()
-                yield session
+                yield client, raw_key
+
+
+@contextmanager
+def _wire_session(user_id: str, protocol_version: str = _PROTOCOL_VERSION):
+    """Yield a handshaken (handshake-era) MCP session."""
+    with _wire_client(user_id) as (client, raw_key):
+        session = _McpSession(client, raw_key, protocol_version)
+        session.handshake()
+        yield session
 
 
 class TestMCPWireE2E(TestTemplate):

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from models.pdf_forms import PdfDelivery
+from services import ModelFacingError
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ _source_resolvers: dict[str, SourceResolver] = {}
 _destination_handlers: dict[str, DestinationHandler] = {}
 
 
-class PdfPortNotRegisteredError(Exception):
+class PdfPortNotRegisteredError(ModelFacingError):
     """Raised when no adapter is registered for a source/destination type."""
 
 

@@ -1,0 +1,457 @@
+"""Storage for the built-in OAuth server: codes, tokens and their lifetimes.
+
+Codes and tokens are random, opaque, and stored only as SHA-256 hashes (see
+``db/models/oauth.py``). Every transaction lives here, as a public synchronous
+function: the SDK provider (``provider.py``) is a thin async adapter that runs
+them off the event loop, and the WorkOS callback (``flow.py``) calls
+:func:`store_authorization_code`.
+
+Every client this issues a code to, or accepts an access token from, is
+reported to :func:`api_server.oauth.cimd.mark_known` with the user it is for,
+once the row is committed, so that client's metadata record is protected from
+unknown client ids. The provider reports token issuance the same way.
+"""
+
+import hashlib
+import secrets
+from datetime import UTC, datetime, timedelta
+
+from loguru import logger as log
+from mcp.server.auth.provider import (
+    AccessToken,
+    AuthorizationCode,
+    RefreshToken,
+    TokenError,
+)
+from mcp.shared.auth import OAuthToken as TokenResponse
+from pydantic import AnyUrl
+from sqlalchemy import delete, select, update
+
+from api_server.auth.authkit_auth import (
+    mcp_resource_url,
+    resolve_token_scopes,
+    strip_resource_flags,
+)
+from api_server.oauth import cimd
+from db.engine import use_db_session
+from db.models.oauth import OAuthCode, OAuthSignOut, OAuthToken, lock_user
+
+CODE_LIFETIME = timedelta(minutes=5)
+ACCESS_TOKEN_LIFETIME = timedelta(hours=1)
+REFRESH_TOKEN_LIFETIME = timedelta(days=30)
+# Absolute cap on one grant: rotation never extends a family past this.
+FAMILY_LIFETIME = timedelta(days=90)
+# How long a code row outlives its expiry. A replayed code revokes what its
+# first exchange issued (provider.load_authorization_code); that only works
+# while the spent row still exists, so it is kept a while after it could no
+# longer be exchanged.
+CODE_PURGE_GRACE = timedelta(days=1)
+# Prefixes make a leaked value recognisable (secret scanners, logs) and let
+# lookups skip the database for anything that cannot be ours.
+_CODE_PREFIX = "mmc_"
+_ACCESS_PREFIX = "mma_"
+REFRESH_PREFIX = "mmr_"
+
+
+def token_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _new_secret(prefix: str) -> str:
+    return prefix + secrets.token_urlsafe(32)
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _as_utc(value: datetime) -> datetime:
+    # SQLite (tests) returns naive datetimes; Postgres returns aware ones.
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _split_scopes(scopes: str) -> list[str]:
+    return scopes.split() if scopes else []
+
+
+def _signed_out_since(session, user_id: str, moment: datetime) -> bool:
+    signed_out_at = session.scalar(
+        select(OAuthSignOut.signed_out_at).where(OAuthSignOut.user_id == user_id)
+    )
+    return signed_out_at is not None and _as_utc(signed_out_at) >= _as_utc(moment)
+
+
+def _widens_access(original: list[str], requested: list[str]) -> bool:
+    """Whether a refresh asking for ``requested`` would grant more than ``original``.
+
+    A token with none of this server's scopes means full access (see
+    ``authkit_auth.resolve_token_scopes``), so dropping the last such scope on
+    refresh would turn a restricted token into an unrestricted one.
+    """
+    before = resolve_token_scopes(" ".join(original))
+    after = resolve_token_scopes(" ".join(requested))
+    if after is None:
+        return True
+    if before == ["*"]:
+        return False
+    return after == ["*"] or not set(after) <= set(before or [])
+
+
+def resource_matches(resource: str | None) -> bool:
+    """Whether ``resource`` names this MCP server (RFC 8707 audience)."""
+    if resource is None:
+        return False
+    # Query flags on the MCP URL are connection options, not another resource.
+    return strip_resource_flags(resource) == strip_resource_flags(mcp_resource_url())
+
+
+# ---------------------------------------------------------------------------
+# Storage (synchronous; the provider calls these off the event loop)
+# ---------------------------------------------------------------------------
+
+
+def store_authorization_code(
+    *,
+    client_id: str,
+    user_id: str,
+    redirect_uri: str,
+    redirect_uri_provided_explicitly: bool,
+    code_challenge: str,
+    scopes: list[str],
+    resource: str,
+    started_at: datetime,
+) -> str | None:
+    """Persist a new authorization code and return its plaintext value.
+
+    Returns ``None``, storing nothing, when the user's grants were revoked at or
+    after ``started_at`` (the moment they allowed this sign-in).
+    """
+    code = _new_secret(_CODE_PREFIX)
+    with use_db_session() as session:
+        lock_user(session, user_id)
+        if _signed_out_since(session, user_id, started_at):
+            return None
+        session.add(
+            OAuthCode(
+                code_hash=token_hash(code),
+                client_id=client_id,
+                user_id=user_id,
+                redirect_uri=redirect_uri,
+                redirect_uri_provided_explicitly=redirect_uri_provided_explicitly,
+                code_challenge=code_challenge,
+                scopes=" ".join(scopes),
+                resource=resource,
+                expires_at=_now() + CODE_LIFETIME,
+            )
+        )
+        session.commit()
+    cimd.mark_known(client_id, user_id)
+    return code
+
+
+def _issue_token_pair(
+    session,
+    *,
+    family_id: str,
+    user_id: str,
+    client_id: str,
+    scopes: list[str],
+    resource: str | None,
+    family_expires_at: datetime,
+) -> TokenResponse:
+    access = _new_secret(_ACCESS_PREFIX)
+    refresh = _new_secret(REFRESH_PREFIX)
+    now = _now()
+    family_expires_at = _as_utc(family_expires_at)
+    access_expires_at = min(now + ACCESS_TOKEN_LIFETIME, family_expires_at)
+    common = {
+        "family_id": family_id,
+        "user_id": user_id,
+        "client_id": client_id,
+        "scopes": " ".join(scopes),
+        "resource": resource,
+        "family_expires_at": family_expires_at,
+    }
+    session.add(
+        OAuthToken(
+            token_hash=token_hash(access),
+            kind="access",
+            expires_at=access_expires_at,
+            **common,
+        )
+    )
+    session.add(
+        OAuthToken(
+            token_hash=token_hash(refresh),
+            kind="refresh",
+            expires_at=min(now + REFRESH_TOKEN_LIFETIME, family_expires_at),
+            **common,
+        )
+    )
+    return TokenResponse(
+        access_token=access,
+        token_type="Bearer",
+        expires_in=max(int((access_expires_at - now).total_seconds()), 0),
+        refresh_token=refresh,
+        scope=" ".join(scopes) or None,
+    )
+
+
+def _revoke_family(session, family_id: str) -> None:
+    session.execute(
+        update(OAuthToken)
+        .where(OAuthToken.family_id == family_id, OAuthToken.revoked_at.is_(None))
+        .values(revoked_at=_now())
+    )
+
+
+def lookup_access_token(token: str) -> AccessToken | None:
+    """Return the live access token for ``token``, or ``None``.
+
+    Used by the /mcp middleware: unknown, revoked, expired or wrong-audience
+    tokens all read as ``None`` (401).
+    """
+    if not token.startswith(_ACCESS_PREFIX):
+        return None
+    with use_db_session() as session:
+        row = session.get(OAuthToken, token_hash(token))
+        if (
+            row is None
+            or row.kind != "access"
+            or row.revoked_at is not None
+            or _as_utc(row.expires_at) <= _now()
+            or not resource_matches(row.resource)
+        ):
+            return None
+        cimd.mark_known(row.client_id, row.user_id)
+        return AccessToken(
+            token=token,
+            client_id=row.client_id,
+            scopes=_split_scopes(row.scopes),
+            expires_at=int(_as_utc(row.expires_at).timestamp()),
+            resource=row.resource,
+            subject=row.user_id,
+        )
+
+
+def load_authorization_code(client_id: str, code: str) -> AuthorizationCode | None:
+    """The unspent code ``code`` issued to ``client_id``, or ``None``.
+
+    A code that was already exchanged is a replay: what its first exchange
+    issued is revoked and ``None`` returned.
+    """
+    with use_db_session() as session:
+        row = session.get(OAuthCode, token_hash(code))
+        if row is None or row.client_id != client_id:
+            return None
+        if row.used_at is not None:
+            lock_user(session, row.user_id)
+            _revoke_family(session, row.code_hash)
+            session.commit()
+            return None
+        return AuthorizationCode(
+            code=code,
+            scopes=_split_scopes(row.scopes),
+            expires_at=_as_utc(row.expires_at).timestamp(),
+            client_id=row.client_id,
+            code_challenge=row.code_challenge,
+            redirect_uri=AnyUrl(row.redirect_uri),
+            redirect_uri_provided_explicitly=row.redirect_uri_provided_explicitly,
+            resource=row.resource,
+            subject=row.user_id,
+        )
+
+
+def exchange_authorization_code(code: str) -> TokenResponse:
+    """Spend ``code`` and issue its token pair; raise :class:`TokenError` if not.
+
+    Single use, atomically: a second exchange (a replay, or a lost race) revokes
+    what the first one issued. A code issued before the user signed out yields
+    nothing. The family id is the code hash, so a replay finds exactly these
+    tokens.
+    """
+    code_hash = token_hash(code)
+    with use_db_session() as session:
+        user_id = session.scalar(
+            select(OAuthCode.user_id).where(OAuthCode.code_hash == code_hash)
+        )
+        if user_id is None:
+            raise TokenError(error="invalid_grant", error_description="unknown code")
+        lock_user(session, user_id)
+        claimed = session.execute(
+            update(OAuthCode)
+            .where(OAuthCode.code_hash == code_hash, OAuthCode.used_at.is_(None))
+            .values(used_at=_now())
+        )
+        if not claimed.rowcount:  # ty: ignore[unresolved-attribute]
+            _revoke_family(session, code_hash)
+            session.commit()
+            raise TokenError(
+                error="invalid_grant",
+                error_description="authorization code was already used",
+            )
+        row = session.get(OAuthCode, code_hash)
+        if row is None:  # claimed above in this transaction; defensive
+            session.rollback()
+            raise TokenError(error="invalid_grant", error_description="unknown code")
+        if _signed_out_since(session, row.user_id, row.created_at):
+            session.commit()  # keep the code spent
+            raise TokenError(
+                error="invalid_grant",
+                error_description="the user signed out after this code was issued",
+            )
+        response = _issue_token_pair(
+            session,
+            family_id=code_hash,
+            user_id=row.user_id,
+            client_id=row.client_id,
+            scopes=_split_scopes(row.scopes),
+            resource=row.resource,
+            family_expires_at=_now() + FAMILY_LIFETIME,
+        )
+        session.commit()
+        cimd.mark_known(row.client_id, row.user_id)
+        return response
+
+
+def load_refresh_token(client_id: str, token: str) -> RefreshToken | None:
+    """The live refresh token ``token`` held by ``client_id``, or ``None``.
+
+    Reuse of a rotated (or revoked) refresh token treats its family as
+    compromised and revokes it, under the user lock so a refresh of the same
+    family running now cannot slip a token past this.
+    """
+    if not token.startswith(REFRESH_PREFIX):
+        return None
+    with use_db_session() as session:
+        row = session.get(OAuthToken, token_hash(token))
+        if row is None or row.kind != "refresh" or row.client_id != client_id:
+            return None
+        if row.revoked_at is not None:
+            lock_user(session, row.user_id)
+            _revoke_family(session, row.family_id)
+            session.commit()
+            log.warning("oauth: refresh token reuse; revoked its token family")
+            return None
+        return RefreshToken(
+            token=token,
+            client_id=row.client_id,
+            scopes=_split_scopes(row.scopes),
+            expires_at=int(_as_utc(row.expires_at).timestamp()),
+            resource=row.resource,
+            subject=row.user_id,
+        )
+
+
+def exchange_refresh_token(token: str, scopes: list[str]) -> TokenResponse:
+    """Rotate ``token`` to a new pair in its family; raise :class:`TokenError` if not.
+
+    Only one caller can consume a refresh token; a loser revokes the family.
+    ``scopes`` (empty: keep the original) may narrow the grant, never widen it,
+    and a refused widening leaves the refresh token unspent.
+    """
+    old_hash = token_hash(token)
+    with use_db_session() as session:
+        user_id = session.scalar(
+            select(OAuthToken.user_id).where(OAuthToken.token_hash == old_hash)
+        )
+        if user_id is None:
+            raise TokenError(
+                error="invalid_grant", error_description="unknown refresh token"
+            )
+        lock_user(session, user_id)
+        consumed = session.execute(
+            update(OAuthToken)
+            .where(OAuthToken.token_hash == old_hash, OAuthToken.revoked_at.is_(None))
+            .values(revoked_at=_now())
+        )
+        row = session.get(OAuthToken, old_hash)
+        if not consumed.rowcount or row is None:  # ty: ignore[unresolved-attribute]
+            if row is not None:
+                _revoke_family(session, row.family_id)
+            session.commit()
+            raise TokenError(
+                error="invalid_grant",
+                error_description="refresh token was already used",
+            )
+        original = _split_scopes(row.scopes)
+        requested = scopes or original
+        if _widens_access(original, requested):
+            session.rollback()
+            raise TokenError(
+                error="invalid_scope",
+                error_description="a refresh cannot widen the token's access",
+            )
+        response = _issue_token_pair(
+            session,
+            family_id=row.family_id,
+            user_id=row.user_id,
+            client_id=row.client_id,
+            scopes=requested,
+            resource=row.resource,
+            family_expires_at=row.family_expires_at,
+        )
+        session.commit()
+        cimd.mark_known(row.client_id, row.user_id)
+        return response
+
+
+def revoke_token(token: str) -> None:
+    """Revoke ``token`` with its whole family, access and refresh (RFC 7009)."""
+    with use_db_session() as session:
+        row = session.get(OAuthToken, token_hash(token))
+        if row is not None:
+            lock_user(session, row.user_id)
+            _revoke_family(session, row.family_id)
+            session.commit()
+
+
+def revoke_user_grants(user_id: str) -> int:
+    """End every grant ``user_id`` holds; return how many tokens were revoked.
+
+    The primitive behind a "sign out everywhere": every live access and refresh
+    token is revoked (each app's next /mcp request gets a 401 and its refresh
+    fails), codes issued but not yet exchanged are spent, and the moment is
+    recorded so a sign-in already under way cannot finish afterwards. The
+    dashboard's "Sign out of all apps" (``POST /dashboard/sign-out-everywhere``,
+    ``api_server/dashboard/session.py``) calls it.
+    """
+    with use_db_session() as session:
+        lock_user(session, user_id)
+        now = _now()
+        result = session.execute(
+            update(OAuthToken)
+            .where(OAuthToken.user_id == user_id, OAuthToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        session.execute(
+            update(OAuthCode)
+            .where(OAuthCode.user_id == user_id, OAuthCode.used_at.is_(None))
+            .values(used_at=now)
+        )
+        # Checked by the code exchange and the WorkOS callback (see OAuthSignOut).
+        session.merge(OAuthSignOut(user_id=user_id, signed_out_at=now))
+        session.commit()
+        return result.rowcount or 0  # ty: ignore[unresolved-attribute]
+
+
+def purge_expired() -> int:
+    """Delete rows that can no longer be used; return how many were removed.
+
+    * codes more than :data:`CODE_PURGE_GRACE` past their expiry;
+    * tokens past their family's absolute cap (``family_expires_at``): no
+      access or refresh token outlives it, revoked or not, so the row can no
+      longer authenticate anything or take part in reuse detection.
+
+    Run periodically by ``api_server.runner`` when ``MCP_AUTH_MODE=self``.
+    """
+    now = _now()
+    with use_db_session() as session:
+        codes = session.execute(
+            delete(OAuthCode).where(OAuthCode.expires_at < now - CODE_PURGE_GRACE)
+        )
+        tokens = session.execute(
+            delete(OAuthToken).where(OAuthToken.family_expires_at < now)
+        )
+        session.commit()
+        return (codes.rowcount or 0) + (tokens.rowcount or 0)  # ty: ignore[unresolved-attribute]

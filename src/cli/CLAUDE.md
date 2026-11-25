@@ -45,8 +45,12 @@ positional value `str | None = None` so it can come from stdin instead.
 ```python
 def set_value(
     key: Annotated[str, typer.Argument(help="...")],
-    value: Annotated[str | None, typer.Argument(help="Use '-' or --stdin for stdin.")] = None,
-    use_stdin: Annotated[bool, typer.Option("--stdin", help="Read value from stdin.")] = False,
+    value: Annotated[
+        str | None, typer.Argument(help="Use '-' or --stdin for stdin.")
+    ] = None,
+    use_stdin: Annotated[
+        bool, typer.Option("--stdin", help="Read value from stdin.")
+    ] = False,
 ) -> None:
     value = resolve_value(value, use_stdin=use_stdin)
 ```
