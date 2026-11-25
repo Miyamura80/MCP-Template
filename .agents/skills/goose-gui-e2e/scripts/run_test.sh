@@ -51,10 +51,28 @@ fi
 # entries, the oracle must not grade stale ones (the false-PASS hole).
 before="$(python3 "$SCRIPT_DIR/mcp_probe.py" calls_count 2>/dev/null || echo 0)"
 
+# Opt-in video (E2E_VIDEO=1): Playwright records each Goose window as webm; the
+# largest one (the main window) is converted to $E2E_HOME/video_<scenario>.mp4.
+vdir=""
+if [ "${E2E_VIDEO:-}" = "1" ]; then
+  vdir="$E2E_HOME/video_raw_${nm}"; rm -rf "$vdir"; mkdir -p "$vdir"
+  export E2E_VIDEO_DIR="$vdir"
+fi
+
 echo "---- drive GUI (Playwright-Electron) ----"
 xvfb-run -a --server-args="-screen 0 1500x1000x24" \
   timeout 200 node "$SCRIPT_DIR/pw_scenario.mjs" "$scfile" "$shot" 2>&1 | sed 's/^/  /'
 drive_rc=${PIPESTATUS[0]}  # node's status, NOT sed's (a failed drive must fail the test)
+
+if [ -n "$vdir" ]; then
+  raw="$(ls -S "$vdir"/*.webm 2>/dev/null | head -1)"
+  if [ -n "$raw" ] && command -v ffmpeg >/dev/null; then
+    ffmpeg -loglevel error -y -i "$raw" -c:v libx264 -pix_fmt yuv420p -movflags +faststart \
+      "$E2E_HOME/video_${nm}.mp4" && echo "video: $E2E_HOME/video_${nm}.mp4"
+  elif [ -n "$raw" ]; then
+    echo "video: $raw (ffmpeg missing, left as webm)"
+  fi
+fi
 
 if [ "$drive_rc" -ne 0 ]; then
   echo "---- drive FAILED (rc=$drive_rc) - not asserting ----"

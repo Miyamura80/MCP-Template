@@ -88,7 +88,14 @@ const app = await electron.launch({
   executablePath: `${GOOSE_SRC}/ui/node_modules/electron/dist/electron`,
   args: [`${GOOSE_SRC}/ui/desktop/.vite/build/main.js`, "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
   env, timeout: 90000,
+  // Opt-in screen recording of every Goose window (run_test.sh sets this when
+  // E2E_VIDEO=1 and converts the result to mp4). Written when the app closes.
+  ...(process.env.E2E_VIDEO_DIR
+    ? { recordVideo: { dir: process.env.E2E_VIDEO_DIR, size: { width: 1280, height: 800 } } }
+    : {}),
 });
+// When recording, hold on each milestone so the video is watchable.
+const linger = (w) => (process.env.E2E_VIDEO_DIR ? w.waitForTimeout(2500).catch(() => {}) : Promise.resolve());
 let ok = false;
 try {
   let win = await app.firstWindow();
@@ -130,6 +137,7 @@ try {
     // Screenshot the app iframe's owning window so the shot shows the rendered app.
     const ownWin = app.windows().find((w) => w.frames().includes(frame)) || win;
     if (shot) { await ownWin.screenshot({ path: shot }); log("screenshot ->", shot); }
+    await linger(ownWin);
 
     // --- optional in-iframe interaction (scenario 2: click -> re-render) ---
     // Drive a real control INSIDE the sandboxed app iframe, then assert the DOM
@@ -181,6 +189,7 @@ try {
         log(`interaction: matched [${result.interact_matched}] missing [${result.interact_missing}]` +
           (wantSel.length ? ` selectors matched [${result.interact_sel_matched}] missing [${result.interact_sel_missing}]` : ""));
         if (shot) { await ownWin.screenshot({ path: shot }); } // reshoot the post-interaction DOM
+        await linger(ownWin);
       } catch (e) {
         log("interaction ERROR", e.message.split("\n")[0]);
       }

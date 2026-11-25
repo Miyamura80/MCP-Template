@@ -44,7 +44,9 @@ bash run_all.sh              # run every scenario, print a summary
 bash down.sh                 # stop test services  (down.sh --reset also drops the e2e DB + key)
 ```
 
-`make test_apps_e2e` runs `up.sh && run_all.sh`. Each `run_test.sh` writes a
+`make test_apps_e2e` runs `up.sh && run_all.sh`. Set `E2E_VIDEO=1` to also
+record each drive as `$E2E_HOME/video_<scenario>.mp4` (Playwright `recordVideo`
++ ffmpeg; the driver lingers ~2.5s on each milestone so the video is watchable). Each `run_test.sh` writes a
 screenshot of the real Goose GUI (with the Settings app rendered) to
 `$E2E_HOME/shot_<scenario>.png`.
 
@@ -58,18 +60,18 @@ Heavy tier - **not** in `make ci` (which stays Node/Rust/Electron-free):
   tests/test_apps_e2e.py --no-cov`). It shells out to `up.sh` + `run_all.sh`.
   (`--no-cov` keeps a single-file run from tripping `pytest.ini`'s coverage gate.)
 - **CI:** `.github/workflows/apps_e2e.yaml` - `workflow_dispatch` + weekly cron. It
-  builds Goose via `setup.sh` (open egress, so the npmmirror preconditions below
-  don't apply on GitHub runners) and runs the guarded pytest entry.
+  builds Goose via `setup.sh` and runs the guarded pytest entry.
 
 ## Preconditions (verify before setup)
 
-- **npmmirror on the network allowlist.** Electron's binary is fetched from a
-  mirror because GitHub release assets are egress-blocked in the sandbox. In the
-  environment's **Network access → Custom**, add `registry.npmmirror.com` and
-  `cdn.npmmirror.com` (keep the default package-manager list checked). `setup.sh`
-  preflights this and fails loudly if it's missing.
-- Sandbox provides: `cargo`, `pnpm`/`node`, `bun`, `uv`, `xvfb-run`. `setup.sh`
-  uses `git clone` (allowed) + the mirror - none of the GitHub-blocked paths.
+- **Official sources only by default.** Goose is built from a `git clone` of
+  `github.com/block/goose`; Electron's binary comes from the official
+  `github.com/electron/electron` release, checksum-verified. The sandbox needs
+  `github.com` + `release-assets.githubusercontent.com` reachable. If release
+  assets are blocked, point `ELECTRON_BASE_URL` at a mirror (e.g.
+  `https://registry.npmmirror.com/-/binary/electron`); `setup.sh` preflights the
+  URL and fails loudly if it is unreachable.
+- Sandbox provides: `cargo`, `pnpm`/`node`, `bun`, `uv`, `xvfb-run`, `ffmpeg`.
 
 ## How a scenario works
 
@@ -184,7 +186,7 @@ Baked into the scripts; listed so you recognize them if something drifts:
 
 | Symptom | Cause → handled by |
 |---|---|
-| Electron binary 403 | GitHub release assets blocked → mirror + checksum (`setup.sh`) |
+| Electron binary 403 | GitHub release assets blocked → set `ELECTRON_BASE_URL` to a mirror (`setup.sh`) |
 | `@electron/node-gyp` 403 on `pnpm install` | git tarball on codeload blocked → registry override (`setup.sh`) |
 | Electron SIGSEGV "Missing X server" | needs a display → `xvfb-run` owns Xvfb per test |
 | Electron crash under Xvfb | `--no-sandbox --disable-gpu` (NOT `--in-process-gpu`) |
