@@ -46,8 +46,11 @@ _ACTIVE_PLUS_STATUSES = frozenset(
         SubscriptionStatus.INCOMPLETE.value,
     }
 )
-# Stripe subscription statuses that still bill (or will) the customer.
-_LIVE_STRIPE_STATUSES = frozenset({"active", "trialing", "past_due", "unpaid"})
+# Stripe subscription statuses that still bill (or will) the customer. Stripe's
+# one-subscription guide counts ``paused`` too, since it can resume in place.
+_LIVE_STRIPE_STATUSES = frozenset(
+    {"active", "trialing", "past_due", "unpaid", "paused"}
+)
 _PLUS_EXISTS = "Active Plus subscription already exists"
 
 

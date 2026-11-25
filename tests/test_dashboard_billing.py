@@ -273,7 +273,9 @@ class TestCheckout(TestTemplate):
             assert mocks.subs.call_args.kwargs["customer"] == "cus_human"
             assert mocks.checkout.call_args.kwargs["customer"] == "cus_human"
 
-    @pytest.mark.parametrize("live", ["active", "trialing", "past_due"])
+    @pytest.mark.parametrize(
+        "live", ["active", "trialing", "past_due", "unpaid", "paused"]
+    )
     def test_refused_when_stripe_has_a_sub_the_webhook_missed(self, live):
         with _client() as (client, factory, mocks):
             _add_sub(factory, stripe_customer_id="cus_human")  # row still says free
