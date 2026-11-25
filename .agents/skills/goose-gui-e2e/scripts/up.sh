@@ -17,6 +17,17 @@ fi
 API_KEY="$(cat "$API_KEY_FILE")"; export API_KEY
 log "API key: ${API_KEY:0:12}..."
 
+# 1b) a dedicated Fernet key for the e2e DB, so a developer's .env (possibly unset
+# or malformed) never decides whether webhook secrets / tokens can be encrypted.
+# (32 random bytes, urlsafe-base64: exactly a Fernet key.)
+E2E_ENC_KEY_FILE="$E2E_HOME/enc_key.txt"
+if [ ! -s "$E2E_ENC_KEY_FILE" ]; then
+  python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())" > "$E2E_ENC_KEY_FILE" \
+    || { log "FATAL enc key"; rm -f "$E2E_ENC_KEY_FILE"; exit 1; }
+  [ -s "$E2E_ENC_KEY_FILE" ] || { log "FATAL: empty enc key"; exit 1; }
+fi
+E2E_ENC_KEY="$(cat "$E2E_ENC_KEY_FILE")"
+
 # 2) template server (FastAPI + FastMCP /mcp mount). SQLite persists on disk.
 # GMAIL_PUBSUB_TOPIC is a real config field (common/global_config.py) - setting it
 # flips push_available true so the Settings app renders its "Add endpoint" control,
@@ -26,12 +37,6 @@ log "API key: ${API_KEY:0:12}..."
 # hitting Google, so the gmail_thread_render scenario can render the reader iframe
 # with no linked account / OAuth / network. Hard-refused under DEV_ENV=prod; here
 # DEV_ENV=dev so it's active. No Gmail tool ever reaches Google in this stack.
-# A dedicated Fernet key for the e2e DB, so a developer's .env (possibly unset or
-# malformed) never decides whether webhook secrets / tokens can be encrypted.
-E2E_ENC_KEY_FILE="$E2E_HOME/enc_key.txt"
-[ -s "$E2E_ENC_KEY_FILE" ] || (cd "$REPO" && uv run python -c \
-  "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") > "$E2E_ENC_KEY_FILE"
-E2E_ENC_KEY="$(cat "$E2E_ENC_KEY_FILE")"
 if ! is_up_http "$SRV_URL/health"; then
   log "template server down -> starting mymcp-serve"
   start_detached mcp-server \

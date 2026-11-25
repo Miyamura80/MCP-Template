@@ -88,13 +88,14 @@ async function findAppFrame(app) {
   return null;
 }
 
-// Goose >= 1.61 builds main.cjs; older builds main.js.
-const mainBundle = ["main.cjs", "main.js"]
-  .map((f) => `${GOOSE_SRC}/ui/desktop/.vite/build/${f}`)
-  .find((f) => existsSync(f));
-if (!mainBundle) { console.log("DRIVE: ERROR goose main bundle not built (run setup.sh)"); process.exit(1); }
+// Resolved by lib.sh (goose_main_bundle) and exported by run_test.sh, so the
+// main.cjs/main.js knowledge lives in one place.
+const mainBundle = process.env.GOOSE_MAIN_BUNDLE;
+if (!mainBundle || !existsSync(mainBundle)) {
+  console.log("DRIVE: ERROR goose main bundle not built (run setup.sh)"); process.exit(1);
+}
 const app = await electron.launch({
-  executablePath: `${GOOSE_SRC}/ui/node_modules/electron/dist/electron`,
+  executablePath: process.env.ELECTRON_BIN,
   args: [mainBundle, "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
   env, timeout: 90000,
 });
@@ -134,14 +135,13 @@ try {
   result.frames = app.windows().reduce((n, w) => n + w.frames().length, 0);
 
   if (frame) {
+    // Let mount-time server calls (e.g. settings_get) settle first, so a
+    // host-side rejection has rendered before we grade the DOM.
+    await win.waitForTimeout(1500);
     const body = await frame.locator("body").innerText({ timeout: 4000 }).catch(() => "");
     result.matched = want.filter((t) => body.includes(t));
     result.missing = want.filter((t) => !body.includes(t));
-    // Give mount-time server calls (e.g. settings_get) a moment to settle, so a
-    // host-side rejection has rendered before we check for it.
-    await win.waitForTimeout(1500);
-    const settled = await frame.locator("body").innerText({ timeout: 4000 }).catch(() => body);
-    result.forbidden = absent.filter((t) => settled.includes(t));
+    result.forbidden = absent.filter((t) => body.includes(t));
     result.rendered = result.matched.length === want.length && want.length > 0 && !result.forbidden.length;
     log(`app iframe found; matched [${result.matched}] missing [${result.missing}]` +
       (result.forbidden.length ? ` FORBIDDEN present [${result.forbidden}]` : ""));
@@ -193,9 +193,13 @@ try {
           if (!result.interact_missing.length && !result.interact_sel_missing.length) break;
           await win.waitForTimeout(700);
         }
-        result.forbidden = absent.filter((t) => ibody.includes(t));
+        // Same settle as the render phase: an error that lands just after the
+        // success text must still fail the run.
+        await win.waitForTimeout(1500);
+        ibody = await frame.locator("body").innerText({ timeout: 2000 }).catch(() => ibody);
+        result.interact_forbidden = absent.filter((t) => ibody.includes(t));
         result.interacted =
-          !result.forbidden.length &&
+          !result.interact_forbidden.length &&
           (wantI.length > 0 || wantSel.length > 0) &&
           result.interact_missing.length === 0 &&
           result.interact_sel_missing.length === 0;
@@ -222,9 +226,11 @@ try {
   writeResult();
   ok = result.rendered && (!interact || result.interacted);
   const why = !result.rendered
-    ? (result.forbidden && result.forbidden.length ? `app shows forbidden text [${result.forbidden}]` : "app not rendered / DOM mismatch")
+    ? (result.forbidden?.length ? `app shows forbidden text [${result.forbidden}]` : "app not rendered / DOM mismatch")
     : interact && !result.interacted
-      ? "interaction did not re-render"
+      ? (result.interact_forbidden?.length
+        ? `interaction shows forbidden text [${result.interact_forbidden}]`
+        : "interaction did not re-render")
       : interact ? "app rendered + interaction re-rendered" : "app rendered";
   console.log(ok ? `DRIVE: OK (${why})` : `DRIVE: FAIL (${why})`);
 } catch (e) {

@@ -54,17 +54,32 @@ before="$(python3 "$SCRIPT_DIR/mcp_probe.py" calls_count 2>/dev/null || echo 0)"
 # Opt-in video (E2E_VIDEO=1): ffmpeg x11grab records the whole Xvfb display the
 # drive runs on, to $E2E_HOME/video_<scenario>.mp4. (Playwright's recordVideo
 # stalls Electron's first-window load, so the display is recorded instead.)
+SCREEN=1500x1000
 video="$E2E_HOME/video_${nm}.mp4"
-drive_cmd="timeout 200 node '$SCRIPT_DIR/pw_scenario.mjs' '$scfile' '$shot'"
-if [ "${E2E_VIDEO:-}" = "1" ] && command -v ffmpeg >/dev/null; then
-  rm -f "$video"
-  drive_cmd="ffmpeg -loglevel error -y -f x11grab -video_size 1500x1000 -framerate 15 -i \"\$DISPLAY\" \
-      -c:v libx264 -preset veryfast -pix_fmt yuv420p -movflags +faststart '$video' </dev/null & FF=\$!; \
-    $drive_cmd; rc=\$?; kill -INT \$FF; wait \$FF 2>/dev/null; exit \$rc"
+rm -f "$video"  # never report a stale video from an earlier run
+record=0
+if [ "${E2E_VIDEO:-}" = "1" ]; then
+  if command -v ffmpeg >/dev/null; then record=1; else echo "WARN: E2E_VIDEO=1 but ffmpeg not found; not recording"; fi
 fi
+export GOOSE_MAIN_BUNDLE="$(goose_main_bundle)"
+
+# Arguments are passed positionally (never spliced into the script string), so
+# paths with quotes or spaces are safe.
+DRIVE='
+  scfile=$1 shot=$2 video=$3 record=$4 screen=$5
+  if [ "$record" = 1 ]; then
+    ffmpeg -loglevel error -y -f x11grab -video_size "$screen" -framerate 15 -i "$DISPLAY" \
+      -c:v libx264 -preset veryfast -pix_fmt yuv420p -movflags +faststart "$video" </dev/null &
+    ff=$!
+  fi
+  timeout 200 node "$SCRIPT_DIR/pw_scenario.mjs" "$scfile" "$shot"; rc=$?
+  # SIGINT lets ffmpeg finalize the mp4 (moov atom) before exiting.
+  [ -n "${ff:-}" ] && { kill -INT "$ff"; wait "$ff" 2>/dev/null; }
+  exit $rc'
 
 echo "---- drive GUI (Playwright-Electron) ----"
-xvfb-run -a --server-args="-screen 0 1500x1000x24" bash -c "$drive_cmd" 2>&1 | sed 's/^/  /'
+xvfb-run -a --server-args="-screen 0 ${SCREEN}x24" \
+  bash -c "$DRIVE" _ "$scfile" "$shot" "$video" "$record" "$SCREEN" 2>&1 | sed 's/^/  /'
 drive_rc=${PIPESTATUS[0]}  # the drive's status, NOT sed's (a failed drive must fail the test)
 [ -s "$video" ] && echo "video: $video"
 

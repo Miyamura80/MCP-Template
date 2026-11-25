@@ -45,10 +45,9 @@ bash down.sh                 # stop test services  (down.sh --reset also drops t
 ```
 
 `make test_apps_e2e` runs `up.sh && run_all.sh`. Set `E2E_VIDEO=1` to also
-record each drive as `$E2E_HOME/video_<scenario>.mp4` (Playwright `recordVideo`
-+ ffmpeg; the driver lingers ~2.5s on each milestone so the video is watchable). Each `run_test.sh` writes a
-screenshot of the real Goose GUI (with the Settings app rendered) to
-`$E2E_HOME/shot_<scenario>.png`.
+record each drive as `$E2E_HOME/video_<scenario>.mp4`: ffmpeg `x11grab` captures
+the Xvfb display (Playwright's `recordVideo` stalls Electron's first window),
+and the driver lingers ~2.5s on each milestone so the video is watchable.
 
 ## Where this runs in the suite
 
@@ -64,10 +63,16 @@ Heavy tier - **not** in `make ci` (which stays Node/Rust/Electron-free):
 
 ## Preconditions (verify before setup)
 
-- **Goose is pinned** via `GOOSE_REF` (default in `setup.sh`). Bump it
-  deliberately: `GOOSE_REF=v1.61.0 bash setup.sh` re-checks-out the tree and
-  rebuilds. Goose `main` moves fast (engines bumps, bundle renames), which is
-  why the build is no longer unpinned.
+- **Goose is pinned** via `GOOSE_REF` (a tag, branch or SHA; default in
+  `setup.sh`). Bump it deliberately: `GOOSE_REF=v1.61.0 bash setup.sh` checks
+  out that ref whenever the tree's HEAD differs, cleans old build products, and
+  rebuilds. Goose `main` moves fast (engines bumps, bundle renames), which is why
+  the build is no longer unpinned. Node/pnpm matching Goose's `engines` are
+  provisioned from nodejs.org/npm under `$E2E_HOME/node` when the system ones
+  don't satisfy them.
+- **Upgrading an existing `$E2E_HOME`:** `up.sh` now encrypts with its own key
+  (`$E2E_HOME/enc_key.txt`), so run `bash down.sh --reset` once to drop an e2e DB
+  whose secrets were encrypted under your `.env` key.
 
 - **Official sources only by default.** Goose is built from a `git clone` of
   `github.com/block/goose`; Electron's binary comes from the official
@@ -108,9 +113,10 @@ A scenario is JSON in `scripts/scenarios/<name>.json`:
   stack sets `GMAIL_FAKE_BACKEND=1`** (see below).
 - `expect` - checked by `mcp_probe.py`: `tool_called` + `round_trip` (from the
   tool-call log) and `app_rendered` + `dom_contains` (from the rendered iframe).
-  `dom_absent` (default `["MCP error"]`) lists text that must NOT appear: a
-  host-side rejection of an app -> server call renders as `MCP error <code>`,
-  which a `dom_contains`-only check would pass. Override with `[]` to opt out.
+  `dom_absent` (default `["MCP error"]`, checked by `pw_scenario.mjs` after the
+  render and after any interaction) lists text that must NOT appear: a host-side
+  rejection of an app -> server call renders as `MCP error <code>`, which a
+  `dom_contains`-only check would pass. Override with `[]` to opt out.
 
 ### Rendering the Gmail apps offline (`GMAIL_FAKE_BACKEND`)
 

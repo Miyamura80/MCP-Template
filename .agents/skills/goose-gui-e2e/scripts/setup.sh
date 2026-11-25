@@ -25,19 +25,30 @@ export ELECTRON_MIRROR="${ELECTRON_BASE_URL%/}/"
 
 log "E2E_HOME=$E2E_HOME  GOOSE_SRC=$GOOSE_SRC"
 
-# ---- 0. pin goose to a known-good release (GOOSE_REF) ----
+# ---- 0. pin goose to a known-good release (GOOSE_REF: a tag, branch or SHA) ----
 # Goose main moves fast (engines bumps, bundle renames, MCP-App bridge changes);
 # building an unpinned HEAD made this harness break without any change here.
-# Switching GOOSE_REF re-checks-out the tree and invalidates every build product.
-if [ -d "$GOOSE_SRC/.git" ] && [ "$(cat "$E2E_HOME/goose_ref" 2>/dev/null)" != "$GOOSE_REF" ]; then
-  log "goose ref changed -> $GOOSE_REF; re-checking out and invalidating build outputs"
-  ( cd "$GOOSE_SRC" && git fetch -q --depth 1 origin tag "$GOOSE_REF" && git checkout -q -f "$GOOSE_REF" )
-  rm -rf "$GOOSE_BINARY" "$DESK/.vite" "$GOOSE_SRC/ui/node_modules"
+# The checkout itself is the source of truth (goose_src may be shared with other
+# harnesses), so compare HEAD to the ref and re-check-out on any mismatch.
+goose_ref_sha() { git -C "$GOOSE_SRC" rev-parse -q --verify "$GOOSE_REF^{commit}" 2>/dev/null; }
+if [ -d "$GOOSE_SRC/.git" ]; then
+  want="$(goose_ref_sha || { git -C "$GOOSE_SRC" fetch -q --depth 1 origin "$GOOSE_REF" && git -C "$GOOSE_SRC" rev-parse FETCH_HEAD; })" \
+    || { echo "FATAL: cannot resolve GOOSE_REF=$GOOSE_REF in $GOOSE_REPO_URL"; exit 1; }
+  if [ "$(git -C "$GOOSE_SRC" rev-parse HEAD)" != "$want" ]; then
+    log "goose checkout != $GOOSE_REF; checking out $want and invalidating build outputs"
+    git -C "$GOOSE_SRC" checkout -q -f "$want"
+    git -C "$GOOSE_SRC" clean -q -fdx -e target/   # drop old-ref build products, keep cargo cache
+    rm -f "$GOOSE_BINARY"
+  fi
 fi
 
 # ---- 1. clone + build the goose CLI (the backend Goose desktop spawns as 'goose serve') ----
 if [ ! -x "$GOOSE_BINARY" ]; then
-  [ -d "$GOOSE_SRC/.git" ] || { log "cloning goose $GOOSE_REF"; git clone --depth 1 --branch "$GOOSE_REF" "$GOOSE_REPO_URL" "$GOOSE_SRC"; }
+  if [ ! -d "$GOOSE_SRC/.git" ]; then
+    log "cloning goose $GOOSE_REF"
+    git init -q "$GOOSE_SRC" && git -C "$GOOSE_SRC" remote add origin "$GOOSE_REPO_URL"
+    git -C "$GOOSE_SRC" fetch -q --depth 1 origin "$GOOSE_REF" && git -C "$GOOSE_SRC" checkout -q FETCH_HEAD
+  fi
   log "building goose CLI (portable-default: no local-inference/keyring) - ~5 min"
   ( cd "$GOOSE_SRC" && cargo build -p goose-cli --bin goose --no-default-features --features portable-default )
   log "goose CLI built: $($GOOSE_BINARY --version)"
@@ -45,37 +56,37 @@ else
   log "goose CLI present: $($GOOSE_BINARY --version)"
 fi
 
-# ---- 1b. Node + pnpm matching goose's `engines` (official nodejs.org build) ----
-# Goose pins engines.node / engines.pnpm and pnpm refuses to install below them.
-# Rather than bypass the check, provision the official Node release it asks for
-# (checksum-verified, under $E2E_HOME/node; lib.sh puts it first on PATH).
-read -r NEED_NODE_MAJOR NEED_PNPM < <(python3 - "$DESK/package.json" <<'PY'
+# ---- 1b. Node + pnpm satisfying goose's `engines` (official builds) ----
+# Goose pins engines.node / engines.pnpm. Provision the official Node major it
+# asks for (checksum-verified, under $E2E_NODE) plus that pnpm, instead of
+# installing on an unsupported runtime. (engine-strict stays off for pnpm
+# install below only so transitive deps' engines don't block it.)
+ENGINES="$(python3 - "$DESK/package.json" <<'PY'
 import json, re, sys
 e = json.load(open(sys.argv[1])).get("engines", {})
-m = re.search(r"(\d+)", e.get("node", ""))
-p = re.search(r"(\d+\.\d+\.\d+)", e.get("pnpm", ""))
-print(m.group(1) if m else "0", p.group(1) if p else "")
+node = re.search(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?", e.get("node", ""))
+pnpm = re.search(r"\d+\.\d+\.\d+", e.get("pnpm", ""))
+print(".".join(g or "0" for g in node.groups()) if node else "-", pnpm.group(0) if pnpm else "-")
 PY
-)
-HAVE_NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-if [ "$NEED_NODE_MAJOR" != "0" ] && [ "$HAVE_NODE_MAJOR" != "$NEED_NODE_MAJOR" ]; then
-  NV="$(curl -fsSL --max-time 20 https://nodejs.org/dist/index.json | python3 -c "import json,sys;print(next(r['version'] for r in json.load(sys.stdin) if r['version'].startswith('v$NEED_NODE_MAJOR.')))")"
-  log "goose wants Node $NEED_NODE_MAJOR (have $HAVE_NODE_MAJOR); installing official $NV into $E2E_NODE"
-  NDL="$E2E_HOME/node-dl"; mkdir -p "$NDL"
+)" || { echo "FATAL: cannot read engines from $DESK/package.json"; exit 1; }
+read -r NEED_NODE NEED_PNPM <<<"$ENGINES"
+HAVE_NODE="$(node -p process.versions.node 2>/dev/null || echo 0.0.0)"
+if [ "$NEED_NODE" != "-" ] && ! { [ "${HAVE_NODE%%.*}" = "${NEED_NODE%%.*}" ] && version_ge "$HAVE_NODE" "$NEED_NODE"; }; then
+  NV="$(curl -fsSL --max-time 20 https://nodejs.org/dist/index.json | python3 -c "import json,sys;print(next((r['version'] for r in json.load(sys.stdin) if r['version'].startswith('v${NEED_NODE%%.*}.')), ''))")"
+  [ -n "$NV" ] || { echo "FATAL: no Node v${NEED_NODE%%.*}.x on nodejs.org"; exit 1; }
+  log "goose wants Node $NEED_NODE (have $HAVE_NODE); installing official $NV into $E2E_NODE"
   NTAR="node-${NV}-linux-x64.tar.xz"
-  curl -fsSL -o "$NDL/$NTAR" "https://nodejs.org/dist/$NV/$NTAR"
-  curl -fsSL -o "$NDL/SHASUMS256.txt" "https://nodejs.org/dist/$NV/SHASUMS256.txt"
-  ( cd "$NDL" && grep -E "  ${NTAR//./\\.}\$" SHASUMS256.txt | sha256sum -c - ) || { echo "FATAL: Node checksum mismatch"; exit 1; }
+  fetch_verified "https://nodejs.org/dist/$NV" "$NTAR" "$E2E_HOME/node-dl"
   rm -rf "$E2E_NODE"; mkdir -p "$E2E_NODE"
-  tar -xJf "$NDL/$NTAR" -C "$E2E_NODE" --strip-components=1
-  export PATH="$E2E_NODE/bin:$PATH"
+  tar -xJf "$E2E_HOME/node-dl/$NTAR" -C "$E2E_NODE" --strip-components=1
+  use_e2e_node
 fi
-HAVE_PNPM="$(pnpm -v 2>/dev/null || echo 0)"
-if [ -n "$NEED_PNPM" ] && [ "$(printf '%s\n%s\n' "$NEED_PNPM" "$HAVE_PNPM" | sort -V | head -1)" != "$NEED_PNPM" ]; then
+HAVE_PNPM="$(pnpm -v 2>/dev/null || echo 0.0.0)"
+if [ "$NEED_PNPM" != "-" ] && ! version_ge "$HAVE_PNPM" "$NEED_PNPM"; then
   log "goose wants pnpm >= $NEED_PNPM (have $HAVE_PNPM); installing pnpm@$NEED_PNPM into $E2E_NODE"
   mkdir -p "$E2E_NODE"
   npm install -g --prefix "$E2E_NODE" "pnpm@$NEED_PNPM" >/dev/null
-  export PATH="$E2E_NODE/bin:$PATH"
+  use_e2e_node
 fi
 log "toolchain: node $(node -v), pnpm $(pnpm -v)"
 
@@ -83,22 +94,13 @@ log "toolchain: node $(node -v), pnpm $(pnpm -v)"
 EV="$(grep -m1 '"electron":' "$DESK/package.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 log "pinned Electron version: $EV"
 if [ ! -x "$ELECTRON_BIN" ]; then
-  DL="$E2E_HOME/electron-dl"; mkdir -p "$DL"
-  BASE="${ELECTRON_BASE_URL%/}/v${EV}"
-  if ! curl -sfL --max-time 15 -o /dev/null "$BASE/SHASUMS256.txt"; then
-    echo "FATAL: $BASE not reachable. Allow github.com + release-assets.githubusercontent.com,"
+  DL="$E2E_HOME/electron-dl"
+  ZIP="electron-v${EV}-linux-x64.zip"
+  fetch_verified "${ELECTRON_BASE_URL%/}/v${EV}" "$ZIP" "$DL" || {
+    echo "FATAL: Electron download failed. Allow github.com + release-assets.githubusercontent.com,"
     echo "  or set ELECTRON_BASE_URL to a reachable Electron mirror."
     exit 1
-  fi
-  ZIP="electron-v${EV}-linux-x64.zip"
-  log "downloading $ZIP from $BASE"
-  curl -fsSL -o "$DL/$ZIP" "$BASE/$ZIP"
-  curl -fsSL -o "$DL/SHASUMS256.txt" "$BASE/SHASUMS256.txt"
-  # SHASUMS256.txt lists each file as `<hash> *<name>` (sha256sum binary-mode marker),
-  # so match a space-or-star before the (dot-escaped) name, not a bare space.
-  ZIP_RE="[ *]${ZIP//./\\.}\$"
-  ( cd "$DL" && grep -E "$ZIP_RE" SHASUMS256.txt | sha256sum -c - ) || { echo "FATAL: Electron checksum mismatch"; exit 1; }
-  log "checksum OK; extracting"
+  }
   rm -rf "$DL/dist"; mkdir -p "$DL/dist"
   ( cd "$DL/dist" && (command -v unzip >/dev/null && unzip -oq "../$ZIP" || python3 -c "import zipfile;zipfile.ZipFile('../$ZIP').extractall('.')") )
   chmod +x "$DL/dist/electron"
@@ -143,19 +145,16 @@ fi
 log "Electron: $($ELECTRON_BIN --no-sandbox --version 2>/dev/null | tail -1)"
 
 # ---- 5. build the dev main-process bundle (.vite/build/main.{js,cjs}) that Playwright launches ----
-# Goose >= 1.61 emits main.cjs; older builds emit main.js. Accept either.
-main_bundle() { ls "$DESK"/.vite/build/main.cjs "$DESK"/.vite/build/main.js 2>/dev/null | head -1; }
-if [ -z "$(main_bundle)" ]; then
+if [ -z "$(goose_main_bundle)" ]; then
   log "building desktop bundles via electron-forge start (dev), then stopping"
   ( cd "$DESK" && node scripts/i18n-compile.js >/dev/null 2>&1 || true )
   xvfb-run -a bash -c "cd '$DESK' && ELECTRON_DISABLE_SANDBOX=1 timeout 180 ../node_modules/.bin/electron-forge start -- --no-sandbox --disable-gpu >'$E2E_HOME/forge_build.log' 2>&1" &
   FPID=$!
   # wait (bounded) for the bundle to appear, then stop forge
-  for _ in $(seq 1 90); do [ -n "$(main_bundle)" ] && break; sleep 2; done
+  for _ in $(seq 1 90); do [ -n "$(goose_main_bundle)" ] && break; sleep 2; done
   pkill -9 -P "$FPID" 2>/dev/null || true; pkill -9 -f 'electron-forge' 2>/dev/null || true; pkill -9 -f 'dist/electron' 2>/dev/null || true
-  [ -n "$(main_bundle)" ] || { echo "FATAL: main bundle not built (see $E2E_HOME/forge_build.log)"; exit 1; }
+  [ -n "$(goose_main_bundle)" ] || { echo "FATAL: main bundle not built (see $E2E_HOME/forge_build.log)"; exit 1; }
 fi
-log "desktop main bundle ready: $(main_bundle)"
+log "desktop main bundle ready: $(goose_main_bundle)"
 
-echo "$GOOSE_REF" > "$E2E_HOME/goose_ref"
 log "SETUP COMPLETE - now: bash up.sh && bash run_test.sh settings_render"
