@@ -13,12 +13,11 @@ import {
   base64ToBlobUrl,
   buildAttachmentsPayload,
   draftFieldsEqual,
-  errMsg,
   extractDraft,
-  extractStructuredContent,
   formatFileSize,
   isPreviewable,
 } from "./helpers";
+import { errMsg, extractStructuredContent } from "../../_shared/toolResult";
 import { ComposerThreadPanel, renderComposerStatus } from "./ComposerThread";
 import { PreviewModal, type PreviewData } from "./AttachmentPreview";
 import { attachmentChipStyle } from "./messageStyles";

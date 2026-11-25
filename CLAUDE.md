@@ -232,6 +232,9 @@ Apps live in `mcp_server/apps/<name>/`:
 - `make build_apps` rebuilds the bundle (developer-only; not part of CI)
 - `make dev_host` runs the upstream `@modelcontextprotocol/ext-apps` basic-host
   for manual smoke testing
+- Code used by more than one app goes in `mcp_server/apps/_shared/`, imported
+  by relative path (`_`-prefixed dirs are never registered as apps). It must not import packages (it has no `node_modules`);
+  see its README.
 
 When adding a new app, also add an entry to `[tool.hatch.build.targets.wheel]
 force-include` in `pyproject.toml` so the HTML ships in the wheel.
@@ -250,9 +253,10 @@ See `mcp_server/MCP_UI_ARCHITECTURE.md` for design rationale and
 - **Conformance tier:** `make mcp_conformance` (MCPJam protocol + apps
   suites, CI-gated, needs Node). OAuth conformance is manual - see
   `docs/content/docs/mcp/oauth.mdx`.
-- App frontends: vitest per app (`bun run test` in `mcp_server/apps/<name>/`,
-  not in CI); each app has an `appContract.test.ts` pinning the real
-  `ext-apps` `App` surface against the `McpAppLike` mock type.
+- App frontends: `bun run test` in `mcp_server/apps/<name>/` runs `tsc` then
+  vitest (CI: `.github/workflows/apps_test.yaml`, one job per app). Each app's
+  `appContract.test.ts` passes a real `ext-apps` `App` as the shared
+  `McpAppSurface` type, so the `tsc` step fails when the SDK drifts.
 - **Rendered-iframe tier (L4, #37):** `make test_apps_e2e` drives the **real
   Goose desktop GUI** (Electron) as an MCP client and asserts the `ui://` app
   actually renders + round-trips in a real host - including a click →

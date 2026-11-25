@@ -326,7 +326,10 @@ def _register_app_resources(mcp: MCPServer) -> None:
     if not _APPS_DIR.is_dir():
         return
     for app_dir in sorted(_APPS_DIR.iterdir()):
-        if not app_dir.is_dir():
+        # `_`-prefixed dirs (`_shared/`) hold source the apps import, not an
+        # app. The wheel ships only dist/, so "has a package.json" (the rule
+        # `make build_apps` uses) can't be the test here.
+        if not app_dir.is_dir() or app_dir.name.startswith("_"):
             continue
         html_path = app_dir / "dist" / "mcp-app.html"
         uri = f"ui://mymcp/{app_dir.name}"

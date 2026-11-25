@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App as McpApp } from "@modelcontextprotocol/ext-apps";
 import { Signer } from "./Signer";
-import { bufferToolResults } from "./helpers";
+import { bufferToolResults } from "../../_shared/mcpApp";
 
 const mcpApp = new McpApp({ name: "pdf-signer", version: "0.1.0" });
 

@@ -54,7 +54,6 @@ function makeApp(overrides: Partial<Record<string, unknown>> = {}) {
       if (value instanceof Error) throw value;
       return value;
     }),
-    openLink: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => undefined),
   };
   return app;

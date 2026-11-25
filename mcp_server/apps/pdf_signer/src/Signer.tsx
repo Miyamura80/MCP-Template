@@ -19,22 +19,13 @@ import * as pdfjsLib from "pdfjs-dist";
 import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs";
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { styles } from "./styles";
+import type { McpAppLike as SharedMcpAppLike } from "../../_shared/mcpApp";
+import { extractStructuredContent } from "../../_shared/toolResult";
 
 (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = pdfjsWorker;
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc;
 
-export type McpAppLike = {
-  ontoolresult?: (result: unknown) => void;
-  callServerTool: (args: {
-    name: string;
-    arguments: Record<string, unknown>;
-  }) => Promise<unknown>;
-  openLink: (params: { url: string }) => Promise<unknown>;
-  sendMessage?: (params: {
-    role: string;
-    content: { type: string; text: string }[];
-  }) => Promise<unknown>;
-};
+export type McpAppLike = SharedMcpAppLike<"callServerTool", "sendMessage">;
 
 export type SignerDocument = {
   doc_id: string;
@@ -64,30 +55,6 @@ type Phase =
   | "cancelled"
   | "error";
 
-// Same hardened CallToolResult parsing as the gmail apps (#183/#201): accept
-// a structured object only from `structuredContent` or a real MCP TextContent
-// block - never the raw envelope. Local copy pending the shared per-app
-// helpers consolidation (issue #170).
-function extractStructuredContent<T>(raw: unknown): T | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  if (obj.structuredContent && typeof obj.structuredContent === "object") {
-    return obj.structuredContent as T;
-  }
-  if (Array.isArray(obj.content)) {
-    for (const item of obj.content) {
-      if (!item || typeof item !== "object") continue;
-      const candidate = item as { type?: unknown; text?: unknown };
-      if (candidate.type !== "text" || typeof candidate.text !== "string") continue;
-      try {
-        const parsed = JSON.parse(candidate.text);
-        if (parsed && typeof parsed === "object") return parsed as T;
-      } catch { /* not JSON text content */ }
-    }
-  }
-  return null;
-}
-
 type RenderedPage = {
   pageNo: number;
   url: string;
@@ -101,8 +68,7 @@ const PAGE_TARGET_WIDTH = 640;
 
 async function renderAllPages(dataBase64: string): Promise<RenderedPage[]> {
   const bytes = Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0));
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false })
-    .promise;
+  const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const pages: RenderedPage[] = [];
   for (let pageNo = 1; pageNo <= doc.numPages; pageNo++) {
@@ -120,6 +86,8 @@ async function renderAllPages(dataBase64: string): Promise<RenderedPage[]> {
       throw new Error(`could not create a rendering context for page ${pageNo}`);
     }
     await page.render({
+      // `canvas: null` tells pdf.js 5 to draw through this context.
+      canvas: null,
       canvasContext: ctx,
       viewport,
       // Draw form-field values (filled by pdf_edit) even when the PDF only

@@ -9,12 +9,9 @@ import type {
   Thread,
   ThreadMessage,
 } from "./types";
-import {
-  curationToThreads,
-  errMsg,
-  extractDraft,
-  extractStructuredContent,
-} from "./helpers";
+import type { ToolResultBuffer } from "../../_shared/mcpApp";
+import { errMsg, extractStructuredContent } from "../../_shared/toolResult";
+import { curationToThreads, extractDraft } from "./helpers";
 import { useIsNarrow } from "./hooks";
 import { ThreadReader } from "./ThreadReader";
 import { InlineComposer } from "./InlineComposer";
@@ -51,7 +48,7 @@ export type {
 
 type InboxProps = {
   mcpApp: import("./types").McpAppLike;
-  resultBuffer?: import("./helpers").ToolResultBuffer;
+  resultBuffer?: ToolResultBuffer;
 };
 
 export function Inbox({ mcpApp, resultBuffer }: InboxProps) {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { extractStructuredContent, errMsg } from "./extract";
+import type { McpAppLike as SharedMcpAppLike } from "../../_shared/mcpApp";
+import { errMsg, extractStructuredContent } from "../../_shared/toolResult";
 
 export type SubView = {
   id: string;
@@ -20,15 +21,7 @@ export type Snapshot = {
 
 type SecretResult = { id: string; secret: string };
 
-// Minimal structural view of the ext-apps App the panel actually uses. The
-// appContract test pins this against the real SDK surface.
-export type McpAppLike = {
-  ontoolresult?: (result: unknown) => void;
-  callServerTool: (args: {
-    name: string;
-    arguments: Record<string, unknown>;
-  }) => Promise<unknown>;
-};
+export type McpAppLike = SharedMcpAppLike<"callServerTool">;
 
 type Props = { mcpApp: McpAppLike };
 

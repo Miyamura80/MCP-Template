@@ -6,7 +6,7 @@ import {
   type CuratedThread,
   type Thread,
 } from "./Inbox";
-import { bufferToolResults } from "./helpers";
+import { bufferToolResults } from "../../_shared/mcpApp";
 
 function makeMcpApp(opts?: {
   threadResults?: Record<string, Thread>;

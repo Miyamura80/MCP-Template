@@ -1,0 +1,61 @@
+name: MCP App Tests
+
+# Type-check and unit-test every MCP App frontend. `bun run test` runs tsc
+# first, which is what enforces each app's appContract.test.ts against the
+# ext-apps version that app's bun.lock pins.
+on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - 'mcp_server/apps/**'
+      - '.github/workflows/apps_test.yaml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'mcp_server/apps/**'
+      - '.github/workflows/apps_test.yaml'
+  workflow_dispatch:
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.list.outputs.apps }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    # Same rule as `make build_apps`: an app is a dir with a package.json.
+    - name: List apps
+      id: list
+      run: |
+        apps=$(ls -d mcp_server/apps/*/package.json | xargs -n1 dirname | xargs -n1 basename | jq -Rnc '[inputs]')
+        echo "apps=$apps" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.discover.outputs.apps) }}
+    defaults:
+      run:
+        working-directory: ./mcp_server/apps/${{ matrix.app }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        # Pinned for reproducible CI; bump deliberately alongside local dev.
+        bun-version: 1.4.4
+
+    - name: Install dependencies
+      run: bun install --frozen-lockfile
+
+    - name: Type-check and test
+      run: bun run test

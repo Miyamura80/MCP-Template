@@ -1,28 +1,9 @@
-// Guards against drift between our McpAppLike structural type (what the
-// component tests mock) and the real @modelcontextprotocol/ext-apps App
-// class (what main.tsx passes in production). If the SDK renames or removes
-// a member we rely on, this fails even though the component tests stay green.
-import { describe, expect, it } from "vitest";
+// Pins the real @modelcontextprotocol/ext-apps App (what main.tsx passes in
+// production) against the shared McpAppSurface type (what component tests
+// mock). Passing the real App to describeAppContract(app: McpAppSurface) is
+// the compile-time half: `bun run test` runs tsc first. The runtime half is
+// in ../../_shared/appContract.ts.
 import { App } from "@modelcontextprotocol/ext-apps";
-import type { McpAppLike } from "./Signer";
+import { describeAppContract } from "../../_shared/appContract";
 
-describe("McpAppLike contract vs real ext-apps App", () => {
-  const app = new App({ name: "contract-test", version: "0.0.0" });
-
-  it("real App is assignable to McpAppLike (compile-time)", () => {
-    const asLike: McpAppLike = app;
-    expect(asLike).toBe(app);
-  });
-
-  it("exposes callServerTool, openLink, and sendMessage as methods", () => {
-    expect(typeof app.callServerTool).toBe("function");
-    expect(typeof app.openLink).toBe("function");
-    expect(typeof app.sendMessage).toBe("function");
-  });
-
-  it("ontoolresult is a settable callback property", () => {
-    const cb = () => undefined;
-    app.ontoolresult = cb;
-    expect(app.ontoolresult).toBe(cb);
-  });
-});
+describeAppContract(new App({ name: "contract-test", version: "0.0.0" }));

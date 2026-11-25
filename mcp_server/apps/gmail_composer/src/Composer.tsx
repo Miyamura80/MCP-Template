@@ -7,7 +7,8 @@ import type {
   SentState,
   Thread,
 } from "./types";
-import { draftFields, extractDraft, extractStructuredContent, extractThread, fieldsEqual } from "./draft";
+import { extractStructuredContent } from "../../_shared/toolResult";
+import { draftFields, extractDraft, extractThread, fieldsEqual } from "./draft";
 import { discardContextText, sentContextText } from "./modelContext";
 import { useAutoGrow, useIsMobile } from "./hooks";
 import { ThreadPanel } from "./ThreadPanel";
