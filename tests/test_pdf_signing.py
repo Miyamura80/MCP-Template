@@ -187,13 +187,13 @@ class TestPerformSigning(PdfSigningTestBase):
         events = [e["event"] for e in repo.load_document(doc_id, "u1").audit or []]
         assert events[-1] == "sign_rejected"
 
-    def test_non_latin1_name_rejected(self):
-        # The stamp face is standard-14 Helvetica (Latin-1): a CJK name would
-        # silently render as '?' on a legal document, so it must be refused.
+    def test_uncovered_name_rejected(self):
+        # No bundled stamp font covers Hebrew: stamping empty boxes into a
+        # signature on a legal document is unacceptable, so it is refused.
         doc_id = self._open_awaiting()
         with pytest.raises(pdf_signing.PdfSigningInputError) as exc:
-            self._sign(doc_id, typed_name="宮村英人")
-        assert "cannot render" in str(exc.value)
+            self._sign(doc_id, typed_name="שרה כהן")
+        assert "don't cover" in str(exc.value)
         assert (
             repo.load_document(doc_id, "u1").status
             == repo.PDF_STATUS_AWAITING_SIGNATURE

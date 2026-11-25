@@ -21,3 +21,11 @@ signing:
   cert_path: null
   key_path: null
   dev_cert_dir: ".pdf_signing"
+
+# Overlay/stamp text outside Latin-1 is drawn with an embedded subset of the
+# Noto fonts bundled in services/pdf_fonts/ (Latin, Greek, Cyrillic, Arabic,
+# Japanese; `make pdf_fonts_cjk` adds Chinese + Korean). Add fonts here to
+# cover more; characters no font covers are refused with an error rather
+# than stamped as '?'.
+fonts:
+  extra_font_paths: []

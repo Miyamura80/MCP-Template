@@ -185,3 +185,5 @@ mcp_conformance_results/
 
 # Auto-generated dev PDF sealing certificate (services/pdf_signing.py)
 .pdf_signing/
+# Opt-in Chinese/Korean PDF stamp fonts built by `make pdf_fonts_cjk`
+services/pdf_fonts/optional/

@@ -21,9 +21,8 @@ Signing steps (US-007):
    ``cert_path``/``key_path`` with a real key pair. Outside dev, falling back
    to the dev cert logs a loud error (:func:`warn_if_untrusted_seal`).
 
-The stamp uses the standard-14 Helvetica-Oblique face rather than a bundled
-script font: zero licensing surface and it renders identically everywhere
-(the PRD's open question, resolved to the simplest v1).
+Latin-1 names stamp in Helvetica-Oblique; other scripts use embedded Noto
+subsets (:mod:`services.pdf_overlay`). Names no font covers are refused.
 """
 
 from __future__ import annotations
@@ -45,28 +44,16 @@ from db.models.pdf_documents import PdfDocument
 from models.pdf_forms import PdfDocStatus, SignaturePlacement
 from services import ModelFacingError
 from services.pdf_documents_repo import load_document, update_document
-from services.pdf_inspect import inspect_pdf
-from services.pdf_overlay import (
-    build_text_overlay_page,
-    escape_pdf_text,
-    unencodable_pdf_text,
+from services.pdf_overlay import build_text_overlay_page, unrenderable_reason
+from services.pdf_stamp import (
+    PdfPlacementResolutionError,
+    name_fits_stamp,
+    resolve_stamp_anchor,
+    stamp_lines,
 )
 
 _SEAL_FIELD_NAME = "MyMCP-Seal"
 _AUDIT_INFO_KEY = "/MyMCPSignatureAudit"
-
-# Stamp geometry (PDF user space, points). The name baseline sits 18pt above
-# the anchor, metadata lines below it; the footprint rect derived from these
-# is what pdf_signer.get_document reports to the iframe, so the "Sign here"
-# highlight and the actual stamp can never drift apart.
-_NAME_FONT_SIZE = 14.0
-_META_FONT_SIZE = 6.5
-_NAME_BASELINE_OFFSET = 18.0
-_META_BASELINE_OFFSET = 10.0
-_META_LINE_SPACING = 8.0
-_STAMP_WIDTH = 200.0
-_STAMP_DESCENT = 4.0  # below the anchor, covering the last metadata line
-_STAMP_ASCENT = _NAME_BASELINE_OFFSET + _NAME_FONT_SIZE  # top of the typed name
 
 
 class PdfSigningStateError(ModelFacingError):
@@ -84,14 +71,6 @@ class PdfSigningInputError(ModelFacingError):
     """Missing typed name or consent - the ceremony inputs are mandatory."""
 
 
-class PdfPlacementResolutionError(ModelFacingError):
-    """The recorded placement no longer resolves to a spot on the document.
-
-    Raised instead of silently stamping a default position - a signature at
-    the wrong place on a legal document is the worst possible fallback.
-    """
-
-
 def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
     """The security-critical ceremony predicate - the single implementation.
 
@@ -105,18 +84,17 @@ def validate_ceremony(doc: PdfDocument, typed_name: str, consent: bool) -> str:
     if not name:
         _audit_rejection(doc, "empty_typed_name")
         raise PdfSigningInputError("typed_name must be the signer's full legal name.")
-    if bad := unencodable_pdf_text(name):
-        # The stamp draws with standard-14 Helvetica (Latin-1 only); silently
-        # rendering '?' into a signature on a legal document is unacceptable,
-        # so refuse and ask for a renderable form of the name. The audit
-        # trail could store the original faithfully, but a stamp that
-        # contradicts the audit is worse than an honest error.
+    if reason := unrenderable_reason(name):
+        # Stamping empty boxes (or a direction-spoofed name) into a signature
+        # on a legal document is unacceptable, and a stamp that contradicts
+        # the audit trail is worse than an honest error, so refuse.
         _audit_rejection(doc, "unrenderable_typed_name")
+        raise PdfSigningInputError(f"typed_name cannot be stamped: it {reason}.")
+    if not name_fits_stamp(name):
+        _audit_rejection(doc, "typed_name_too_long")
         raise PdfSigningInputError(
-            f"typed_name contains characters the signature stamp cannot "
-            f"render: {bad!r}. The stamp uses a Latin-1 (standard-14) font - "
-            "please sign with a Latin-script form of the name (e.g. a "
-            "romanized spelling)."
+            "typed_name is too long to fit the signature stamp; use a shorter "
+            "form of the full legal name."
         )
     if not consent:
         _audit_rejection(doc, "consent_not_given")
@@ -296,71 +274,6 @@ def sealing_cert_paths() -> tuple[Path, Path]:
     return cert_path, key_path
 
 
-def resolve_stamp_anchor(
-    data: bytes, placement: SignaturePlacement
-) -> tuple[int, float, float]:
-    """Turn the recorded placement into (1-based page, x, y baseline).
-
-    Raises :class:`PdfPlacementResolutionError` rather than guessing: the
-    placement was validated by ``pdf_request_signature`` and the document is
-    locked while awaiting, so failure to resolve means something is genuinely
-    wrong and stamping a default spot would be worse than refusing.
-    """
-    if placement.field_name is not None:
-        inspection = inspect_pdf(data, include_text_layout=False)
-        field = next(
-            (f for f in inspection.fields if f.name == placement.field_name), None
-        )
-        if field is None or field.rect is None:
-            raise PdfPlacementResolutionError(
-                f"Signature field {placement.field_name!r} no longer resolves "
-                "to a widget rectangle in this document. Cancel and re-request "
-                "the signature."
-            )
-        return field.page or 1, field.rect[0] + 2.0, field.rect[1] + 4.0
-    if placement.page is None or placement.x is None or placement.y is None:
-        raise PdfPlacementResolutionError(
-            "Recorded placement is missing page/x/y coordinates. Cancel and "
-            "re-request the signature."
-        )
-    return placement.page, placement.x, placement.y
-
-
-def resolve_stamp_rect(
-    data: bytes, placement: SignaturePlacement
-) -> tuple[int, list[float]]:
-    """The exact footprint the stamp will occupy: (page, [x0, y0, x1, y1]).
-
-    Derived from the same anchor + geometry constants the stamp drawing uses,
-    so the signing app's highlight box cannot drift from the real stamp.
-    """
-    page, x, y = resolve_stamp_anchor(data, placement)
-    return page, [x, y - _STAMP_DESCENT, x + _STAMP_WIDTH, y + _STAMP_ASCENT]
-
-
-def _stamp_content(x: float, y: float, typed_name: str, meta_lines: list[str]) -> bytes:
-    chunks = [
-        b"BT /MyMCPSigF1 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (
-            _NAME_FONT_SIZE,
-            x,
-            y + _NAME_BASELINE_OFFSET,
-            escape_pdf_text(typed_name),
-        )
-    ]
-    chunks.extend(
-        b"BT /MyMCPSigF2 %.2f Tf %.2f %.2f Td (%s) Tj ET\n"
-        % (
-            _META_FONT_SIZE,
-            x,
-            y + _META_BASELINE_OFFSET - i * _META_LINE_SPACING,
-            escape_pdf_text(line),
-        )
-        for i, line in enumerate(meta_lines)
-    )
-    return b"".join(chunks)
-
-
 def _apply_stamp_and_audit(
     data: bytes, placement: SignaturePlacement, audit: dict[str, Any]
 ) -> bytes:
@@ -377,8 +290,8 @@ def _apply_stamp_and_audit(
     overlay = build_text_overlay_page(
         float(target.mediabox.width),
         float(target.mediabox.height),
-        {"/MyMCPSigF1": "/Helvetica-Oblique", "/MyMCPSigF2": "/Helvetica"},
-        _stamp_content(x, y, audit["typed_name"], meta_lines),
+        stamp_lines(x, y, audit["typed_name"], meta_lines),
+        font_prefix="MyMCPSig",
     )
     target.merge_page(overlay)
     writer.add_metadata({_AUDIT_INFO_KEY: json.dumps(audit, sort_keys=True)})

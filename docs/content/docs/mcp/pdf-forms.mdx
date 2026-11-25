@@ -120,11 +120,44 @@ with an empty user password still opens), and returns `warnings` +
   view, which may be incomplete; edits may not display in XFA-only viewers.
   Verify with `render_pages` before exporting.
 
-Overlay text and the signature stamp draw with standard-14 (Latin-1) fonts:
-`add_text` ops and typed signer names containing characters outside Latin-1
-(e.g. CJK) are rejected with a clear error instead of silently rendering
-`?` - romanized input works today; embedded Unicode fonts are a tracked
-follow-up.
+### Non-Latin text
+
+Overlay text and the signature stamp keep the standard-14 Helvetica faces for
+Latin-1 text. Anything else (`山田太郎`, `Ελένη`, `Иван`, `محمد`) is shaped
+with HarfBuzz and drawn with an embedded, per-document subset of the Noto
+fonts bundled in `services/pdf_fonts/` (SIL OFL 1.1), with a ToUnicode map so
+the text stays searchable and copyable. Arabic is joined and laid out
+right-to-left inside a left-to-right line, with numbers kept left-to-right.
+Control and invisible characters (Unicode categories Cc, Cf, Zl and Zp,
+which include bidi overrides such as U+202E, zero-width spaces, the word
+joiner and soft hyphens, plus Hangul fillers) are always rejected, so a
+stamped name cannot display differently from what was typed; ZWNJ/ZWJ stay
+allowed for Arabic and Indic spelling. A typed name wider than the stamp shrinks
+to fit (down to 8pt); a name still too long at that size is refused.
+
+The committed bundle is ~2 MB rather than the ~16 MB a full CJK face costs,
+so its coverage is deliberate: Latin (incl. Vietnamese), Greek, Cyrillic,
+Arabic, kana and JIS X 0208 level-1 kanji (plus the GB2312 level-1 hanzi the
+Japanese face shares). Text with characters outside it (Hangul, simplified-only
+hanzi, Hebrew, Indic scripts, rarer ideographs, emoji) or with control
+characters is rejected with a clear error instead of stamping empty boxes.
+
+**Chinese and Korean (opt-in).** Run `make pdf_fonts_cjk` to download the
+hash-pinned Noto Sans SC and KR sources and build subsets (~0.75 MB: the rest
+of GB2312 level 1 and the 2,350 common Hangul syllables) into
+`services/pdf_fonts/optional/`. That directory is gitignored and checked
+automatically: no config needed, and a file whose sha256 does not match the
+pinned build is ignored with a warning. Restart the server afterwards.
+The target writes into the source checkout, so it only helps a server run
+from that checkout; for an installed wheel, build the fonts anywhere with
+`uv run scripts/build_pdf_fonts.py --cjk` from a checkout and list the two
+resulting files in `pdf_forms.fonts.extra_font_paths` instead.
+
+**Other scripts.** List extra TTF/OTF files in
+`pdf_forms.fonts.extra_font_paths`; they are tried after the bundled and
+opt-in fonts, and an unreadable path is skipped with a warning in the log at
+server startup. `scripts/build_pdf_fonts.py` downloads the pinned,
+sha256-verified sources and regenerates the subsets reproducibly.
 
 ### The sealing certificate
 
