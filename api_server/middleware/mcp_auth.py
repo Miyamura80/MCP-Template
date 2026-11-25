@@ -17,16 +17,17 @@ import json
 import anyio
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-import api_server.oauth as oauth_server
 from api_server.auth.api_key_auth import validate_api_key
 from api_server.auth.authkit_auth import (
-    resolve_token_scopes,
     resource_metadata_url,
     verify_authkit_token,
 )
+from api_server.auth.authorization_server import (
+    BuiltinAuthorizationServer,
+    authorization_server,
+)
 from api_server.auth.unified_auth import AuthenticatedUser
 from api_server.auth.workos_auth import verify_workos_token
-from api_server.oauth.storage import lookup_access_token
 from common import global_config
 from db.engine import use_db_session
 from src.payments.request_context import reset_payment_header, set_payment_header
@@ -121,20 +122,13 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
 
     auth_header = headers.get("authorization", "")
     scheme, _, credentials = auth_header.partition(" ")
-    if scheme.lower() == "bearer" and oauth_server.is_self_mode():
-        # The built-in OAuth server issued, stores and can revoke these tokens.
-        # The MCP spec forbids accepting tokens from any other authorization
-        # server, so AuthKit and WorkOS JWTs are not tried in this mode. The
-        # scheme is case-insensitive (RFC 9110 section 11.1).
-        access = lookup_access_token(credentials.strip())
-        if access is None or not access.subject:
-            return None
-        scopes = resolve_token_scopes(" ".join(access.scopes))
-        if scopes is None:
-            return None
-        return AuthenticatedUser(
-            user_id=access.subject, auth_method="oauth", scopes=scopes
-        )
+    server = authorization_server()
+    if scheme.lower() == "bearer" and isinstance(server, BuiltinAuthorizationServer):
+        # This server issued, stores and can revoke these tokens. The MCP spec
+        # forbids accepting tokens from any other authorization server, so
+        # AuthKit and WorkOS JWTs are not tried in this mode. The scheme is
+        # case-insensitive (RFC 9110 section 11.1).
+        return server.authenticate_bearer(credentials.strip())
     if auth_header.startswith("Bearer "):
         token = auth_header.removeprefix("Bearer ").strip()
         oauth_user = verify_authkit_token(token)
@@ -171,9 +165,12 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
 
 
 def _www_authenticate_value() -> bytes:
-    """Build the 401 challenge; advertise PRM discovery when OAuth is on."""
+    """Build the 401 challenge; advertise PRM discovery when OAuth is on.
+
+    Same rule as the PRM routes, which 404 when there is no issuer to name.
+    """
     value = 'Bearer realm="mcp"'
-    if global_config.WORKOS_AUTHKIT_DOMAIN or oauth_server.is_self_mode():
+    if authorization_server().authorization_server_url():
         value += f', resource_metadata="{resource_metadata_url()}"'
     return value.encode("latin-1")
 

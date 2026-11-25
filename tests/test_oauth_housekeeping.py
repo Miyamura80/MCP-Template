@@ -127,7 +127,7 @@ class TestAuthkitModeIsInert(TestTemplate):
                 "api_server.middleware.mcp_auth.verify_authkit_token",
                 return_value=authkit_user,
             ) as authkit,
-            patch("api_server.middleware.mcp_auth.lookup_access_token") as builtin,
+            patch("api_server.oauth.storage.lookup_access_token") as builtin,
         ):
             user = _authenticate(bearer_scope("eyJ.some.jwt"))
         authkit.assert_called_once_with("eyJ.some.jwt")

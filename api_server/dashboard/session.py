@@ -36,6 +36,7 @@ from fastapi.responses import RedirectResponse, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from loguru import logger as log
 
+from api_server.auth.authorization_server import authorization_server
 from api_server.branded_page import render_page
 from api_server.oauth.flow import (
     WORKOS_AUTHORIZE_URL,
@@ -321,12 +322,8 @@ def sign_out_everywhere(
     MCP app's grant (``revoke_user_grants``): their next /mcp request gets a 401
     and their refresh fails, so each must sign in again.
     """
-    if global_config.MCP_AUTH_MODE == "self":
-        # Imported here so the default authkit mode never loads OAuth storage.
-        from api_server.oauth.storage import revoke_user_grants  # noqa: PLC0415
-
-        revoked = revoke_user_grants(session.user_id)
-        log.info("dashboard: signed out everywhere, revoked {} tokens", revoked)
+    revoked = authorization_server().revoke_user_grants(session.user_id)
+    log.info("dashboard: signed out everywhere, revoked {} tokens", revoked)
     response = RedirectResponse("/dashboard/login", status_code=303)
     response.delete_cookie(
         _cookie("session"), path="/", secure=_secure(), httponly=True
