@@ -41,7 +41,7 @@ _MAX_CLIENT_ID_LENGTH = 2000  # oauth_codes.client_id is String(2048)
 # Scopes a client may request. The identity scopes are what MCP clients ask for
 # when they want refresh tokens and a profile; the rest are this server's own.
 # A token always grants full access unless it carries this server's scopes (see
-# api_server.auth.authkit_auth._resolve_scopes), so this list only gates what a
+# api_server.auth.authkit_auth.resolve_token_scopes), so this list only gates what a
 # request may name, not what it gets.
 _REQUESTABLE_SCOPES = sorted(
     {"openid", "profile", "email", "offline_access", *ALL_SCOPES}

@@ -2,8 +2,6 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from typing import Literal, TypedDict
 
 import uvicorn
@@ -44,11 +42,9 @@ from mcp_server.server import lifespan as mcp_lifespan
 from mcp_server.server import mount_on as mount_mcp_server
 from services import InvalidArgument
 from services.gmail_svc import GmailAttachmentTooLargeError
+from src.utils.package_info import package_version
 
-try:
-    _APP_VERSION = _pkg_version("mcp-template")
-except PackageNotFoundError:
-    _APP_VERSION = "0.1.0"
+_APP_VERSION = package_version("0.1.0")
 
 # Advertise the public host in the OpenAPI `servers` block when configured, so
 # the published spec is self-describing (codegen, Swagger "Try it out", and the

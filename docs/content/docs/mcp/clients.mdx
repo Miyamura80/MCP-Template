@@ -19,10 +19,14 @@ Every client below connects to the same **streamable-HTTP** endpoint,
 | Grok Build CLI | Local | Streamable HTTP | OAuth or `X-API-KEY` | No | [Grok](/docs/mcp/grok#grok-build-cli) |
 | xAI API | Cloud | Streamable HTTP | `X-API-KEY` or bearer token | No (API) | [Grok](/docs/mcp/grok#xai-api-remote-mcp-tools) |
 | Muse Code | Local | Streamable HTTP | OAuth or `X-API-KEY` | Unverified | [Muse](/docs/mcp/muse#muse-code) |
-| Muse (consumer) | Cloud | Unverified | Unverified | Unverified | [Muse](/docs/mcp/muse#muse-consumer-agent) |
 
 - **Cloud** clients run in the vendor's cloud and need a public URL with
   [OAuth 2.1](/docs/mcp/oauth); `localhost` won't work.
+- **OAuth** above means the default `MCP_AUTH_MODE=authkit`. With the built-in
+  server (`MCP_AUTH_MODE=self`) only clients that identify themselves with a
+  [Client ID Metadata Document](/docs/mcp/oauth#built-in-authorization-server-opt-in) can sign in: Dynamic Client
+  Registration, deprecated in the 2026-07-28 spec, is refused. A client that
+  only does DCR needs `authkit` mode or an `X-API-KEY`.
 - **Local** clients run on your machine, so `http://localhost:8080/mcp` works
   during development.
 - **MCP Apps**: clients marked *No* still get the tool's normal output; the

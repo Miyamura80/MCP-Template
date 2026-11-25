@@ -113,7 +113,7 @@ def verify_authkit_token(token: str) -> AuthKitUser | None:
     if not user_id:
         return None
 
-    scopes = _resolve_scopes(payload.get("scope"))
+    scopes = resolve_token_scopes(payload.get("scope"))
     if scopes is None:
         # Malformed scope claim: reject the token instead of erroring.
         return None
@@ -121,7 +121,7 @@ def verify_authkit_token(token: str) -> AuthKitUser | None:
     return AuthKitUser(user_id=user_id, email=payload.get("email"), scopes=scopes)
 
 
-def _resolve_scopes(raw: object) -> list[str] | None:
+def resolve_token_scopes(raw: object) -> list[str] | None:
     """Map an AuthKit access-token ``scope`` claim onto this server's scopes.
 
     AuthKit access tokens carry OIDC *identity* scopes (``openid``, ``profile``,

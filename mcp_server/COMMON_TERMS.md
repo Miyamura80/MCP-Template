@@ -57,8 +57,12 @@ replaced them with **MRTR** (below).
   result now carries `resultType` (`"complete"` otherwise). In python-sdk 2.x:
   `Resolve(...)`/`Elicit(...)` tool parameters or a hand-returned
   `InputRequiredResult`; `ctx.elicit()` raises `NoBackChannelError` on
-  2026-07-28. This repo's enhancers gate on `client_can_elicit()` and take
-  their non-elicitation fallback there.
+  2026-07-28. This repo's enhancers check `tool.can_request_input` and return
+  `tool.input_required(...)` there (reading the retry with
+  `tool.input_response()`), and gate in-band `tool.elicit()` on
+  `tool.can_elicit`. `requestState` is sealed under a key every replica
+  derives from `SESSION_SECRET_KEY` (`RequestStateSecurity` in
+  `mcp_server/server.py`), so a retry may land on any replica.
 - **Logging** (`notifications/message`) - *deprecated* (SEP-2577); log level is
   now opted into per request via `_meta` (`logging/setLevel` removed).
 

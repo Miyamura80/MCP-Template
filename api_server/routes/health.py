@@ -14,18 +14,14 @@ import os
 import subprocess
 import threading
 from datetime import UTC, datetime
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 
 from fastapi import APIRouter, Depends
 from loguru import logger as log
 
 from api_server.auth import AuthenticatedUser, get_authenticated_user
+from src.utils.package_info import package_version
 
-try:
-    _APP_VERSION = _pkg_version("mcp-template")
-except PackageNotFoundError:
-    _APP_VERSION = "0.1.0"
+_APP_VERSION = package_version("0.1.0")
 
 router = APIRouter(tags=["health"])
 

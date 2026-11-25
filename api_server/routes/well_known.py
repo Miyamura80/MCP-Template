@@ -57,8 +57,6 @@ import functools
 import hashlib
 import json
 import time
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -78,6 +76,7 @@ from models.a2a import (
     A2AAgentSkill,
 )
 from services import discover_services, get_registry
+from src.utils.package_info import package_version
 
 router = APIRouter(tags=["well-known"])
 
@@ -93,10 +92,7 @@ _WEB_BOT_AUTH_MEDIA_TYPE = "application/http-message-signatures-directory+json"
 
 def _server_version() -> str:
     """Resolve the published package version; fall back when not installed."""
-    try:
-        return _pkg_version("mcp-template")
-    except PackageNotFoundError:
-        return "0.0.0"
+    return package_version()
 
 
 def _icon(icon: IconConfig) -> dict:

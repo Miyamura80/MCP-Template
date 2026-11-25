@@ -22,6 +22,9 @@ Token handling, per OAuth 2.1 and the MCP authorization spec (2026-07-28):
 Everything that issues a code or tokens, and sign-out itself, first takes a
 per-user lock (``db.models.oauth.lock_user``), so a sign-out cannot interleave
 with an exchange or refresh and leave a token it did not see.
+
+Every transaction is a public synchronous function in ``storage``; this class
+only validates the authorize request and runs those off the event loop.
 """
 
 import re
@@ -36,31 +39,12 @@ from mcp.server.auth.provider import (
     OAuthAuthorizationServerProvider,
     RefreshToken,
     RegistrationError,
-    TokenError,
 )
 from mcp.shared.auth import OAuthClientInformationFull
 from mcp.shared.auth import OAuthToken as TokenResponse
-from pydantic import AnyUrl
-from sqlalchemy import select, update
 
 from api_server.auth.authkit_auth import mcp_resource_url
-from api_server.oauth import cimd, signing
-from api_server.oauth.storage import (
-    FAMILY_LIFETIME,
-    REFRESH_PREFIX,
-    _as_utc,
-    _issue_token_pair,
-    _now,
-    _revoke_family,
-    _signed_out_since,
-    _split_scopes,
-    _widens_access,
-    lookup_access_token,
-    resource_matches,
-    token_hash,
-)
-from db.engine import use_db_session
-from db.models.oauth import OAuthCode, OAuthToken, lock_user
+from api_server.oauth import cimd, signing, storage
 
 # RFC 7636: an S256 challenge is a SHA-256 digest, base64url without padding.
 _CODE_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -100,7 +84,7 @@ class BuiltinOAuthProvider(
         # Bind the token to this server (RFC 8707). Clients must send resource;
         # when one is absent, the token is still bound to this server.
         resource = params.resource or mcp_resource_url()
-        if not resource_matches(resource):
+        if not storage.resource_matches(resource):
             raise AuthorizeError(
                 error="invalid_request",
                 error_description="resource must be this MCP server's URL",
@@ -129,125 +113,23 @@ class BuiltinOAuthProvider(
     async def load_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> AuthorizationCode | None:
-        def _load() -> AuthorizationCode | None:
-            with use_db_session() as session:
-                row = session.get(OAuthCode, token_hash(authorization_code))
-                if row is None or row.client_id != client.client_id:
-                    return None
-                if row.used_at is not None:
-                    # A replayed code: revoke what the first exchange issued.
-                    lock_user(session, row.user_id)
-                    _revoke_family(session, row.code_hash)
-                    session.commit()
-                    return None
-                return AuthorizationCode(
-                    code=authorization_code,
-                    scopes=_split_scopes(row.scopes),
-                    expires_at=_as_utc(row.expires_at).timestamp(),
-                    client_id=row.client_id,
-                    code_challenge=row.code_challenge,
-                    redirect_uri=AnyUrl(row.redirect_uri),
-                    redirect_uri_provided_explicitly=row.redirect_uri_provided_explicitly,
-                    resource=row.resource,
-                    subject=row.user_id,
-                )
-
-        return await to_thread.run_sync(_load)
+        return await to_thread.run_sync(
+            storage.load_authorization_code, client.client_id, authorization_code
+        )
 
     async def exchange_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode
     ) -> TokenResponse:
-        def _exchange() -> TokenResponse:
-            code_hash = token_hash(authorization_code.code)
-            with use_db_session() as session:
-                user_id = session.scalar(
-                    select(OAuthCode.user_id).where(OAuthCode.code_hash == code_hash)
-                )
-                if user_id is None:
-                    raise TokenError(
-                        error="invalid_grant", error_description="unknown code"
-                    )
-                lock_user(session, user_id)
-                # Single use, atomically: only the first exchange flips used_at.
-                claimed = session.execute(
-                    update(OAuthCode)
-                    .where(
-                        OAuthCode.code_hash == code_hash, OAuthCode.used_at.is_(None)
-                    )
-                    .values(used_at=_now())
-                )
-                if not claimed.rowcount:  # ty: ignore[unresolved-attribute]
-                    # Lost the race to a concurrent exchange of the same code:
-                    # a replay, so revoke what the winner issued.
-                    _revoke_family(session, code_hash)
-                    session.commit()
-                    raise TokenError(
-                        error="invalid_grant",
-                        error_description="authorization code was already used",
-                    )
-                row = session.get(OAuthCode, code_hash)
-                if row is None:  # claimed above in this transaction; defensive
-                    session.rollback()
-                    raise TokenError(
-                        error="invalid_grant", error_description="unknown code"
-                    )
-                if _signed_out_since(session, row.user_id, row.created_at):
-                    session.commit()  # keep the code spent
-                    raise TokenError(
-                        error="invalid_grant",
-                        error_description="the user signed out after this code was issued",
-                    )
-                # The family id is the code hash, so a replayed code can find
-                # and revoke exactly the tokens this exchange issues.
-                response = _issue_token_pair(
-                    session,
-                    family_id=code_hash,
-                    user_id=row.user_id,
-                    client_id=row.client_id,
-                    scopes=_split_scopes(row.scopes),
-                    resource=row.resource,
-                    family_expires_at=_now() + FAMILY_LIFETIME,
-                )
-                session.commit()
-                cimd.mark_known(row.client_id, row.user_id)
-                return response
-
-        return await to_thread.run_sync(_exchange)
+        return await to_thread.run_sync(
+            storage.exchange_authorization_code, authorization_code.code
+        )
 
     async def load_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: str
     ) -> RefreshToken | None:
-        if not refresh_token.startswith(REFRESH_PREFIX):
-            return None
-
-        def _load() -> RefreshToken | None:
-            with use_db_session() as session:
-                row = session.get(OAuthToken, token_hash(refresh_token))
-                if (
-                    row is None
-                    or row.kind != "refresh"
-                    or row.client_id != client.client_id
-                ):
-                    return None
-                if row.revoked_at is not None:
-                    # Reuse of a rotated (or revoked) refresh token: treat the
-                    # family as compromised. Under the lock, so a refresh of the
-                    # same family running now cannot slip a token past this.
-                    lock_user(session, row.user_id)
-                    _revoke_family(session, row.family_id)
-                    session.commit()
-                    log.warning("oauth: refresh token reuse; revoked its token family")
-                    return None
-                return RefreshToken(
-                    token=refresh_token,
-                    client_id=row.client_id,
-                    scopes=_split_scopes(row.scopes),
-                    expires_at=int(_as_utc(row.expires_at).timestamp()),
-                    resource=row.resource,
-                    subject=row.user_id,
-                )
-
-        return await to_thread.run_sync(_load)
+        return await to_thread.run_sync(
+            storage.load_refresh_token, client.client_id, refresh_token
+        )
 
     async def exchange_refresh_token(
         self,
@@ -255,69 +137,12 @@ class BuiltinOAuthProvider(
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> TokenResponse:
-        def _exchange() -> TokenResponse:
-            old_hash = token_hash(refresh_token.token)
-            with use_db_session() as session:
-                user_id = session.scalar(
-                    select(OAuthToken.user_id).where(OAuthToken.token_hash == old_hash)
-                )
-                if user_id is None:
-                    raise TokenError(
-                        error="invalid_grant", error_description="unknown refresh token"
-                    )
-                lock_user(session, user_id)
-                # Rotate atomically: only one caller can consume this token.
-                consumed = session.execute(
-                    update(OAuthToken)
-                    .where(
-                        OAuthToken.token_hash == old_hash,
-                        OAuthToken.revoked_at.is_(None),
-                    )
-                    .values(revoked_at=_now())
-                )
-                row = session.get(OAuthToken, old_hash)
-                if not consumed.rowcount or row is None:  # ty: ignore[unresolved-attribute]
-                    if row is not None:
-                        _revoke_family(session, row.family_id)
-                    session.commit()
-                    raise TokenError(
-                        error="invalid_grant",
-                        error_description="refresh token was already used",
-                    )
-                original = _split_scopes(row.scopes)
-                requested = scopes or original
-                if _widens_access(original, requested):
-                    session.rollback()  # leave the refresh token unspent
-                    raise TokenError(
-                        error="invalid_scope",
-                        error_description="a refresh cannot widen the token's access",
-                    )
-                response = _issue_token_pair(
-                    session,
-                    family_id=row.family_id,
-                    user_id=row.user_id,
-                    client_id=row.client_id,
-                    scopes=requested,
-                    resource=row.resource,
-                    family_expires_at=row.family_expires_at,
-                )
-                session.commit()
-                cimd.mark_known(row.client_id, row.user_id)
-                return response
-
-        return await to_thread.run_sync(_exchange)
+        return await to_thread.run_sync(
+            storage.exchange_refresh_token, refresh_token.token, scopes
+        )
 
     async def load_access_token(self, token: str) -> AccessToken | None:
-        return await to_thread.run_sync(lookup_access_token, token)
+        return await to_thread.run_sync(storage.lookup_access_token, token)
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        def _revoke() -> None:
-            with use_db_session() as session:
-                row = session.get(OAuthToken, token_hash(token.token))
-                if row is not None:
-                    # Revoke both the access and the refresh token (RFC 7009).
-                    lock_user(session, row.user_id)
-                    _revoke_family(session, row.family_id)
-                    session.commit()
-
-        await to_thread.run_sync(_revoke)
+        await to_thread.run_sync(storage.revoke_token, token.token)
