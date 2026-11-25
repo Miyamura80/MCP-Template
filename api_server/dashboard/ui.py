@@ -33,10 +33,10 @@ def csrf_field(session: DashboardSession) -> str:
 
 def _sign_out(session: DashboardSession) -> str:
     """Sign out of this browser; with the built-in OAuth server, of every app."""
-    action, label = authorization_server().sign_out
+    sign_out = authorization_server().sign_out
     return (
-        f"<form method='post' action='{action}'>{csrf_field(session)}"
-        f"<button class='danger' type='submit'>{label}</button></form>"
+        f"<form method='post' action='{sign_out.action}'>{csrf_field(session)}"
+        f"<button class='danger' type='submit'>{sign_out.label}</button></form>"
     )
 
 

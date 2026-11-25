@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+import pytest
 from fastapi import FastAPI
 
 from api_server.auth.authorization_server import (
@@ -11,8 +12,13 @@ from api_server.auth.authorization_server import (
 )
 from api_server.dashboard.session import DashboardSession
 from api_server.dashboard.ui import dashboard_page
+from api_server.middleware.mcp_auth import _www_authenticate_value
 from common import global_config
 from tests.test_template import TestTemplate
+
+AUTHKIT = "https://auth.example.com"
+MCP_URL = "https://mcp.example.com/mcp"
+PRM = "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
 
 
 class TestStrategySelection(TestTemplate):
@@ -24,8 +30,12 @@ class TestStrategySelection(TestTemplate):
             assert isinstance(authorization_server(), BuiltinAuthorizationServer)
         assert isinstance(authorization_server(), AuthKitAuthorizationServer)
 
-    def test_chosen_once_per_mode(self):
-        assert authorization_server() is authorization_server()
+    def test_unknown_mode_fails_loudly(self):
+        with (
+            patch.object(global_config, "MCP_AUTH_MODE", "bogus"),
+            pytest.raises(KeyError),
+        ):
+            authorization_server()
 
 
 class TestAuthKitStrategy(TestTemplate):
@@ -36,19 +46,43 @@ class TestAuthKitStrategy(TestTemplate):
         server.mount(app)
         assert app.router.routes == before
         assert server.issues_tokens is False
-        assert server.authenticate_bearer("anything") is None
         assert server.revoke_user_grants("user_1") == 0
 
     def test_names_the_authkit_domain(self):
-        with patch.object(
-            global_config, "WORKOS_AUTHKIT_DOMAIN", "https://auth.example.com/"
-        ):
+        with patch.object(global_config, "WORKOS_AUTHKIT_DOMAIN", AUTHKIT + "/"):
             url = AuthKitAuthorizationServer().authorization_server_url()
-        assert url == "https://auth.example.com"
+        assert url == AUTHKIT
 
     def test_unconfigured_names_no_issuer(self):
         with patch.object(global_config, "WORKOS_AUTHKIT_DOMAIN", None):
             assert AuthKitAuthorizationServer().authorization_server_url() is None
+
+
+class TestChallengeMatchesProtectedResourceMetadata(TestTemplate):
+    """The 401 points at PRM exactly when PRM has an issuer to name."""
+
+    @pytest.mark.parametrize(
+        ("mode", "domain", "advertised"),
+        [
+            ("authkit", None, False),
+            ("authkit", AUTHKIT, True),
+            ("self", None, True),
+            ("self", AUTHKIT, True),
+        ],
+    )
+    def test_both_modes(self, mode, domain, advertised):
+        with (
+            patch.object(global_config, "MCP_AUTH_MODE", mode),
+            patch.object(global_config, "WORKOS_AUTHKIT_DOMAIN", domain),
+            patch.object(global_config, "MCP_PUBLIC_URL", MCP_URL),
+        ):
+            issuer = authorization_server().authorization_server_url()
+            challenge = _www_authenticate_value().decode()
+        assert bool(issuer) is advertised
+        if advertised:
+            assert challenge == f'Bearer realm="mcp", resource_metadata="{PRM}"'
+        else:
+            assert challenge == 'Bearer realm="mcp"'
 
 
 class TestDashboardSignOut(TestTemplate):

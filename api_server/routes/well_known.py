@@ -64,7 +64,6 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-import api_server.oauth as oauth_server
 from api_server.auth.authkit_auth import authkit_domain, mcp_resource_url
 from api_server.auth.authorization_server import authorization_server
 from common import global_config
@@ -366,18 +365,16 @@ def protected_resource_metadata_root() -> dict:
     return _metadata()
 
 
-def _authorization_server_metadata() -> dict:
+def fetch_authkit_metadata() -> dict:
     """Return AuthKit's RFC 8414 metadata document, cached per issuer.
 
     404 when OAuth is unconfigured (mirrors the PRM routes); 502 when the
     upstream authorization server cannot be reached, so callers see a clear
     "try again" signal rather than a cached or partial document.
 
-    With ``MCP_AUTH_MODE=self`` this server is the authorization server, so its
-    own metadata is built locally and served instead.
+    The AuthKit strategy's ``authorization_server_metadata``; with
+    ``MCP_AUTH_MODE=self`` the built-in server's own document is served instead.
     """
-    if authorization_server().issues_tokens:
-        return oauth_server.authorization_server_metadata()
     domain = authkit_domain()
     if not domain:
         raise HTTPException(status_code=404, detail="OAuth is not configured")
@@ -408,7 +405,7 @@ def _authorization_server_metadata() -> dict:
 def authorization_server_metadata_for_mcp() -> JSONResponse:
     # Public discovery: registry/scanner crawlers read this cross-origin.
     return JSONResponse(
-        _authorization_server_metadata(),
+        authorization_server().authorization_server_metadata(),
         headers={"Access-Control-Allow-Origin": "*"},
     )
 
@@ -416,6 +413,6 @@ def authorization_server_metadata_for_mcp() -> JSONResponse:
 @router.get("/.well-known/oauth-authorization-server")
 def authorization_server_metadata_root() -> JSONResponse:
     return JSONResponse(
-        _authorization_server_metadata(),
+        authorization_server().authorization_server_metadata(),
         headers={"Access-Control-Allow-Origin": "*"},
     )

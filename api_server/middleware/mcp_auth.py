@@ -22,7 +22,10 @@ from api_server.auth.authkit_auth import (
     resource_metadata_url,
     verify_authkit_token,
 )
-from api_server.auth.authorization_server import authorization_server
+from api_server.auth.authorization_server import (
+    BuiltinAuthorizationServer,
+    authorization_server,
+)
 from api_server.auth.unified_auth import AuthenticatedUser
 from api_server.auth.workos_auth import verify_workos_token
 from common import global_config
@@ -120,7 +123,7 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
     auth_header = headers.get("authorization", "")
     scheme, _, credentials = auth_header.partition(" ")
     server = authorization_server()
-    if scheme.lower() == "bearer" and server.issues_tokens:
+    if scheme.lower() == "bearer" and isinstance(server, BuiltinAuthorizationServer):
         # This server issued, stores and can revoke these tokens. The MCP spec
         # forbids accepting tokens from any other authorization server, so
         # AuthKit and WorkOS JWTs are not tried in this mode. The scheme is
@@ -162,9 +165,12 @@ def _authenticate(scope: Scope) -> AuthenticatedUser | None:
 
 
 def _www_authenticate_value() -> bytes:
-    """Build the 401 challenge; advertise PRM discovery when OAuth is on."""
+    """Build the 401 challenge; advertise PRM discovery when OAuth is on.
+
+    Same rule as the PRM routes, which 404 when there is no issuer to name.
+    """
     value = 'Bearer realm="mcp"'
-    if global_config.WORKOS_AUTHKIT_DOMAIN or authorization_server().issues_tokens:
+    if authorization_server().authorization_server_url():
         value += f', resource_metadata="{resource_metadata_url()}"'
     return value.encode("latin-1")
 

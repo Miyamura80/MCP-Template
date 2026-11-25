@@ -322,10 +322,8 @@ def sign_out_everywhere(
     MCP app's grant (``revoke_user_grants``): their next /mcp request gets a 401
     and their refresh fails, so each must sign in again.
     """
-    server = authorization_server()
-    if server.issues_tokens:
-        revoked = server.revoke_user_grants(session.user_id)
-        log.info("dashboard: signed out everywhere, revoked {} tokens", revoked)
+    revoked = authorization_server().revoke_user_grants(session.user_id)
+    log.info("dashboard: signed out everywhere, revoked {} tokens", revoked)
     response = RedirectResponse("/dashboard/login", status_code=303)
     response.delete_cookie(
         _cookie("session"), path="/", secure=_secure(), httponly=True

@@ -8,22 +8,28 @@ setting itself:
                        are mounted here.
     self               the built-in server in ``api_server.oauth`` issues,
                        stores and can revoke them; AuthKit only signs users in.
-
-The ``self`` strategy imports its OAuth modules inside each method, so this
-module never pulls in the OAuth storage or provider on its own.
 """
 
 from __future__ import annotations
 
-from functools import cache
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
+import api_server.oauth as oauth_server
 from api_server.auth.authkit_auth import authkit_domain, resolve_token_scopes
 from api_server.auth.unified_auth import AuthenticatedUser
+from api_server.oauth import flow
+from api_server.oauth import storage as oauth_storage
 from common import global_config
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+
+
+class SignOut(NamedTuple):
+    """The dashboard's sign-out control."""
+
+    action: str
+    label: str
 
 
 class McpAuthorizationServer(Protocol):
@@ -32,8 +38,7 @@ class McpAuthorizationServer(Protocol):
     issues_tokens: bool
     """True when this server issues, stores and can revoke MCP tokens."""
 
-    sign_out: tuple[str, str]
-    """The dashboard's sign-out control: (form action, button label)."""
+    sign_out: SignOut
 
     def mount(self, app: FastAPI) -> None:
         """Add this server's OAuth endpoints, if it has any, to ``app``."""
@@ -43,8 +48,8 @@ class McpAuthorizationServer(Protocol):
         """The issuer that RFC 9728 metadata names; ``None`` when unconfigured."""
         ...
 
-    def authenticate_bearer(self, token: str) -> AuthenticatedUser | None:
-        """Resolve a bearer token this server issued (only if ``issues_tokens``)."""
+    def authorization_server_metadata(self) -> dict:
+        """The RFC 8414 document served at this origin's well-known path."""
         ...
 
     def revoke_user_grants(self, user_id: str) -> int:
@@ -56,7 +61,7 @@ class AuthKitAuthorizationServer:
     """WorkOS AuthKit issues MCP tokens; /mcp verifies them as JWTs."""
 
     issues_tokens = False
-    sign_out = ("/dashboard/logout", "Sign out")
+    sign_out = SignOut("/dashboard/logout", "Sign out")
 
     def mount(self, app: FastAPI) -> None:
         return None
@@ -64,9 +69,13 @@ class AuthKitAuthorizationServer:
     def authorization_server_url(self) -> str | None:
         return authkit_domain()
 
-    def authenticate_bearer(self, token: str) -> AuthenticatedUser | None:
-        # AuthKit tokens go through the /mcp middleware's AuthKit/WorkOS chain.
-        return None
+    def authorization_server_metadata(self) -> dict:
+        # Imported here: the well-known routes import this module.
+        from api_server.routes.well_known import (  # noqa: PLC0415
+            fetch_authkit_metadata,
+        )
+
+        return fetch_authkit_metadata()
 
     def revoke_user_grants(self, user_id: str) -> int:
         # AuthKit-issued tokens cannot be revoked from here.
@@ -77,24 +86,21 @@ class BuiltinAuthorizationServer:
     """The built-in OAuth 2.1 server (``api_server.oauth``) issues MCP tokens."""
 
     issues_tokens = True
-    sign_out = ("/dashboard/sign-out-everywhere", "Sign out of all apps")
+    sign_out = SignOut("/dashboard/sign-out-everywhere", "Sign out of all apps")
 
     def mount(self, app: FastAPI) -> None:
-        import api_server.oauth as oauth_server  # noqa: PLC0415
-        from api_server.oauth import flow  # noqa: PLC0415
-
         app.include_router(flow.router)
         app.router.routes.extend(oauth_server.create_sdk_routes())
 
     def authorization_server_url(self) -> str | None:
-        from api_server.oauth.flow import issuer_url  # noqa: PLC0415
+        return flow.issuer_url()
 
-        return issuer_url()
+    def authorization_server_metadata(self) -> dict:
+        return oauth_server.authorization_server_metadata()
 
     def authenticate_bearer(self, token: str) -> AuthenticatedUser | None:
-        from api_server.oauth.storage import lookup_access_token  # noqa: PLC0415
-
-        access = lookup_access_token(token)
+        """Resolve a bearer token this server issued."""
+        access = oauth_storage.lookup_access_token(token)
         if access is None or not access.subject:
             return None
         scopes = resolve_token_scopes(" ".join(access.scopes))
@@ -105,22 +111,19 @@ class BuiltinAuthorizationServer:
         )
 
     def revoke_user_grants(self, user_id: str) -> int:
-        from api_server.oauth.storage import revoke_user_grants  # noqa: PLC0415
-
-        return revoke_user_grants(user_id)
+        return oauth_storage.revoke_user_grants(user_id)
 
 
-@cache
-def _for_mode(mode: str) -> McpAuthorizationServer:
-    if mode == "self":
-        return BuiltinAuthorizationServer()
-    return AuthKitAuthorizationServer()
+_SERVERS: dict[str, McpAuthorizationServer] = {
+    "authkit": AuthKitAuthorizationServer(),
+    "self": BuiltinAuthorizationServer(),
+}
 
 
 def authorization_server() -> McpAuthorizationServer:
     """The strategy for the configured ``MCP_AUTH_MODE``.
 
-    Built once per mode value and keyed on the setting itself, so a test that
-    patches ``MCP_AUTH_MODE`` gets the matching strategy.
+    Looked up on each call, so a test that patches ``MCP_AUTH_MODE`` gets the
+    matching strategy. An unknown mode raises ``KeyError``.
     """
-    return _for_mode(global_config.MCP_AUTH_MODE)
+    return _SERVERS[global_config.MCP_AUTH_MODE]
