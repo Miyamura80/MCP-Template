@@ -158,7 +158,6 @@ def doc(w: int, h: int, body: list[str], title: str) -> str:
 class Lane:
     title: str
     logo: str
-    call: str
     how: str  # how the service reaches this interface
     auto: bool  # registered from the @service with no extra code
     client_label: str
@@ -167,18 +166,16 @@ class Lane:
 
 
 def architecture() -> str:
-    w, h = 880, 500
+    w, h = 880, 484
     cols = [150, 440, 730]  # lane centres
-    card_w, card_h = 260, 128
-    y_client, y_card, y_svc, y_infra = 32, 124, 332, 448
+    card_w, card_h = 240, 112
+    y_client, y_card, y_svc, y_infra = 32, 124, 316, 432
     svc_w, svc_h = 560, 80
     lanes = [
-        Lane("CLI", "typer", 'mymcp docs search "oauth"', "thin Typer command", False,
-             "your terminal", glyph=">_"),
-        Lane("MCP server", "mcp", "tools/call  search_docs", "auto-registered", True,
-             "AI clients", clients=["claude", "chatgpt", "goose"]),
-        Lane("HTTP API", "fastapi", "POST /api/v1/services/search_docs", "auto-registered", True,
-             "apps & scripts", glyph="{ }"),
+        Lane("CLI", "typer", "thin wrapper", False, "your terminal", glyph=">_"),
+        Lane("MCP server", "mcp", "automatic", True, "AI clients",
+             clients=["claude", "chatgpt", "goose"]),
+        Lane("HTTP API", "fastapi", "automatic", True, "apps & scripts", glyph="{ }"),
     ]  # fmt: skip
 
     b = markers(w, h, [(1, 7), (21, 7), (2, 12), (20, 12)])
@@ -196,10 +193,9 @@ def architecture() -> str:
         b.append(arrow(cx, y_client + 54, cx, y_card - 4))
         b.append(hackbox(cx - card_w / 2, y_card, card_w, card_h))
         b.append(icon(lane.logo, cx - 14, y_card + 22, 28))
-        b.append(text(cx, y_card + 72, lane.title, 17, weight=600))
-        b.append(text(cx, y_card + 94, lane.call, 12, "mono muted"))
+        b.append(text(cx, y_card + 74, lane.title, 17, weight=600))
         b.append(
-            text(cx, y_card + 114, lane.how, 12, "accent" if lane.auto else "muted")
+            text(cx, y_card + 96, lane.how, 12, "accent" if lane.auto else "muted")
         )
         end_x = w / 2 + (cx - w / 2) * 0.35
         cls = "wire-accent" if lane.auto else "wire"
@@ -208,13 +204,21 @@ def architecture() -> str:
     sx = w / 2 - svc_w / 2
     b.append(hackbox(sx, y_svc, svc_w, svc_h))
     b.append(icon("python", sx + 24, y_svc + svc_h / 2 - 12, 28))
-    sig = "@service  search_docs(SearchDocsInput) → SearchDocsResult"
-    b.append(text(sx + 72, y_svc + 38, sig, 15, "mono", anchor="start", weight=600))
     b.append(
         text(
             sx + 72,
-            y_svc + 62,
-            "written once in services/  ·  one Pydantic contract",
+            y_svc + 36,
+            "Your logic, written once",
+            17,
+            anchor="start",
+            weight=600,
+        )
+    )
+    b.append(
+        text(
+            sx + 72,
+            y_svc + 60,
+            "same inputs and outputs everywhere",
             13,
             "accent",
             anchor="start",
@@ -223,13 +227,12 @@ def architecture() -> str:
 
     b.append(arrow(w / 2, y_svc + svc_h, w / 2, y_infra - 4))
     b.append(hackbox(sx, y_infra, svc_w, 36, dim=True))
-    infra = "models/  ·  common/ config  ·  db/  ·  utils/llm/"
-    b.append(text(w / 2, y_infra + 24, infra, 13, "mono muted"))
+    b.append(text(w / 2, y_infra + 24, "config  ·  database  ·  LLM", 13, "muted"))
     return doc(
         w,
         h,
         b,
-        "One @service: MCP tool and HTTP route auto-registered, CLI as a thin command",
+        "Write your logic once: MCP and API are automatic, the CLI is a thin wrapper",
     )
 
 
@@ -242,10 +245,10 @@ def mcp_apps() -> str:
     label_w = 150  # room for the lane's name before its output arrow
     b = markers(canvas_w, canvas_h, [(1, 1), (21, 7)])
     b.append(hackbox(sx, sy, sw, sh))
-    b.append(text(sx + sw / 2, sy + 44, "@service", 16, "mono", weight=600))
+    b.append(text(sx + sw / 2, sy + 44, "Your logic", 16, weight=600))
     b.append(text(sx + sw / 2, sy + 64, "unchanged", 12, "muted"))
 
-    plain = [("typer", "CLI", "table / json"), ("fastapi", "HTTP API", "JSON")]
+    plain = [("typer", "CLI", "text"), ("fastapi", "HTTP API", "JSON")]
     for cy, (logo, name, out) in zip((rows[0], rows[2]), plain, strict=True):
         b.append(elbow(sx + sw, sy + sh / 2, x_lane - 8, cy))
         b.append(icon(logo, x_lane, cy - 12, 24))
@@ -256,14 +259,12 @@ def mcp_apps() -> str:
     cy = rows[1]
     b.append(arrow(sx + sw, cy, x_lane - 8, cy, "wire-accent"))
     b.append(icon("mcp", x_lane, cy - 12, 24))
-    b.append(
-        text(x_lane + 36, cy - 2, "MCP + enhancer", 15, anchor="start", weight=600)
-    )
+    b.append(text(x_lane + 36, cy - 2, "MCP + extras", 15, anchor="start", weight=600))
     b.append(
         text(
             x_lane + 36,
             cy + 16,
-            "elicit · images · ui://",
+            "forms · images · UI",
             12,
             "accent",
             anchor="start",
@@ -282,7 +283,7 @@ def mcp_apps() -> str:
         text(
             fx + 14,
             fy + 34,
-            "interactive app (iframe)",
+            "interactive app",
             13,
             "accent",
             anchor="start",
@@ -300,9 +301,9 @@ def add_feature() -> str:
     y_steps, y_result = 32, 164
     xs = [40 + i * (step_w + gap) for i in range(3)]
     steps = [
-        ("1", "models/", "Pydantic input + output", False),
-        ("2", "services/", "@service function", False),
-        ("3", "src/cli/commands/", "thin CLI command (optional)", True),
+        ("1", "Inputs + outputs", "typed models", False),
+        ("2", "Logic", "one function", False),
+        ("3", "CLI command", "optional", True),
     ]
     b = markers(w, h, [(1, 4), (21, 1)])
     for x, (n, folder, what, optional) in zip(xs, steps, strict=True):
@@ -317,9 +318,7 @@ def add_feature() -> str:
                 weight=700,
             )
         )
-        b.append(
-            text(x + 52, y_steps + 48, folder, 15, "mono", anchor="start", weight=600)
-        )
+        b.append(text(x + 52, y_steps + 48, folder, 15, anchor="start", weight=600))
         b.append(text(x + 52, y_steps + 70, what, 12, "muted", anchor="start"))
     for a, z in zip(xs, xs[1:], strict=False):
         b.append(
@@ -339,16 +338,12 @@ def add_feature() -> str:
         icon(logo, x0 + i * pitch - 13, y_result + 20, 26)
         for i, logo in enumerate(logos)
     ]
-    b.append(
-        text(
-            rx + rw / 2, y_result + 72, "MCP tool + HTTP route, automatic", 12, "accent"
-        )
-    )
+    b.append(text(rx + rw / 2, y_result + 72, "MCP + API, automatic", 12, "accent"))
     return doc(
         w,
         h,
         b,
-        "Add a feature: models, a @service (MCP + API automatic), optional CLI command",
+        "Add a feature: inputs and outputs, then logic; MCP and API follow, CLI optional",
     )
 
 
