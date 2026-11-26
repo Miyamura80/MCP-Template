@@ -217,25 +217,12 @@ def architecture() -> str:
 
     sx = w / 2 - svc_w / 2
     b.append(hackbox(sx, y_svc, svc_w, svc_h))
-    b.append(icon("python", sx + 24, y_svc + svc_h / 2 - 12, 28))
+    # logo + label centred as one group (label is ~100px wide at this size)
+    gx = w / 2 - 70
+    b.append(icon("python", gx, y_svc + svc_h / 2 - 15, 30))
     b.append(
         text(
-            sx + 72,
-            y_svc + 36,
-            "Your logic, written once",
-            17,
-            anchor="start",
-            weight=600,
-        )
-    )
-    b.append(
-        text(
-            sx + 72,
-            y_svc + 60,
-            "same inputs and outputs everywhere",
-            13,
-            "accent",
-            anchor="start",
+            gx + 42, y_svc + svc_h / 2 + 7, "Code Logic", 20, anchor="start", weight=600
         )
     )
 
@@ -256,7 +243,7 @@ def mcp_apps() -> str:
     label_w = 150  # room for the lane's name before its output arrow
     b = markers(canvas_w, canvas_h, [(1, 1), (21, 7)])
     b.append(hackbox(sx, sy, sw, sh))
-    b.append(text(sx + sw / 2, sy + 44, "Your logic", 16, weight=600))
+    b.append(text(sx + sw / 2, sy + 44, "Code Logic", 16, weight=600))
     b.append(text(sx + sw / 2, sy + 64, "unchanged", 12, "muted"))
 
     plain = [("typer", "CLI", "text"), ("fastapi", "HTTP API", "JSON")]
