@@ -192,7 +192,7 @@ export const compatibility: { heading: string; clients: Client[] } = {
     { name: "ChatGPT", logo: "/logos/chatgpt.svg" },
     { name: "VS Code", logo: "/logos/vscode.svg" },
     { name: "OpenClaw", logo: "/logos/openclaw.svg" },
-    { name: "Goose", logo: "/logos/goose.svg" },
+    { name: "Grok", logo: "/logos/grokbot.svg" },
   ],
 };
 

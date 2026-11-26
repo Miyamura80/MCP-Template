@@ -5,7 +5,7 @@
  *
  * Why this exists: clicking "AI reply" inside the app calls
  * mcpApp.sendMessage({role:"user", …}) (Inbox.tsx:296-309), which posts a NEW
- * user turn into the HOST chat - Claude/ChatGPT/Goose/VS Code - and the model
+ * user turn into the HOST chat - Claude/ChatGPT/Grok/VS Code - and the model
  * replies. We depict the full round-trip by scrolling DOWN through it:
  *
  *   - 0%:   the inbox card (InboxApp) on top; below it the summoned turn + the

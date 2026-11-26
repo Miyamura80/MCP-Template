@@ -1,7 +1,7 @@
 ---
 /*
  * Hero chat mock. A toggle swaps between four client shells (Claude / ChatGPT /
- * Goose / VS Code), each a stylized-but-recognizable reproduction of that client's
+ * Grok / VS Code), each a stylized-but-recognizable reproduction of that client's
  * real chat UI (theme, chrome, bubbles, avatars sourced from per-client research).
  * Every shell embeds the SAME <InboxApp /> MCP-app card - a sandboxed MCP App
  * renders its own UI regardless of host, so the card stays brand-cyan everywhere.
@@ -12,7 +12,7 @@
 import { heroChat } from "../config/landing";
 import ClaudeShell from "./chat/ClaudeShell.astro";
 import ChatGptShell from "./chat/ChatGptShell.astro";
-import GooseShell from "./chat/GooseShell.astro";
+import GrokShell from "./chat/GrokShell.astro";
 import VsCodeShell from "./chat/VsCodeShell.astro";
 
 const { clients, defaultId } = heroChat;
@@ -53,7 +53,7 @@ const maskStyle = (logo: string) =>
   <div>
     <div role="tabpanel" id="panel-claude" aria-labelledby="tab-claude" tabindex="0" data-shell="claude" hidden={defaultId !== "claude"}><ClaudeShell /></div>
     <div role="tabpanel" id="panel-chatgpt" aria-labelledby="tab-chatgpt" tabindex="0" data-shell="chatgpt" hidden={defaultId !== "chatgpt"}><ChatGptShell /></div>
-    <div role="tabpanel" id="panel-goose" aria-labelledby="tab-goose" tabindex="0" data-shell="goose" hidden={defaultId !== "goose"}><GooseShell /></div>
+    <div role="tabpanel" id="panel-grok" aria-labelledby="tab-grok" tabindex="0" data-shell="grok" hidden={defaultId !== "grok"}><GrokShell /></div>
     <div role="tabpanel" id="panel-vscode" aria-labelledby="tab-vscode" tabindex="0" data-shell="vscode" hidden={defaultId !== "vscode"}><VsCodeShell /></div>
   </div>
 </div>

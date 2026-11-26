@@ -29,7 +29,7 @@ export const hero: {
  * MCP app stays brand-cyan so it reads as the same app in every client.
  */
 export interface ChatClient {
-  id: "claude" | "chatgpt" | "goose" | "vscode";
+  id: "claude" | "chatgpt" | "grok" | "vscode";
   name: string;
   logo: string;
   accent: string;
@@ -40,7 +40,7 @@ export const heroChat: { defaultId: ChatClient["id"]; clients: ChatClient[] } = 
   clients: [
     { id: "claude", name: "Claude", logo: "/logos/claude.svg", accent: "#d97757" },
     { id: "chatgpt", name: "ChatGPT", logo: "/logos/chatgpt.svg", accent: "#10a37f" },
-    { id: "goose", name: "Goose", logo: "/logos/goose.svg", accent: "#e0a458" },
+    { id: "grok", name: "Grok", logo: "/logos/grokbot.svg", accent: "#e7e7e7" },
     { id: "vscode", name: "VS Code", logo: "/logos/vscode.svg", accent: "#3794ff" },
   ],
 };
