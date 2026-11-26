@@ -59,7 +59,7 @@ STYLE = f"""
 _PAINT_ATTRS = {"fill", "stroke", "style", "class", "opacity", "fill-opacity"}
 _KEEP_ROOT_ATTRS = ("fill-rule", "clip-rule")
 # Logos shown in their own brand colours rather than recoloured to white.
-ORIGINAL_COLOURS = {"python"}
+ORIGINAL_COLOURS = {"python", "grokbot"}
 
 
 def _symbol(name: str) -> str:
@@ -188,7 +188,7 @@ def architecture() -> str:
     lanes = [
         Lane("CLI", "typer", "thin wrapper", False, "your terminal", glyph=">_"),
         Lane("MCP server", "mcp", "automatic", True, "AI clients",
-             clients=["claude", "chatgpt", "goose"]),
+             clients=["claude", "chatgpt", "grokbot"]),
         Lane("HTTP API", "fastapi", "automatic", True, "apps & scripts", glyph="{ }"),
     ]  # fmt: skip
 
