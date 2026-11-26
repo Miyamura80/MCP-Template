@@ -7,7 +7,8 @@ Core Cyan wireframes for primary flow, Graphene Grey for secondary, white type
 in a neo-grotesque sans, square corners, no gradients or shadows, and every
 container is a Hackbox: a solid tag inside the top-left corner sized 40% of the
 box's width by 10% of its height. Logos are the real marks vendored in
-media/icons/ (eito.me/icons, svgl.app, simpleicons.org), recoloured to white.
+media/icons/ (eito.me/icons, svgl.app, simpleicons.org), recoloured to white
+(except ORIGINAL_COLOURS, which keep their brand colours).
 
 The canvas is drawn on its own black ground, so the files read the same in
 GitHub's light and dark themes. Positions derive from the named constants at
@@ -57,26 +58,39 @@ STYLE = f"""
 # every shape; fill-rule / clip-rule are kept because they carry the holes.
 _PAINT_ATTRS = {"fill", "stroke", "style", "class", "opacity", "fill-opacity"}
 _KEEP_ROOT_ATTRS = ("fill-rule", "clip-rule")
+# Logos shown in their own brand colours rather than recoloured to white.
+ORIGINAL_COLOURS = {"python"}
 
 
 def _symbol(name: str) -> str:
-    """Inline a vendored logo as a white, single-colour <symbol>."""
+    """Inline a vendored logo as a <symbol>: white, or in its original colours."""
     root = ET.parse(ICONS / f"{name}.svg").getroot()
     view_box = root.get("viewBox")
     if not view_box:
         raise ValueError(f"media/icons/{name}.svg has no viewBox")
-    shapes: list[str] = []
+    original = name in ORIGINAL_COLOURS
+    parts: list[str] = []
     for child in root:
         tag = child.tag.split("}")[-1]
-        if tag in {"title", "defs", "desc", "metadata"}:
+        if tag in {"title", "desc", "metadata"} or (tag == "defs" and not original):
             continue
         for el in child.iter():
-            for attr in _PAINT_ATTRS & set(el.attrib):
-                del el.attrib[attr]
-        shapes.append(ET.tostring(child, encoding="unicode"))
-    inner = re.sub(r'\sxmlns(:\w+)?="[^"]*"', "", "".join(shapes))
+            if original:
+                # Namespace gradient ids so several logos can share one document.
+                if "id" in el.attrib:
+                    el.attrib["id"] = f"{name}-{el.attrib['id']}"
+                for attr, val in el.attrib.items():
+                    el.attrib[attr] = re.sub(
+                        r"url\(#([^)]+)\)", rf"url(#{name}-\1)", val
+                    )
+            else:
+                for attr in _PAINT_ATTRS & set(el.attrib):
+                    del el.attrib[attr]
+        parts.append(ET.tostring(child, encoding="unicode"))
+    inner = re.sub(r'\sxmlns(:\w+)?="[^"]*"', "", "".join(parts))
     keep = "".join(f' {a}="{root.get(a)}"' for a in _KEEP_ROOT_ATTRS if root.get(a))
-    return f'<symbol id="i-{name}" viewBox="{view_box}" class="logo"{keep}>{inner}</symbol>'
+    cls = "" if original else ' class="logo"'
+    return f'<symbol id="i-{name}" viewBox="{view_box}"{cls}{keep}>{inner}</symbol>'
 
 
 def icon(name: str, x: float, y: float, size: float) -> str:
@@ -166,10 +180,10 @@ class Lane:
 
 
 def architecture() -> str:
-    w, h = 880, 484
+    w, h = 880, 436
     cols = [150, 440, 730]  # lane centres
     card_w, card_h = 240, 112
-    y_client, y_card, y_svc, y_infra = 32, 124, 316, 432
+    y_client, y_card, y_svc = 32, 124, 316
     svc_w, svc_h = 560, 80
     lanes = [
         Lane("CLI", "typer", "thin wrapper", False, "your terminal", glyph=">_"),
@@ -178,7 +192,7 @@ def architecture() -> str:
         Lane("HTTP API", "fastapi", "automatic", True, "apps & scripts", glyph="{ }"),
     ]  # fmt: skip
 
-    b = markers(w, h, [(1, 7), (21, 7), (2, 12), (20, 12)])
+    b = markers(w, h, [(1, 7), (21, 7), (2, 10), (20, 10)])
     for cx, lane in zip(cols, lanes, strict=True):
         if lane.clients:
             n, s, gap = len(lane.clients), 24, 16
@@ -225,9 +239,6 @@ def architecture() -> str:
         )
     )
 
-    b.append(arrow(w / 2, y_svc + svc_h, w / 2, y_infra - 4))
-    b.append(hackbox(sx, y_infra, svc_w, 36, dim=True))
-    b.append(text(w / 2, y_infra + 24, "config  ·  database  ·  LLM", 13, "muted"))
     return doc(
         w,
         h,
