@@ -361,13 +361,22 @@ blind_except_check: check_uv ## Check every `# noqa: BLE001` has a justification
 	@uv run python scripts/check_blind_except_justification.py
 	@echo "$(GREEN)✅Blind-except justification check completed.$(RESET)"
 
+.PHONY: gen_readme_diagrams readme_diagrams_check
+gen_readme_diagrams: check_uv ## Regenerate the README's SVG diagrams in media/
+	@uv run python scripts/gen_readme_diagrams.py
+
+readme_diagrams_check: check_uv ## Fail if media/*.svg has drifted from scripts/gen_readme_diagrams.py
+	@echo "$(YELLOW)🔍Checking README diagrams...$(RESET)"
+	@uv run python scripts/gen_readme_diagrams.py --check
+	@echo "$(GREEN)✅README diagrams check completed.$(RESET)"
+
 .PHONY: tool_surface_docs_check
 tool_surface_docs_check: check_uv ## Fail if the docs' tool reference has drifted from the @service registry
 	@echo "$(YELLOW)🔍Checking tool surface docs...$(RESET)"
 	@uv run python scripts/gen_tool_docs.py --check
 	@echo "$(GREEN)✅Tool surface docs check completed.$(RESET)"
 
-ci: ruff vulture import_lint ty docs_lint docs_test check_deps file_len_check blind_except_check api_key_header_check tool_surface_docs_check lint_immutable_refs ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, api_key_header_check, tool_surface_docs_check, lint_immutable_refs)
+ci: ruff vulture import_lint ty docs_lint docs_test check_deps file_len_check blind_except_check api_key_header_check tool_surface_docs_check readme_diagrams_check lint_immutable_refs ## Run all CI checks (ruff, vulture, import_lint, ty, docs_lint, docs_test, check_deps, file_len_check, blind_except_check, api_key_header_check, tool_surface_docs_check, readme_diagrams_check, lint_immutable_refs)
 	@echo "$(GREEN)✅CI checks completed.$(RESET)"
 
 .PHONY: sync-agent-config
