@@ -2171,7 +2171,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.51" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
     { name = "starlette", specifier = ">=1.3.1" },
-    { name = "stripe", specifier = ">=15.3.1" },
+    { name = "stripe", specifier = ">=17.1.0" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "termcolor", specifier = ">=2.5.0" },
     { name = "ty", specifier = ">=0.0.14" },
@@ -3939,15 +3939,15 @@ wheels = [
 
 [[package]]
 name = "stripe"
-version = "15.3.1"
+version = "17.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b6/a0/52b623a5c07238af6282dfc07ba8c8a9b332f4d7ef69d0006e8a52e6b34d/stripe-15.3.1.tar.gz", hash = "sha256:2f9a8d961e5c2ec19149fb4e0b47d9709d014a68592cdb1f4efd044abc8d2359", size = 1516385, upload-time = "2026-07-16T00:47:46.829Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/ec/09fcf4d5a21aa23974470ab7a0f58e1011dec23effce4b6eaf3b103be1b3/stripe-17.1.0.tar.gz", hash = "sha256:767b8e0f350b2b00fae7f8fbe7e28d4c215aac23529c833f0e77ec20c5f3bb48", size = 1670474, upload-time = "2026-11-19T03:49:33.134Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/eb/7a/58f266c262bbf903e2eca438ef752ed0fcc7273c9a4bc42edc20effa962f/stripe-15.3.1-py3-none-any.whl", hash = "sha256:f7c87a9a9072db7316e9ba497b4dbaa1dbae51f67ca201ba6155fe8b6487e5e3", size = 2173610, upload-time = "2026-07-16T00:47:45.173Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/96/ee86b1748e0ff130474ac042cbeb683ea15ef210948a86bdbd5e73dbf8df/stripe-17.1.0-py3-none-any.whl", hash = "sha256:c8089bacd9f7d95b62e3f4c0fc6cb5dc719eb09b9d09c6ff330800d36bf8b6eb", size = 2690745, upload-time = "2026-11-19T03:49:30.546Z" },
 ]
 
 [[package]]
