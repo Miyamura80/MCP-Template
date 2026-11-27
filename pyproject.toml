@@ -74,7 +74,7 @@ dependencies = [
     "pypdf>=7.0.0",
     # <0.36: services/pdf_overlay.py:_Accumulator is a temporary shim over
     # pyHanko internals (RTL ToUnicode fix); re-check it before raising this.
-    "pyhanko[opentype]>=0.35.2,<0.36",
+    "pyhanko[opentype]>=0.38.2,<0.39",
     "pypdfium2>=5.12.1",
     "httpcore>=1.0.9",
     "fonttools>=4.33.3",
