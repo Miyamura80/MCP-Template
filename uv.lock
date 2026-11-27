@@ -2151,7 +2151,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
-    { name = "pyhanko", extras = ["opentype"], specifier = ">=0.35.2,<0.36" },
+    { name = "pyhanko", extras = ["opentype"], specifier = ">=0.38.2,<0.39" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.0" },
     { name = "pylint", specifier = ">=4.0.6" },
     { name = "pypdf", specifier = ">=7.0.0" },
@@ -3038,20 +3038,19 @@ wheels = [
 
 [[package]]
 name = "pyhanko"
-version = "0.35.2"
+version = "0.38.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "aiohttp" },
     { name = "asn1crypto" },
     { name = "cryptography" },
     { name = "lxml" },
     { name = "pyhanko-certvalidator" },
-    { name = "pyyaml" },
-    { name = "requests" },
     { name = "tzlocal" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/36/fa398db6dec3b0d10ae36da77f9044f5834c7a73edf82bc2da64cf4e8454/pyhanko-0.35.2.tar.gz", hash = "sha256:e3363ae72aa3570c7d85ec76592f8b7e900d5695c264cafadc1926df7b0bd711", size = 7680125, upload-time = "2026-07-05T15:26:05.537Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/a0/3e3f62eee1e90d5b245a2b21bd5099c53c2d95bb7821db30c6bf415b3a6d/pyhanko-0.38.2.tar.gz", hash = "sha256:2c18ab33367ee8df2df81637a2a321951d769ed7194d9c5aa04a5b5041c33d82", size = 8018822, upload-time = "2026-11-19T21:59:31.173Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/a4/66a2b997b8cfebfcbe1552918dd011e621206f25bb8b1acc4e6536bfa738/pyhanko-0.35.2-py3-none-any.whl", hash = "sha256:d3bc33e33fbf1bacd5d7e9b06bb57564d351b5c85c8c12788e90fc33355bac19", size = 467809, upload-time = "2026-07-05T15:26:03.636Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/7f/01b57148a40097e5845bf71d46297295391fe19c7a4a5b1382eaa5eeba1f/pyhanko-0.38.2-py3-none-any.whl", hash = "sha256:041051105ddf3ace6571605ddccae0f3e444a6e99f0bd54ec88281684282ad41", size = 486594, upload-time = "2026-11-19T21:59:29.503Z" },
 ]
 
 [package.optional-dependencies]
@@ -3062,18 +3061,19 @@ opentype = [
 
 [[package]]
 name = "pyhanko-certvalidator"
-version = "0.31.1"
+version = "0.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "aiohttp" },
     { name = "asn1crypto" },
+    { name = "certifi" },
     { name = "cryptography" },
     { name = "oscrypto" },
-    { name = "requests" },
     { name = "uritools" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2d/8b/93ee7af674045965e18cc53357bc338d24d2ca47bb71a750c0e38d1cc462/pyhanko_certvalidator-0.31.1.tar.gz", hash = "sha256:b7abc5672878994a050cf70a19b8247891aa30c9e6507eea77a6b10c7dbc1e50", size = 584700, upload-time = "2026-05-06T00:00:51.779Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/49/f6ec683b23c1275940c2f68490b2bfbfe6ed246b50b7108561ef21678372/pyhanko_certvalidator-0.33.0.tar.gz", hash = "sha256:a4c3309f99c77cdcad24532f75340bd8cc8b108aa8992b8102d44f250ebd449c", size = 602367, upload-time = "2026-10-17T20:30:49.128Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/99/722e90c586455733fa860d092722ef074f3a65449fe9787b7b7e2dafcd1f/pyhanko_certvalidator-0.31.1-py3-none-any.whl", hash = "sha256:0aabe25b536ed555f3b18e5eb2c62ff46adeff9d15e27f0c9d5d81952d956f45", size = 111438, upload-time = "2026-05-06T00:00:50.198Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/22/fc8a485269187b85eadd2cf536b92be403a238932e7d3943ba176fb31041/pyhanko_certvalidator-0.33.0-py3-none-any.whl", hash = "sha256:72d3b830c0427a7aae45873ba7b4e34cb86caed451eff9dfb4394a69e93bb169", size = 118831, upload-time = "2026-10-17T20:30:47.557Z" },
 ]
 
 [[package]]
